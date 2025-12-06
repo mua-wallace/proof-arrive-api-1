@@ -1,98 +1,332 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Proof Arrive API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A NestJS-based REST API for managing vehicle arrivals, exits, and related operations. Built with TypeScript, Drizzle ORM, and PostgreSQL.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 🚀 Features
 
-## Description
+- **RESTful API** with NestJS framework
+- **PostgreSQL Database** with Drizzle ORM
+- **Docker Support** for easy deployment
+- **Swagger Documentation** for API exploration
+- **TypeScript** for type safety
+- **Environment-based Configuration** with Joi validation
+- **Error Handling** with Sentry integration
+- **CORS** support for cross-origin requests
+- **Validation** with class-validator
+- **Base Service** for common CRUD operations
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 📁 Project Structure
 
-## Project setup
-
-```bash
-$ npm install
+```text
+src/
+├── main.ts                 # Application entry point
+├── app.module.ts          # Root module
+├── config/                # Configuration files
+│   └── app.config.ts      # Application configuration
+├── database/              # Database configuration
+│   ├── database.module.ts
+│   ├── database-connection.ts
+│   ├── drizzle.config.ts
+│   └── migrations/        # Database migrations
+├── modules/               # Feature modules
+│   ├── vehicles/         # Vehicle management
+│   ├── arrivals/         # Arrival tracking
+│   ├── exits/           # Exit tracking
+│   ├── incoming/        # Incoming operations
+│   ├── centers/         # Center management
+│   ├── users/           # User management
+│   ├── reports/         # Reporting
+│   └── schemas/         # Database schemas
+├── common/               # Shared utilities
+│   ├── filters/         # Exception filters
+│   ├── guards/          # Authentication guards
+│   ├── interceptors/     # Request/response interceptors
+│   ├── decorators/      # Custom decorators
+│   ├── interfaces/      # TypeScript interfaces
+│   └── services/        # Base services
+└── integrations/        # Third-party integrations
+    └── third-party/     # External service integrations
 ```
 
-## Compile and run the project
+## 🛠️ Tech Stack
+
+- **Framework**: NestJS 11
+- **Language**: TypeScript
+- **Database**: PostgreSQL 16
+- **ORM**: Drizzle ORM
+- **Validation**: Joi, class-validator
+- **Documentation**: Swagger/OpenAPI
+- **Error Tracking**: Sentry
+- **Containerization**: Docker & Docker Compose
+
+## 📋 Prerequisites
+
+- Node.js 22.17.0 or higher
+- Docker and Docker Compose
+- npm or yarn
+
+## 🚀 Getting Started
+
+### 1. Clone the Repository
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+git clone <repository-url>
+cd proof-arrive-api
 ```
 
-## Run tests
+### 2. Environment Setup
+
+Copy the example environment file and configure it:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+cp .env.example .env
 ```
 
-## Deployment
+Edit `.env` with your configuration values.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+### 3. Run with Docker Compose (Recommended)
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+The easiest way to run the application is using Docker Compose:
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+# Build and start all services
+docker-compose up --build
+
+# Run in detached mode
+docker-compose up -d --build
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+
+# Stop and remove volumes
+docker-compose down -v
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+The application will be available at:
 
-## Resources
+- **API**: <http://localhost:5001>
+- **Swagger Documentation**: <http://localhost:5001/docs>
+- **PostgreSQL**: localhost:5432
 
-Check out a few resources that may come in handy when working with NestJS:
+### 4. Run Locally (Development)
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+If you prefer to run without Docker:
 
-## Support
+```bash
+# Install dependencies
+npm install
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+# Start PostgreSQL (if not using Docker)
+docker-compose up -d postgres
 
-## Stay in touch
+# Run database migrations
+npm run db:migrate  # If you have migration scripts
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+# Start the application in development mode
+npm run start:dev
+```
 
-## License
+The application will be available at:
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- **API**: <http://localhost:5000>
+- **Swagger Documentation**: <http://localhost:5000/docs>
+
+## 📝 Environment Variables
+
+See `.env.example` for all available environment variables. Key variables include:
+
+### Application
+
+- `PORT` - Server port (default: 5000)
+- `API_PREFIX` - API route prefix (default: api/v1)
+- `APP_MODE` - Application mode: development | production
+- `APP_NAME` - Application name
+- `APP_DOCS` - Swagger documentation path (default: docs)
+- `ALLOWED_ORIGINS` - Comma-separated list of allowed CORS origins
+
+### Database
+
+- `DATABASE_HOST` - Database host
+- `DATABASE_PORT` - Database port (default: 5432)
+- `DATABASE_USERNAME` - Database username
+- `DATABASE_PASSWORD` - Database password
+- `DATABASE_NAME` - Database name
+- `DATABASE_LOGGING` - Enable database query logging (true/false)
+
+## 🗄️ Database
+
+### Migrations
+
+Generate migrations with Drizzle Kit:
+
+```bash
+npx drizzle-kit generate
+```
+
+Run migrations:
+
+```bash
+npx drizzle-kit migrate
+```
+
+### Database Schema
+
+Database schemas are defined in `src/modules/schemas/`. The base schema includes:
+
+- `id` (UUID, primary key)
+- `createdAt` (timestamp)
+- `updatedAt` (timestamp)
+- `deletedAt` (timestamp, nullable for soft deletes)
+
+## 📚 API Documentation
+
+Once the application is running, access the Swagger documentation at:
+
+- **Local**: <http://localhost:5000/docs>
+- **Docker**: <http://localhost:5001/docs>
+
+The Swagger UI provides:
+
+- Interactive API exploration
+- Request/response schemas
+- Authentication testing
+- Dark theme interface
+
+## 🏗️ Available Modules
+
+### Vehicles
+
+Manage vehicle information and operations.
+
+### Arrivals
+
+Track vehicle arrivals at centers.
+
+### Exits
+
+Track vehicle exits from centers.
+
+### Incoming
+
+Handle incoming vehicle operations.
+
+### Centers
+
+Manage center/location information.
+
+### Users
+
+User management and authentication.
+
+### Reports
+
+Generate and manage reports.
+
+## 🧪 Testing
+
+```bash
+# Unit tests
+npm run test
+
+# E2E tests
+npm run test:e2e
+
+# Test coverage
+npm run test:cov
+
+# Watch mode
+npm run test:watch
+```
+
+## 🛠️ Development
+
+### Available Scripts
+
+```bash
+# Development
+npm run start:dev      # Start in watch mode
+npm run start:debug     # Start in debug mode
+
+# Production
+npm run build           # Build the application
+npm run start:prod     # Start in production mode
+
+# Code Quality
+npm run lint            # Run ESLint
+npm run format          # Format code with Prettier
+```
+
+### Code Structure
+
+- **Modules**: Feature-based modules in `src/modules/`
+- **Services**: Business logic in `*.service.ts` files
+- **Controllers**: API endpoints in `*.controller.ts` files
+- **DTOs**: Data transfer objects in `dto/` folders
+- **Schemas**: Database schemas in `src/modules/schemas/`
+- **Base Service**: Reusable CRUD operations in `src/common/services/base.service.ts`
+
+## 🐳 Docker
+
+### Build Image
+
+```bash
+docker build -t proof-arrive-api .
+```
+
+### Run Container
+
+```bash
+docker run -p 5001:5000 proof-arrive-api
+```
+
+### Docker Compose Services
+
+- **proof-arrive-api**: The NestJS application
+- **postgres**: PostgreSQL 16 database
+
+## 🔒 Security
+
+- Environment variables for sensitive data
+- CORS configuration for allowed origins
+- Input validation with class-validator
+- Error tracking with Sentry (production)
+- SQL injection protection via Drizzle ORM
+
+## 📦 Dependencies
+
+### Core
+
+- `@nestjs/common`, `@nestjs/core` - NestJS framework
+- `drizzle-orm` - TypeScript ORM
+- `postgres` - PostgreSQL client
+- `@nestjs/config` - Configuration management
+- `joi` - Environment variable validation
+
+### Documentation
+
+- `@nestjs/swagger` - API documentation
+- `swagger-themes` - Swagger UI themes
+
+### Utilities
+
+- `cookie-parser` - Cookie parsing middleware
+- `@sentry/node` - Error tracking
+
+## 🤝 Contributing
+
+1. Create a feature branch
+
+2. Make your changes
+3. Run tests and linting
+4. Submit a pull request
+
+## 📄 License
+
+This project is private and proprietary.
+
+## 🆘 Support
+
+For issues and questions, please contact the development team.
