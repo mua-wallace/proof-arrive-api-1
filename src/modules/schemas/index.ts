@@ -1,3 +1,4 @@
-// Export all schemas from database/schema.ts
-export * from '../../database/schema';
+// Export all schemas from the schemas folder
+// Add your schema exports here
 
+export {};

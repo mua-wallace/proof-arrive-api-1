@@ -2,8 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '../modules/schemas';
-import { DATABASE_CONNECTION } from './database-connection';
+import * as schema from '@modules/schemas';
+import { DATABASE_CONNECTION } from '@database/database-connection';
 
 @Module({
   imports: [ConfigModule],
@@ -11,18 +11,9 @@ import { DATABASE_CONNECTION } from './database-connection';
     {
       provide: DATABASE_CONNECTION,
       useFactory: (configService: ConfigService) => {
-        const connectionString =
-          configService.get('database.url') ||
-          configService.get('DATABASE_URL') ||
-          configService.get('POSTGRES_URL') ||
-          (() => {
-            const host = configService.get('database.host') || 'localhost';
-            const port = configService.get('database.port') || 5432;
-            const username = configService.get('database.username') || 'postgres';
-            const password = configService.get('database.password') || 'postgres';
-            const database = configService.get('database.name') || 'proof_arrive';
-            return `postgresql://${username}:${password}@${host}:${port}/${database}`;
-          })();
+        const dbConfig = configService.get('database');
+        const { host, port, username, password, name } = dbConfig;
+        const connectionString = `postgresql://${username}:${password}@${host}:${port}/${name}`;
 
         const client = postgres(connectionString, {
           max: 10,

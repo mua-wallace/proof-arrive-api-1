@@ -1,14 +1,17 @@
 import { defineConfig } from 'drizzle-kit';
+import appConfig from '@config/app.config';
+
+const config = appConfig();
 
 export default defineConfig({
-  schema: './src/database/schema.ts',
+  schema: './src/modules/schemas/**/*.ts',
   out: './src/database/migrations',
   dialect: 'postgresql',
   dbCredentials: {
-    host: process.env.DATABASE_HOST || 'localhost',
-    port: parseInt(process.env.DATABASE_PORT || '5432'),
-    user: process.env.DATABASE_USERNAME || 'postgres',
-    password: process.env.DATABASE_PASSWORD || 'postgres',
-    database: process.env.DATABASE_NAME || 'proof_arrive',
+    host: config.database.host || 'localhost',
+    port: config.database.port || 5432,
+    user: config.database.username || 'postgres',
+    password: config.database.password || 'postgres',
+    database: config.database.name || 'proof_arrive',
   },
 });
