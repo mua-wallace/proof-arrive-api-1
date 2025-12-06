@@ -6,11 +6,13 @@ dotenv.config();
 export default () => ({
   app: {
     prefix: process.env.API_PREFIX || 'api/v1',
-    
     mode: process.env.APP_MODE || 'development',
     port: parseInt(process.env.PORT || '5000', 10),
     name: process.env.APP_NAME || 'Proof Arrive API',
     docs: process.env.APP_DOCS || 'docs',
+    allowedOrigins: process.env.ALLOWED_ORIGINS
+      ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
+      : ['http://localhost:5173'],
   },
   database: {
     host: process.env.DATABASE_HOST,
