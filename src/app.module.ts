@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { DatabaseModule } from './database/database.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { ArrivalsModule } from './modules/arrivals/arrivals.module';
 import { ExitsModule } from './modules/exits/exits.module';
@@ -10,6 +12,11 @@ import { ThirdPartyModule } from './integrations/third-party/third-party.module'
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
+    DatabaseModule,
     VehiclesModule,
     ArrivalsModule,
     ExitsModule,
