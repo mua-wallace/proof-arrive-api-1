@@ -13,6 +13,7 @@ import { ReportsModule } from '@modules/reports/reports.module';
 import { AuthModule } from '@modules/auth/auth.module';
 import { ThirdPartyModule } from '@integrations/third-party/third-party.module';
 import { MalambiApiModule } from '@integrations/malambi-api/malambi-api.module';
+import { QueueModule } from '@common/queue/queue.module';
 import { MalambiAuthMiddleware } from '@common/middleware/malambi-auth.middleware';
 
 @Module({
@@ -50,6 +51,7 @@ import { MalambiAuthMiddleware } from '@common/middleware/malambi-auth.middlewar
       }),
     }),
     DatabaseModule,
+    QueueModule,
     AuthModule,
     VehiclesModule,
     ArrivalsModule,

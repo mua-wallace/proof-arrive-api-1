@@ -8,6 +8,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { DatabaseModule } from '@database/database.module';
 import { MalambiApiModule } from '@integrations/malambi-api/malambi-api.module';
+import { QueueModule } from '@common/queue/queue.module';
+import { UsersModule } from '@modules/users/users.module';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Module({
@@ -16,6 +18,8 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
     PassportModule,
     JwtModule,
     DatabaseModule,
+    QueueModule,
+    UsersModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, LocalStrategy, JwtStrategy, JwtRefreshStrategy, JwtAuthGuard],

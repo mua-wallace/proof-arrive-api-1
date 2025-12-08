@@ -1,6 +1,7 @@
-import { pgTable, text, integer, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, text, index } from 'drizzle-orm/pg-core';
 import { baseColumns } from './base.schema';
 
+// Users/Agents
 export const users = pgTable('users', {
   ...baseColumns,
   k_u: text('k_u').notNull(),
@@ -17,5 +18,9 @@ export const users = pgTable('users', {
   loginusername: text('loginusername').notNull(),
   k_p: text('k_p').notNull(),
   refresh_token: text('refresh_token'),
-});
+}, (table) => ({
+  usernameIdx: index('idx_users_username').on(table.username),
+  companyIdx: index('idx_users_company').on(table.company),
+  accidIdx: index('idx_users_accid').on(table.accid),
+}));
 

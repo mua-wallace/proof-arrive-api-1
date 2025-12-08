@@ -15,8 +15,20 @@ import { v4 as uuidv4 } from 'uuid';
 import { and, eq, gt, lt } from 'drizzle-orm';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
 import { Credentials } from '@common/interfaces';
+import { QueueService } from '@common/queue/queue.service';
+import { UsersSyncService } from '@modules/users/users-sync.service';
 
-type User = typeof schema.users.$inferSelect;
+// Temporary user type from Malambi API login response
+interface MalambiUser {
+  accid: string | number;
+  subid: string | number;
+  token: string;
+  session: string;
+  username: string;
+  loginusername?: string;
+  company?: string;
+  [key: string]: any;
+}
 
 @Injectable()
 export class AuthService {
@@ -26,11 +38,13 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly malambiApi: MalambiApiService,
+    private readonly queueService: QueueService,
+    private readonly usersSyncService: UsersSyncService,
     @Inject(DATABASE_CONNECTION)
     private readonly dbConnection: PostgresJsDatabase<typeof schema>,
   ) {}
 
-  async login(user: User): Promise<any> {
+  async login(user: MalambiUser): Promise<any> {
     this.logger.debug(`Login attempt for user: accid=${user.accid}, subid=${user.subid}, type: accid=${typeof user.accid}, subid=${typeof user.subid}`);
     
     // Convert accid and subid to numbers, handling empty strings and invalid values
@@ -52,18 +66,25 @@ export class AuthService {
     
     this.logger.debug(`Valid credentials: accid=${accid}, subid=${subid}`);
     
+    // Check if user exists in database, if not trigger background sync job
+    const userExists = await this.usersSyncService.userExists(accid);
+    if (!userExists) {
+      this.logger.debug(`User ${accid} not found in database, triggering sync job`);
+      await this.queueService.add('user-sync', 'sync-user', { accid, subid });
+    }
+    
     const { accessToken, refreshToken } = await this.generateUserTokens(
       user.token,
       accid,
       subid,
     );
 
-    const { token, session, loginusername, refresh_token, ...rest } = user;
-
     return {
-      ...rest,
+      accid: user.accid,
+      subid: user.subid,
+      username: user.loginusername || user.username,
       fullName: user.username,
-      username: user.loginusername,
+      company: user.company,
       accessToken,
       refreshToken,
     };

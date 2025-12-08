@@ -1,11 +1,25 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { v4 as uuidv4 } from 'uuid';
 import { MalambiBaseApiService } from '@common/services/malambi-base-api.service';
-import * as schema from '@modules/schemas';
 
-type User = typeof schema.users.$inferSelect;
+// Temporary user type from Malambi API login response
+export interface MalambiUser {
+  accid: string | number;
+  subid: string | number;
+  token: string;
+  session: string;
+  username: string;
+  loginusername?: string;
+  company?: string;
+  k_u?: string;
+  pid?: string;
+  partner?: string;
+  k_k?: string;
+  expire?: string;
+  k_p?: string;
+  [key: string]: any;
+}
 
 interface LoginResponse {
   success: boolean;
@@ -37,7 +51,7 @@ export class MalambiApiService extends MalambiBaseApiService {
   /**
    * Authenticate user with Malambi API
    */
-  async login(username: string, password: string): Promise<User> {
+  async login(username: string, password: string): Promise<MalambiUser> {
     const formData = this.buildForm({
       auth_u: username,
       auth_p: password,
@@ -59,11 +73,10 @@ export class MalambiApiService extends MalambiBaseApiService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Map API response to User schema
     // Log the raw API response for debugging
     this.logger.debug(`Malambi API login response: accid=${data.accid} (${typeof data.accid}), subid=${data.subid} (${typeof data.subid})`);
     
-    // Ensure accid and subid are valid strings (not empty)
+    // Ensure accid and subid are valid
     const accid = data.accid?.toString() || '';
     const subid = data.subid?.toString() || '';
     
@@ -72,25 +85,21 @@ export class MalambiApiService extends MalambiBaseApiService {
       throw new UnauthorizedException('Invalid credentials: missing account information');
     }
     
-    const user: User = {
-      id: uuidv4(),
-      k_u: data.k_u || '',
-      pid: data.pid || '',
-      subid: subid,
-      partner: data.partner || '',
-      k_k: data.k_k || '',
-      expire: data.expire || new Date().toISOString(),
+    // Map API response to MalambiUser
+    const user: MalambiUser = {
+      accid: data.accid || accid,
+      subid: data.subid || subid,
       token: data.token || '',
       session: data.session || '',
-      accid: accid,
-      company: data.company || '',
       username: data.username || username,
       loginusername: data.loginusername || username,
-      k_p: data.k_p || '',
-      refresh_token: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      deletedAt: null,
+      company: data.company || '',
+      k_u: data.k_u,
+      pid: data.pid,
+      partner: data.partner,
+      k_k: data.k_k,
+      expire: data.expire,
+      k_p: data.k_p,
     };
 
     return user;

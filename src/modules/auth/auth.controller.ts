@@ -19,7 +19,17 @@ import * as schema from '@modules/schemas';
 import { Credentials } from '@common/interfaces';
 import { Public } from './decorators/public.decorator';
 
-type User = typeof schema.users.$inferSelect;
+// Temporary user type from Malambi API login response
+interface MalambiUser {
+  accid: string | number;
+  subid: string | number;
+  token: string;
+  session: string;
+  username: string;
+  loginusername?: string;
+  company?: string;
+  [key: string]: any;
+}
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -35,7 +45,7 @@ export class AuthController {
   @ApiBody({ type: LoginRequest })
   async login(
     @Body() loginDto: LoginRequest,
-    @CurrentUser() user: User,
+    @CurrentUser() user: MalambiUser,
   ) {
     this.logger.log(`User ${user.username} is attempting to log in`);
     return this.authService.login(user);
