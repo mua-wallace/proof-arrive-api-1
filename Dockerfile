@@ -7,6 +7,8 @@ RUN npm install
 
 COPY . .
 
+CMD [ "npm", "run", "start:dev" ]
+
 FROM node:22.17.0 AS build
 
 WORKDIR /usr/src/app
@@ -17,7 +19,7 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-ENV NODE_ENV production
+ENV NODE_ENV=production
 
 FROM node:22.17.0 AS production
 

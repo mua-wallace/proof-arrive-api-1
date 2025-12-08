@@ -2,5 +2,5 @@
 // Add your schema exports here
 
 export * from './base.schema';
-
-export {};
+export * from './users.schema';
+export * from './refresh-tokens.schema';

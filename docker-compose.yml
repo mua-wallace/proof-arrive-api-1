@@ -1,23 +1,30 @@
-version: '3.8'
-
 services:
   proof-arrive-api:
     build:
       context: .
       dockerfile: Dockerfile
-      target: production
+      target: development
     container_name: proof-arrive-api
     restart: unless-stopped
     ports:
       - '5001:5000'
+    volumes:
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       PORT: 5000
+      API_PREFIX: api/v1
+      APP_MODE: development
+      APP_NAME: Proof Arrive API
+      APP_DOCS: docs
+      ALLOWED_ORIGINS: http://localhost:5173
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
       DATABASE_USERNAME: postgres
       DATABASE_PASSWORD: postgres
       DATABASE_NAME: proof_arrive
+      DATABASE_LOGGING: 'false'
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,6 +48,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - proof-arrive-network
 
 volumes:
   postgres_data:

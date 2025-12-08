@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import * as Joi from 'joi';
 import appConfig from '@config/app.config';
@@ -10,10 +10,14 @@ import { IncomingModule } from '@modules/incoming/incoming.module';
 import { CentersModule } from '@modules/centers/centers.module';
 import { UsersModule } from '@modules/users/users.module';
 import { ReportsModule } from '@modules/reports/reports.module';
+import { AuthModule } from '@modules/auth/auth.module';
 import { ThirdPartyModule } from '@integrations/third-party/third-party.module';
+import { MalambiApiModule } from '@integrations/malambi-api/malambi-api.module';
+import { MalambiAuthMiddleware } from '@common/middleware/malambi-auth.middleware';
 
 @Module({
   imports: [
+    MalambiApiModule,
     ConfigModule.forRoot({
       isGlobal: true,
       load: [appConfig],
@@ -36,9 +40,17 @@ import { ThirdPartyModule } from '@integrations/third-party/third-party.module';
         DATABASE_PASSWORD: Joi.string().default('postgres'),
         DATABASE_NAME: Joi.string().default('proof_arrive'),
         DATABASE_LOGGING: Joi.string().valid('true', 'false').default('false'),
+        JWT_ACCESS_TOKEN_SECRET: Joi.string().default('your-access-token-secret-change-in-production'),
+        JWT_ACCESS_TOKEN_EXPIRATION: Joi.string().default('3600000'),
+        JWT_REFRESH_TOKEN_SECRET: Joi.string().default('your-refresh-token-secret-change-in-production'),
+        JWT_REFRESH_TOKEN_EXPIRATION: Joi.string().default('259200000'),
+        JWT_REFRESH_TOKEN_EXPIRATION_DAYS: Joi.number().default(3),
+        MALAMBI_API_BASE_URL: Joi.string().uri().optional(),
+        MALAMBI_API_BASE_URL_GEOZONE: Joi.string().uri().optional(),
       }),
     }),
     DatabaseModule,
+    AuthModule,
     VehiclesModule,
     ArrivalsModule,
     ExitsModule,
@@ -49,6 +61,20 @@ import { ThirdPartyModule } from '@integrations/third-party/third-party.module';
     ThirdPartyModule,
   ],
   controllers: [],
-  providers: [],
+  providers: [MalambiAuthMiddleware],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(MalambiAuthMiddleware)
+      .exclude(
+        { path: 'auth/login', method: RequestMethod.POST },
+        { path: 'auth/refresh-token', method: RequestMethod.POST },
+        { path: 'auth/check', method: RequestMethod.GET },
+        { path: 'api/v1/auth/login', method: RequestMethod.POST },
+        { path: 'api/v1/auth/check', method: RequestMethod.GET },
+    
+      )
+      .forRoutes('*');
+  }
+}
