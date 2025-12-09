@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, NotFoundException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { MalambiBaseApiService } from '@common/services/malambi-base-api.service';
@@ -224,6 +224,78 @@ export class MalambiApiService extends MalambiBaseApiService {
       success: response.success || false,
       totalCount: response.totalCount || 0,
       rows: response.rows || [],
+    };
+  }
+
+  /**
+   * Get vehicle detail from Malambi API
+   */
+  async getVehicleDetail(
+    token: string,
+    accId: string,
+    subId: string,
+    vehicleId: string,
+  ): Promise<{
+    id: number;
+    plate: string;
+    model?: string;
+    brand?: string;
+    year?: number;
+    tag2?: string;
+    groupId?: number;
+  }> {
+    const data = await this.makeApiCall<any>(
+      'GET',
+      {
+        frm: 'VehiclesSetting',
+        task: 'load',
+        select: 'vehicle',
+        id: vehicleId,
+      },
+      undefined,
+      undefined,
+      { token, accId, subId },
+    );
+
+    console.log(`Malambi API vehicle detail response: ${JSON.stringify(data, null, 2)}`);
+
+    if (!data) {
+      throw new NotFoundException(`Vehicle not found, id: ${vehicleId}`);
+    }
+
+    return this.transformVehicleDetail(data);
+  }
+
+  /**
+   * Transform vehicle detail from Malambi API response
+   */
+  private transformVehicleDetail(raw: any): {
+    id: number;
+    plate: string;
+    model?: string;
+    brand?: string;
+    year?: number;
+    tag2?: string;
+    groupId?: number;
+  } {
+    const row = raw?.rows?.[0];
+    if (!row) {
+      throw new Error('Invalid vehicle data from API');
+    }
+
+    // Keep CLN, remove parentheses and trim extra spaces
+    const plate = row.tag
+      ?.replace(/\(.*?\)/g, '') // remove text inside parentheses
+      .trim() || '';
+
+    return {
+      id: row.id,
+      plate,
+      model: row.model,
+      brand: row.brand,
+      year: row.year,
+      tag2: row.tag2,
+      groupId: row.groupid,
     };
   }
 }

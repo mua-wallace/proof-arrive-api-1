@@ -74,11 +74,11 @@ async function bootstrap() {
         .setDescription(`Documentation for ${config.app.name}`)
         .addTag('Auth', 'API for authentication and authorization')
         .addTag('Users', 'API for managing users')
+        .addTag('Centers', 'API for managing centers/locations')
         .addTag('Vehicles', 'API for managing vehicles')
         .addTag('Arrivals', 'API for tracking vehicle arrivals')
         .addTag('Exits', 'API for tracking vehicle exits')
         .addTag('Incoming', 'API for managing incoming operations')
-        .addTag('Centers', 'API for managing centers/locations')
         .addTag('Reports', 'API for generating and managing reports')
         .addBearerAuth(
           {

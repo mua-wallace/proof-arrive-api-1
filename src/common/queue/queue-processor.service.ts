@@ -103,9 +103,29 @@ export class QueueProcessorService implements OnModuleInit {
     }
 
     try {
-      const { thirdPartyId } = job.data as { thirdPartyId: number };
-      await this.vehiclesSyncService.syncVehicle(thirdPartyId);
-      this.logger.debug(`Vehicle sync job completed: thirdPartyId=${thirdPartyId}`);
+      const jobData = job.data as {
+        vehicleData?: {
+          id: number;
+          plate: string;
+          model?: string;
+          brand?: string;
+          year?: number;
+          tag2?: string;
+          groupId?: number;
+        };
+        thirdPartyId?: number;
+      };
+      
+      if (jobData.vehicleData) {
+        await this.vehiclesSyncService.syncVehicle(jobData.vehicleData);
+        this.logger.debug(`Vehicle sync job completed: thirdPartyId=${jobData.vehicleData.id}, plate=${jobData.vehicleData.plate}`);
+      } else if (jobData.thirdPartyId) {
+        // Legacy support: if only thirdPartyId is provided, we would need to fetch vehicle data from Malambi API
+        // For now, log an error as we need full vehicle data
+        this.logger.error('Invalid vehicle sync job data: missing vehicleData. Full vehicle data is required.');
+      } else {
+        this.logger.error('Invalid vehicle sync job data: missing vehicleData or thirdPartyId');
+      }
     } catch (error) {
       this.logger.error(`Error processing vehicle sync job:`, error instanceof Error ? error.stack : error);
     }
