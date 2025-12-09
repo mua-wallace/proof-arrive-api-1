@@ -121,9 +121,44 @@ export class QueueProcessorService implements OnModuleInit {
     }
 
     try {
-      const { centerId, centerName } = job.data as { centerId: number; centerName?: string };
-      await this.centersSyncService.syncCenter(centerId, centerName);
-      this.logger.debug(`Center sync job completed: centerId=${centerId}`);
+      const jobData = job.data as {
+        centerData?: {
+          id: number;
+          siteid: number;
+          name: string;
+          fullname?: string;
+          geozone?: string;
+          gzone_id?: number;
+          manager?: string;
+          groupid?: number;
+          groupname?: string;
+          sitetype?: number;
+          distance?: number;
+          time1?: string;
+          time2?: string;
+          saturday?: string;
+          sunday?: string;
+          breakstart?: string;
+          breakstop?: string;
+          timeoutin?: number;
+          timeoutin_str?: string;
+          timeoutin_muros?: number;
+          timeoutin_muros_str?: string;
+        };
+        thirdPartyId?: number;
+        siteid?: number;
+      };
+      
+      if (jobData.centerData) {
+        await this.centersSyncService.syncCenter(jobData.centerData);
+        this.logger.debug(`Center sync job completed: thirdPartyId=${jobData.centerData.id}, siteid=${jobData.centerData.siteid}`);
+      } else if (jobData.thirdPartyId || jobData.siteid) {
+        // If only IDs are provided, we would need to fetch center data from Malambi API
+        // For now, log an error as we need full center data
+        this.logger.error('Invalid center sync job data: missing centerData. Full center data is required.');
+      } else {
+        this.logger.error('Invalid center sync job data: missing centerData or IDs');
+      }
     } catch (error) {
       this.logger.error(`Error processing center sync job:`, error instanceof Error ? error.stack : error);
     }

@@ -3,7 +3,7 @@ import { Inject } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '@modules/schemas';
-import { eq } from 'drizzle-orm';
+import { eq, or } from 'drizzle-orm';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
 import { QueueService } from '@common/queue/queue.service';
 
@@ -20,78 +20,259 @@ export class CentersSyncService {
 
   /**
    * Sync center from Malambi API to database
+   * @param centerData - Full center data from Malambi API
    */
-  async syncCenter(centerId: number, centerName?: string): Promise<void> {
+  async syncCenter(centerData: {
+    id: number;
+    siteid: number;
+    name: string;
+    fullname?: string;
+    geozone?: string;
+    gzone_id?: number;
+    manager?: string;
+    groupid?: number;
+    groupname?: string;
+    sitetype?: number;
+    distance?: number;
+    time1?: string;
+    time2?: string;
+    saturday?: string;
+    sunday?: string;
+    breakstart?: string;
+    breakstop?: string;
+    timeoutin?: number;
+    timeoutin_str?: string;
+    timeoutin_muros?: number;
+    timeoutin_muros_str?: string;
+  }): Promise<void> {
     try {
-      this.logger.debug(`Syncing center: centerId=${centerId}, name=${centerName || 'N/A'}`);
+      const thirdPartyId = centerData.id;
+      const siteid = centerData.siteid;
+      
+      this.logger.debug(`Syncing center: thirdPartyId=${thirdPartyId}, siteid=${siteid}, name=${centerData.name}`);
 
-      // Check if center already exists by name or ID
-      // Note: The schema uses serial ID, so we might need to track thirdPartyId separately
-      // For now, we'll check by name
-      if (centerName) {
-        const existingCenter = await this.dbConnection
-          .select()
-          .from(schema.centers)
-          .where(eq(schema.centers.name, centerName))
-          .limit(1);
-
-        if (existingCenter.length > 0) {
-          this.logger.debug(`Center ${centerName} already exists, skipping sync`);
-          return;
-        }
+      // Check if center already exists by thirdPartyId, siteid, or geozoneId
+      const geozoneId = centerData.gzone_id;
+      const conditions = [
+        eq(schema.centers.thirdPartyId, thirdPartyId),
+        eq(schema.centers.siteid, siteid),
+      ];
+      
+      if (geozoneId) {
+        conditions.push(eq(schema.centers.geozoneId, geozoneId));
       }
 
-      // Fetch center data from Malambi API
-      // Note: You'll need to implement getCenterInfo in MalambiApiService
-      // For now, we'll create a basic center record
-      const centerData = {
-        name: centerName || `Center_${centerId}`,
-        address: null,
-        latitude: null,
-        longitude: null,
-        geozoneId: null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+      const existingCenter = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(or(...conditions))
+        .limit(1);
+
+      if (existingCenter.length > 0) {
+        this.logger.debug(`Center ${thirdPartyId} (siteid: ${siteid}, gzone_id: ${geozoneId}) already exists, skipping sync`);
+        return;
+      }
+
+      // Insert center with data from Malambi API
+      const centerRecord = {
+        thirdPartyId,
+        siteid,
+        name: centerData.name || `Center_${thirdPartyId}`,
+        fullname: centerData.fullname || null,
+        geozone: centerData.geozone || null,
+        geozoneId: centerData.gzone_id || null,
+        manager: centerData.manager || null,
+        groupid: centerData.groupid || null,
+        groupname: centerData.groupname || null,
+        sitetype: centerData.sitetype ?? 0,
+        distance: centerData.distance || null,
+        time1: centerData.time1 || null,
+        time2: centerData.time2 || null,
+        saturday: centerData.saturday || null,
+        sunday: centerData.sunday || null,
+        breakstart: centerData.breakstart || null,
+        breakstop: centerData.breakstop || null,
+        timeoutin: centerData.timeoutin || null,
+        timeoutin_str: centerData.timeoutin_str || null,
+        timeoutin_muros: centerData.timeoutin_muros || null,
+        timeoutin_muros_str: centerData.timeoutin_muros_str || null,
       };
 
-      await this.dbConnection.insert(schema.centers).values(centerData).execute();
+      await this.dbConnection.insert(schema.centers).values(centerRecord).execute();
 
-      this.logger.log(`Center ${centerId} synced successfully`);
+      this.logger.log(`Center ${thirdPartyId} (siteid: ${siteid}) synced successfully`);
     } catch (error) {
-      this.logger.error(`Error syncing center ${centerId}:`, error instanceof Error ? error.stack : error);
+      this.logger.error(`Error syncing center:`, error instanceof Error ? error.stack : error);
       throw error;
     }
   }
 
   /**
-   * Check if center exists in database
+   * Check if center exists in database by geozoneId (gzone_id)
    */
-  async centerExists(name: string): Promise<boolean> {
+  async centerExistsByGeozoneId(geozoneId: number): Promise<boolean> {
+    if (!geozoneId) {
+      return false;
+    }
+
     const center = await this.dbConnection
       .select()
       .from(schema.centers)
-      .where(eq(schema.centers.name, name))
+      .where(eq(schema.centers.geozoneId, geozoneId))
       .limit(1);
 
     return center.length > 0;
   }
 
   /**
+   * Check if center exists in database by thirdPartyId or siteid
+   */
+  async centerExists(thirdPartyId?: number, siteid?: number): Promise<boolean> {
+    if (!thirdPartyId && !siteid) {
+      return false;
+    }
+
+    const conditions: ReturnType<typeof eq>[] = [];
+    if (thirdPartyId) {
+      conditions.push(eq(schema.centers.thirdPartyId, thirdPartyId));
+    }
+    if (siteid) {
+      conditions.push(eq(schema.centers.siteid, siteid));
+    }
+
+    if (conditions.length === 0) {
+      return false;
+    }
+
+    const center = await this.dbConnection
+      .select()
+      .from(schema.centers)
+      .where(conditions.length === 1 ? conditions[0] : or(...conditions))
+      .limit(1);
+
+    return center.length > 0;
+  }
+
+  /**
+   * Fetch centers from Malambi API, find center by geozone_id, and sync if missing
+   * This method fetches all centers, finds the one with matching gzone_id,
+   * checks if it exists in database, and triggers a background job to save it if missing
+   * @param geozoneId - The geozone_id (gzone_id) to find and sync
+   */
+  async syncCenterByGeozoneId(
+    token: string,
+    accId: string,
+    subId: string,
+    geozoneId: number,
+  ): Promise<{ found: boolean; synced: boolean; skipped: boolean; message: string }> {
+    try {
+      if (!geozoneId || geozoneId === 0) {
+        return {
+          found: false,
+          synced: false,
+          skipped: false,
+          message: 'Invalid geozone_id provided',
+        };
+      }
+
+      this.logger.debug(`Fetching centers from Malambi API to find center with gzone_id=${geozoneId}`);
+
+      // Check if center already exists in database
+      const exists = await this.centerExistsByGeozoneId(geozoneId);
+      if (exists) {
+        this.logger.debug(`Center with gzone_id=${geozoneId} already exists in database, skipping sync`);
+        return {
+          found: true,
+          synced: false,
+          skipped: true,
+          message: `Center with gzone_id=${geozoneId} already exists in database`,
+        };
+      }
+
+      // Fetch centers from API (using default options: limit=1000, regionid=-1, filtertype=1)
+      const response = await this.malambiApi.getCenters(token, accId, subId, {
+        limit: 1000,
+        regionid: -1,
+        filtertype: 1,
+      });
+
+      if (!response.success || !Array.isArray(response.rows)) {
+        this.logger.warn('Invalid response from Malambi API centers endpoint');
+        return {
+          found: false,
+          synced: false,
+          skipped: false,
+          message: 'Invalid response from Malambi API',
+        };
+      }
+
+      // Find center with matching gzone_id in the rows array
+      const centerData = response.rows.find((center) => center.gzone_id === geozoneId);
+
+      if (!centerData) {
+        this.logger.debug(`Center with gzone_id=${geozoneId} not found in API response`);
+        return {
+          found: false,
+          synced: false,
+          skipped: false,
+          message: `Center with gzone_id=${geozoneId} not found in Malambi API`,
+        };
+      }
+
+      // Center found in API, trigger background job to save it
+      this.logger.debug(`Center with gzone_id=${geozoneId} (${centerData.name}) found in API, triggering sync job`);
+      await this.queueService.add('center-sync', 'sync-center', {
+        centerData: {
+          id: centerData.id,
+          siteid: centerData.siteid,
+          name: centerData.name,
+          fullname: centerData.fullname,
+          geozone: centerData.geozone,
+          gzone_id: centerData.gzone_id,
+          manager: centerData.manager,
+          groupid: centerData.groupid,
+          groupname: centerData.groupname,
+          sitetype: centerData.sitetype,
+          distance: centerData.distance,
+          time1: centerData.time1,
+          time2: centerData.time2,
+          saturday: centerData.saturday,
+          sunday: centerData.sunday,
+          breakstart: centerData.breakstart,
+          breakstop: centerData.breakstop,
+          timeoutin: centerData.timeoutin,
+          timeoutin_str: centerData.timeoutin_str,
+          timeoutin_muros: centerData.timeoutin_muros,
+          timeoutin_muros_str: centerData.timeoutin_muros_str,
+        },
+      });
+
+      this.logger.log(`Center sync job triggered for gzone_id=${geozoneId} (${centerData.name})`);
+
+      return {
+        found: true,
+        synced: true,
+        skipped: false,
+        message: `Center with gzone_id=${geozoneId} (${centerData.name}) sync job triggered`,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error syncing center by geozone_id:`,
+        error instanceof Error ? error.stack : error,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Ensure center is synced - check if exists, if not trigger background sync job
    * Call this method when a center is accessed/scanned
    */
-  async ensureCenterSynced(centerId: number, centerName?: string): Promise<void> {
-    if (centerName) {
-      const exists = await this.centerExists(centerName);
-      if (!exists) {
-        this.logger.debug(`Center ${centerName} not found in database, triggering sync job`);
-        await this.queueService.add('center-sync', 'sync-center', { centerId, centerName });
-      }
-    } else {
-      // If no name provided, trigger sync with just ID
-      this.logger.debug(`Center ${centerId} sync job triggered (no name provided)`);
-      await this.queueService.add('center-sync', 'sync-center', { centerId, centerName: undefined });
+  async ensureCenterSynced(thirdPartyId?: number, siteid?: number): Promise<void> {
+    const exists = await this.centerExists(thirdPartyId, siteid);
+    if (!exists) {
+      this.logger.debug(`Center not found (thirdPartyId: ${thirdPartyId}, siteid: ${siteid}), triggering sync job`);
+      await this.queueService.add('center-sync', 'sync-center', { thirdPartyId, siteid });
     }
   }
 }

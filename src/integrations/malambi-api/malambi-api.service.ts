@@ -156,4 +156,74 @@ export class MalambiApiService extends MalambiBaseApiService {
       return false;
     }
   }
+
+  /**
+   * Get centers list from Malambi API
+   */
+  async getCenters(
+    token: string,
+    accId: string,
+    subId: string,
+    options?: {
+      limit?: number;
+      regionid?: number;
+      filtertype?: number;
+    },
+  ): Promise<{
+    success: boolean;
+    totalCount: number;
+    rows: Array<{
+      id: number;
+      siteid: number;
+      name: string;
+      fullname?: string;
+      geozone?: string;
+      gzone_id?: number;
+      manager?: string;
+      groupid?: number;
+      groupname?: string;
+      sitetype?: number;
+      distance?: number;
+      time1?: string;
+      time2?: string;
+      saturday?: string;
+      sunday?: string;
+      breakstart?: string;
+      breakstop?: string;
+      timeoutin?: number;
+      timeoutin_str?: string;
+      timeoutin_muros?: number;
+      timeoutin_muros_str?: string;
+      [key: string]: any;
+    }>;
+  }> {
+    const params = {
+      plug: 'Sites',
+      package: 'tripsanalyzer',
+      full: '1',
+      task: 'list',
+      filtertype: options?.filtertype?.toString() || '1',
+      limit: options?.limit?.toString() || '1000',
+      regionid: options?.regionid?.toString() || '-1',
+    };
+
+    const response = await this.makeApiCall<{
+      success: boolean;
+      totalCount: number;
+      rows: any[];
+    }>(
+      'GET',
+      params,
+      undefined,
+      undefined,
+      { token, accId, subId },
+      { includeDc: true },
+    );
+
+    return {
+      success: response.success || false,
+      totalCount: response.totalCount || 0,
+      rows: response.rows || [],
+    };
+  }
 }
