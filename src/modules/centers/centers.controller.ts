@@ -1,8 +1,12 @@
-import { Controller, Post, Get, Query, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Query, Param, BadRequestException } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { CentersService } from './centers.service';
 import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-credentials.decorator';
-import { Credentials } from '@common/interfaces';
+import { Credentials, PaginateResult } from '@common/interfaces';
+import { FilterCentersDto } from './dto';
+import * as schema from '@modules/schemas';
+
+type Center = typeof schema.centers.$inferSelect;
 
 @Controller('centers')
 @ApiTags('Centers')
@@ -10,26 +14,32 @@ import { Credentials } from '@common/interfaces';
 export class CentersController {
   constructor(private readonly centersService: CentersService) {}
 
-  @Post('sync')
+  @Get()
   @ApiOperation({
-    summary: 'Find and sync a center by geozone_id',
-    description: 'This endpoint fetches centers from the Malambi API, finds the center with matching gzone_id, checks if it exists in the database, and triggers a background job to save it if missing.',
+    summary: 'List all synced centers in the system with filtering and pagination',
   })
-  @ApiQuery({ name: 'geozone_id', required: true, type: Number, description: 'The geozone_id (gzone_id) to find and sync' })
-  async syncCenter(
-    @CurrentUserCredentials() credentials: Credentials,
-    @Query('geozone_id') geozoneId: number,
-  ) {
-    if (!geozoneId) {
-      throw new BadRequestException('geozone_id is required');
-    }
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
+  @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
+  @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
+  async findAll(
+    @Query() filterDto: FilterCentersDto,
+  ): Promise<PaginateResult<Center>> {
+    const query = {
+      page: filterDto.page ?? 1,
+      limit: filterDto.limit ?? 100,
+      search: filterDto.search,
+      searchBy: filterDto.searchBy ? filterDto.searchBy.split(',') : undefined,
+      sortBy: filterDto.sortBy
+        ? (filterDto.sortBy.split(',').map((s) => {
+            const [field, direction] = s.split(':');
+            return [field, (direction || 'ASC').toUpperCase()] as [string, 'ASC' | 'DESC'];
+          }) as [string, 'ASC' | 'DESC'][])
+        : undefined,
+    };
 
-    return this.centersService.syncCenterByGeozoneId(
-      credentials.token,
-      credentials.accid.toString(),
-      credentials.subid.toString(),
-      Number(geozoneId),
-    );
+    return this.centersService.findAll(query);
   }
 
   @Get('from-api')
@@ -55,6 +65,37 @@ export class CentersController {
         regionid: regionid ? Number(regionid) : undefined,
         filtertype: filtertype ? Number(filtertype) : undefined,
       },
+    );
+  }
+
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Get center details by ID',
+    description: 'Provides access to view the details of a specific center by its internal ID (serial integer).',
+  })
+  async findOneById(@Param('id') id: string): Promise<Center> {
+    return this.centersService.findOneById(Number(id));
+  }
+
+  @Post('sync')
+  @ApiOperation({
+    summary: 'Find and sync a center by geozone_id',
+    description: 'This endpoint fetches centers from the Malambi API, finds the center with matching gzone_id, checks if it exists in the database, and triggers a background job to save it if missing.',
+  })
+  @ApiQuery({ name: 'geozone_id', required: true, type: Number, description: 'The geozone_id (gzone_id) to find and sync' })
+  async syncCenter(
+    @CurrentUserCredentials() credentials: Credentials,
+    @Query('geozone_id') geozoneId: number,
+  ) {
+    if (!geozoneId) {
+      throw new BadRequestException('geozone_id is required');
+    }
+
+    return this.centersService.syncCenterByGeozoneId(
+      credentials.token,
+      credentials.accid.toString(),
+      credentials.subid.toString(),
+      Number(geozoneId),
     );
   }
 }
