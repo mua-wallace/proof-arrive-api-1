@@ -66,11 +66,32 @@ export class AuthService {
     
     this.logger.debug(`Valid credentials: accid=${accid}, subid=${subid}`);
     
-    // Check if user exists in database, if not trigger background sync job
-    const userExists = await this.usersSyncService.userExists(accid);
+    // Check if user exists in database
+    const userExists = await this.usersSyncService.userExists(accidStr);
+    
     if (!userExists) {
-      this.logger.debug(`User ${accid} not found in database, triggering sync job`);
-      await this.queueService.add('user-sync', 'sync-user', { accid, subid });
+      // User doesn't exist, trigger background sync job with full user data
+      this.logger.debug(`User ${accidStr} not found in database, triggering sync job with full user data`);
+      await this.queueService.add('user-sync', 'sync-user', { 
+        userData: {
+          accid: accidStr,
+          subid: subidStr,
+          token: user.token,
+          session: user.session,
+          username: user.username,
+          company: user.company || '',
+          k_u: user.k_u || '',
+          pid: user.pid || '',
+          partner: user.partner || '0',
+          k_k: user.k_k || '',
+          expire: user.expire || '0',
+          k_p: user.k_p || '',
+        }
+      });
+    } else {
+      // User exists, update lastLoginAt
+      this.logger.debug(`User ${accidStr} exists, updating lastLoginAt`);
+      await this.usersSyncService.updateLastLogin(accidStr);
     }
     
     const { accessToken, refreshToken } = await this.generateUserTokens(
@@ -82,7 +103,7 @@ export class AuthService {
     return {
       accid: user.accid,
       subid: user.subid,
-      username: user.loginusername || user.username,
+      username: user.username,
       fullName: user.username,
       company: user.company,
       accessToken,

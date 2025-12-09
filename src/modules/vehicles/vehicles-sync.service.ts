@@ -5,6 +5,7 @@ import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '@modules/schemas';
 import { eq } from 'drizzle-orm';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
+import { QueueService } from '@common/queue/queue.service';
 
 @Injectable()
 export class VehiclesSyncService {
@@ -14,6 +15,7 @@ export class VehiclesSyncService {
     @Inject(DATABASE_CONNECTION)
     private readonly dbConnection: PostgresJsDatabase<typeof schema>,
     private readonly malambiApi: MalambiApiService,
+    private readonly queueService: QueueService,
   ) {}
 
   /**
@@ -72,6 +74,18 @@ export class VehiclesSyncService {
       .limit(1);
 
     return vehicle.length > 0;
+  }
+
+  /**
+   * Ensure vehicle is synced - check if exists, if not trigger background sync job
+   * Call this method when a vehicle is scanned/accessed
+   */
+  async ensureVehicleSynced(thirdPartyId: number): Promise<void> {
+    const exists = await this.vehicleExists(thirdPartyId);
+    if (!exists) {
+      this.logger.debug(`Vehicle ${thirdPartyId} not found in database, triggering sync job`);
+      await this.queueService.add('vehicle-sync', 'sync-vehicle', { thirdPartyId });
+    }
   }
 }
 

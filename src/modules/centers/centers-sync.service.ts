@@ -5,6 +5,7 @@ import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '@modules/schemas';
 import { eq } from 'drizzle-orm';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
+import { QueueService } from '@common/queue/queue.service';
 
 @Injectable()
 export class CentersSyncService {
@@ -14,6 +15,7 @@ export class CentersSyncService {
     @Inject(DATABASE_CONNECTION)
     private readonly dbConnection: PostgresJsDatabase<typeof schema>,
     private readonly malambiApi: MalambiApiService,
+    private readonly queueService: QueueService,
   ) {}
 
   /**
@@ -73,6 +75,24 @@ export class CentersSyncService {
       .limit(1);
 
     return center.length > 0;
+  }
+
+  /**
+   * Ensure center is synced - check if exists, if not trigger background sync job
+   * Call this method when a center is accessed/scanned
+   */
+  async ensureCenterSynced(centerId: number, centerName?: string): Promise<void> {
+    if (centerName) {
+      const exists = await this.centerExists(centerName);
+      if (!exists) {
+        this.logger.debug(`Center ${centerName} not found in database, triggering sync job`);
+        await this.queueService.add('center-sync', 'sync-center', { centerId, centerName });
+      }
+    } else {
+      // If no name provided, trigger sync with just ID
+      this.logger.debug(`Center ${centerId} sync job triggered (no name provided)`);
+      await this.queueService.add('center-sync', 'sync-center', { centerId, centerName: undefined });
+    }
   }
 }
 

@@ -64,9 +64,30 @@ export class QueueProcessorService implements OnModuleInit {
     }
 
     try {
-      const { accid, subid } = job.data as { accid: number; subid: number };
-      await this.usersSyncService.syncUser(accid, subid);
-      this.logger.debug(`User sync job completed: accid=${accid}`);
+      const jobData = job.data as { 
+        userData: {
+          accid: string;
+          subid: string;
+          token: string;
+          session: string;
+          username: string;
+          company: string;
+          k_u: string;
+          pid: string;
+          partner: string;
+          k_k: string;
+          expire: string;
+          k_p: string;
+        };
+      };
+      
+      if (!jobData.userData) {
+        this.logger.error('Invalid user sync job data: missing userData');
+        return;
+      }
+
+      await this.usersSyncService.syncUser(jobData.userData);
+      this.logger.debug(`User sync job completed: accid=${jobData.userData.accid}`);
     } catch (error) {
       this.logger.error(`Error processing user sync job:`, error instanceof Error ? error.stack : error);
     }
