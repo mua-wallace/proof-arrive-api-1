@@ -3,7 +3,6 @@ import { DATABASE_CONNECTION } from '@database/database-connection';
 import * as schema from '@modules/schemas';
 import { BaseService } from '@common/services/base.service';
 import { PaginateQuery, PaginateResult, BaseEntity } from '@common/interfaces';
-import { CreateUserDto, UpdateUserDto } from './dto';
 
 type User = typeof schema.users.$inferSelect & BaseEntity;
 
@@ -16,30 +15,6 @@ export class UsersService extends BaseService<User> {
     db: any, // BaseService expects DrizzleDatabase type
   ) {
     super(db, schema.users);
-  }
-
-  async create(
-    data: { userDto: CreateUserDto; userId?: string } | any,
-  ): Promise<User> {
-    const { userDto, userId } = data;
-
-    // Check if user with accid already exists
-    const existingUser = await this.findOneBy({ accid: userDto.accid } as any);
-    if (existingUser) {
-      throw new NotFoundException(`User with accid ${userDto.accid} already exists`);
-    }
-
-    return super.create({
-      ...userDto,
-      // Set default values for required fields if not provided
-      k_u: userDto.k_u || '',
-      pid: userDto.pid || '',
-      k_k: userDto.k_k || '',
-      k_p: userDto.k_p || '',
-      token: userDto.token || '',
-      session: userDto.session || '',
-      expire: userDto.expire || '0',
-    } as any);
   }
 
   async findAll(
@@ -79,17 +54,6 @@ export class UsersService extends BaseService<User> {
       throw new NotFoundException('User not found');
     }
     return user;
-  }
-
-  async update(
-    id: string,
-    data: { updateData: UpdateUserDto; userId?: string } | any,
-  ): Promise<User> {
-    // Check if user exists
-    await this.findOneById(id);
-
-    const { updateData, userId } = data;
-    return super.update(id, updateData as any);
   }
 
   async remove(id: string): Promise<User> {

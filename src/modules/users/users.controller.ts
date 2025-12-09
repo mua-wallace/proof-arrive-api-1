@@ -1,18 +1,14 @@
 import {
-  Body,
   Controller,
   Delete,
   Get,
   Param,
-  Post,
-  Put,
   Query,
 } from '@nestjs/common';
-import { ApiBody, ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiQuery, ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { CreateUserDto, UpdateUserDto } from './dto';
-import { CurrentUser } from '@modules/auth/decorators/current-user.decorator';
 import { PaginateQuery, PaginateResult } from '@common/interfaces';
+import { FilterUsersDto } from './dto/filter-users.dto';
 import * as schema from '@modules/schemas';
 
 type User = typeof schema.users.$inferSelect;
@@ -23,55 +19,34 @@ type User = typeof schema.users.$inferSelect;
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Post('create')
-  @ApiBody({
-    type: CreateUserDto,
-  })
-  @ApiOperation({
-    summary: 'Allows addition of a new user with specified details',
-  })
-  async create(
-    @Body() userDto: CreateUserDto,
-    @CurrentUser() currentUser: any,
-  ): Promise<User> {
-    return this.usersService.create({
-      userDto,
-      userId: currentUser?.accid || currentUser?.id,
-    });
-  }
-
-  @Post('filter')
+  @Get()
   @ApiOperation({
     summary: 'List all users in the system with filtering and pagination',
   })
-  @ApiBody({
-    type: Object,
-    required: false,
-    description: 'Filter conditions (optional)',
-  })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
+  @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
+  @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
   async findAllWithFilter(
-    @Body() filter: any,
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
-    @Query('search') search?: string,
-    @Query('searchBy') searchBy?: string,
-    @Query('sortBy') sortBy?: string,
+    @Query() filterDto: FilterUsersDto,
   ): Promise<PaginateResult<User>> {
     const query: PaginateQuery = {
-      page: page ? Number(page) : undefined,
-      limit: limit ? Number(limit) : undefined,
-      search,
-      searchBy: searchBy ? searchBy.split(',') : undefined,
-      sortBy: sortBy
-        ? (sortBy.split(',').map((s) => {
+      page: filterDto.page ?? 1,
+      limit: filterDto.limit ?? 100,
+      search: filterDto.search,
+      searchBy: filterDto.searchBy ? filterDto.searchBy.split(',') : undefined,
+      sortBy: filterDto.sortBy
+        ? (filterDto.sortBy.split(',').map((s) => {
             const [field, direction] = s.split(':');
             return [field, (direction || 'ASC').toUpperCase()] as [string, 'ASC' | 'DESC'];
           }) as [string, 'ASC' | 'DESC'][])
         : undefined,
     };
 
-    // If filter is provided, we can add it to options
-    const options = filter && Object.keys(filter).length > 0 ? { where: filter } : undefined;
+    // Note: filter object cannot be passed as query param easily, 
+    // so we'll skip it for query params. If needed, use POST with body.
+    const options = undefined;
 
     return this.usersService.findAll(query, options);
   }
@@ -82,24 +57,6 @@ export class UsersController {
   })
   async findOneById(@Param('userId') userId: string): Promise<User> {
     return this.usersService.findOneById(userId);
-  }
-
-  @Put(':userId')
-  @ApiBody({
-    type: UpdateUserDto,
-  })
-  @ApiOperation({
-    summary: 'Enables updating details of an existing user',
-  })
-  async update(
-    @Param('userId') userId: string,
-    @Body() updateData: UpdateUserDto,
-    @CurrentUser() currentUser: any,
-  ): Promise<User> {
-    return this.usersService.update(userId, {
-      updateData,
-      userId: currentUser?.accid || currentUser?.id,
-    });
   }
 
   @Delete(':userId')

@@ -96,16 +96,24 @@ export class AuthService {
     
     const { accessToken, refreshToken } = await this.generateUserTokens(
       user.token,
+      
       accid,
       subid,
     );
 
     return {
-      accid: user.accid,
-      subid: user.subid,
+      accid: accidStr,
+      subid: subidStr,
+      token: user.token,
+      session: user.session,
       username: user.username,
-      fullName: user.username,
-      company: user.company,
+      company: user.company || '',
+      k_u: user.k_u || '',
+      pid: user.pid || '',
+      partner: user.partner || '0',
+      k_k: user.k_k || '',
+      expire: user.expire || '0',
+      k_p: user.k_p || '',
       accessToken,
       refreshToken,
     };
