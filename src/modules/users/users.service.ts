@@ -56,6 +56,14 @@ export class UsersService extends BaseService<User> {
     return user;
   }
 
+  async findByAccidAndSubid(accid: string, subid: string): Promise<User> {
+    const user = await this.findOneBy({ accid, subid } as any);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    return user;
+  }
+
   async remove(id: string): Promise<User> {
     return super.remove(id);
   }

@@ -9,6 +9,8 @@ import { ApiQuery, ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { UsersService } from './users.service';
 import { PaginateQuery, PaginateResult } from '@common/interfaces';
 import { FilterUsersDto } from './dto/filter-users.dto';
+import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-credentials.decorator';
+import { Credentials } from '@common/interfaces';
 import * as schema from '@modules/schemas';
 
 type User = typeof schema.users.$inferSelect;
@@ -51,20 +53,33 @@ export class UsersController {
     return this.usersService.findAll(query, options);
   }
 
-  @Get('details/:userId')
+  @Get('me')
   @ApiOperation({
-    summary: 'Provides access to view the details of a specific user',
+    summary: 'Get current authenticated user details',
   })
-  async findOneById(@Param('userId') userId: string): Promise<User> {
-    return this.usersService.findOneById(userId);
+  async getMe(
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<User> {
+    return this.usersService.findByAccidAndSubid(
+      String(credentials.accid),
+      String(credentials.subid),
+    );
   }
 
-  @Delete(':userId')
+  @Get('details/:id')
   @ApiOperation({
-    summary: 'Removes a user from the system',
+    summary: 'Get user details by ID (UUID)',
   })
-  async remove(@Param('userId') userId: string): Promise<User> {
-    return this.usersService.remove(userId);
+  async findOneById(@Param('id') id: string): Promise<User> {
+    return this.usersService.findOneById(id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary: 'Removes a user from the system by ID (UUID)',
+  })
+  async remove(@Param('id') id: string): Promise<User> {
+    return this.usersService.remove(id);
   }
 }
 
