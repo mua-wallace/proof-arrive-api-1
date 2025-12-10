@@ -8,6 +8,13 @@
       "when": 1765274655918,
       "tag": "0000_complete_thena",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1765274655919,
+      "tag": "0002_add_created_by_fields",
+      "breakpoints": true
     }
   ]
 }

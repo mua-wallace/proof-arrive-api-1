@@ -1,10 +1,17 @@
 # Proof Arrive API
 
-A NestJS-based REST API for managing vehicle arrivals, exits, and related operations. Built with TypeScript, Drizzle ORM, and PostgreSQL.
+A comprehensive NestJS-based REST API for tracking and managing vehicle logistics operations, including arrivals, exits, and inter-center transfers. The system integrates with the Malambi third-party API to synchronize user, vehicle, and center data. Built with TypeScript, Drizzle ORM, and PostgreSQL.
 
 ## 🚀 Features
 
 - **RESTful API** with NestJS framework
+- **JWT Authentication** with access and refresh tokens
+- **Vehicle Arrival Tracking** with QR code scanning, GPS coordinates, and processing stages
+- **Exit Management** with destination tracking and exit types
+- **Incoming Vehicle Operations** for managing vehicles in transit between centers
+- **Processing Stages** for multi-stage workflow tracking (unloading, inspection, etc.)
+- **Data Synchronization** with Malambi API via background jobs
+- **Audit Trail** with `createdBy` fields to track user actions
 - **PostgreSQL Database** with Drizzle ORM
 - **Docker Support** for easy deployment
 - **Swagger Documentation** for API exploration
@@ -14,6 +21,7 @@ A NestJS-based REST API for managing vehicle arrivals, exits, and related operat
 - **CORS** support for cross-origin requests
 - **Validation** with class-validator
 - **Base Service** for common CRUD operations
+- **Pagination, Filtering, and Sorting** on all list endpoints
 
 ## 📁 Project Structure
 
@@ -143,18 +151,31 @@ See `.env.example` for all available environment variables. Key variables includ
 - `PORT` - Server port (default: 5000)
 - `API_PREFIX` - API route prefix (default: api/v1)
 - `APP_MODE` - Application mode: development | production
-- `APP_NAME` - Application name
+- `APP_NAME` - Application name (default: Proof Arrive API)
 - `APP_DOCS` - Swagger documentation path (default: docs)
 - `ALLOWED_ORIGINS` - Comma-separated list of allowed CORS origins
 
 ### Database
 
-- `DATABASE_HOST` - Database host
+- `DATABASE_HOST` - Database host (default: localhost)
 - `DATABASE_PORT` - Database port (default: 5432)
-- `DATABASE_USERNAME` - Database username
-- `DATABASE_PASSWORD` - Database password
-- `DATABASE_NAME` - Database name
+- `DATABASE_USERNAME` - Database username (default: postgres)
+- `DATABASE_PASSWORD` - Database password (default: postgres)
+- `DATABASE_NAME` - Database name (default: proof_arrive)
 - `DATABASE_LOGGING` - Enable database query logging (true/false)
+
+### JWT Authentication
+
+- `JWT_ACCESS_TOKEN_SECRET` - Secret key for signing access tokens
+- `JWT_ACCESS_TOKEN_EXPIRATION` - Access token expiration in milliseconds (default: 3600000 = 1 hour)
+- `JWT_REFRESH_TOKEN_SECRET` - Secret key for signing refresh tokens
+- `JWT_REFRESH_TOKEN_EXPIRATION` - Refresh token expiration in milliseconds (default: 259200000 = 3 days)
+- `JWT_REFRESH_TOKEN_EXPIRATION_DAYS` - Refresh token expiration in days (default: 3)
+
+### Malambi Integration
+
+- `MALAMBI_API_BASE_URL` - Base URL for Malambi API (default: https://malambi.net/Helper)
+- `MALAMBI_API_BASE_URL_GEOZONE` - Base URL for Malambi Geozone API (default: https://fm7.malambi.net/Helper)
 
 ## 🗄️ Database
 
@@ -174,12 +195,32 @@ npx drizzle-kit migrate
 
 ### Database Schema
 
-Database schemas are defined in `src/modules/schemas/`. The base schema includes:
+Database schemas are defined in `src/modules/schemas/`. The base schemas include:
 
+**Base Columns (UUID-based tables like users):**
 - `id` (UUID, primary key)
 - `createdAt` (timestamp)
 - `updatedAt` (timestamp)
 - `deletedAt` (timestamp, nullable for soft deletes)
+
+**Base Columns Serial (Integer-based tables like arrivals, exits, etc.):**
+- `id` (serial integer, primary key)
+- `createdAt` (timestamp)
+- `updatedAt` (timestamp)
+
+**Key Tables:**
+- `users` - User/agent information (synced from Malambi)
+- `vehicles` - Vehicle information (synced from Malambi)
+- `centers` - Center/location information (synced from Malambi)
+- `arrivals` - Vehicle arrival records with QR codes and processing stages
+- `exits` - Vehicle exit records with destination information
+- `incoming_vehicles` - Vehicles in transit between centers
+- `processing_stages` - Multi-stage processing workflows for arrivals
+
+**Relations:**
+- All tables support relational queries via Drizzle ORM
+- Foreign key relationships between vehicles, centers, users, arrivals, exits, and incoming vehicles
+- `createdBy` fields on arrivals, exits, and incoming_vehicles for audit trail
 
 ## 📚 API Documentation
 
@@ -190,40 +231,90 @@ Once the application is running, access the Swagger documentation at:
 
 The Swagger UI provides:
 
-- Interactive API exploration
-- Request/response schemas
-- Authentication testing
-- Dark theme interface
+- **Comprehensive API Description**: Overview, authentication, workflows, and common operations
+- **Interactive API Exploration**: Test endpoints directly from the browser
+- **Request/Response Schemas**: Full DTO definitions with validation rules
+- **Authentication Testing**: Built-in JWT token management
+- **Dark Theme Interface**: Modern, developer-friendly UI
+- **Tag-based Organization**: Endpoints grouped by feature modules
+
+### API Overview
+
+The Swagger documentation includes detailed information about:
+
+- **Overview**: What the API does and its purpose
+- **Key Features**: Core functionality and capabilities
+- **Authentication**: JWT token flow and usage
+- **Data Synchronization**: Malambi integration details
+- **Common Operations**: Workflow examples for arrivals and exits
+- **Pagination & Filtering**: Query parameter usage
+- **Error Handling**: HTTP status codes and error responses
 
 ## 🏗️ Available Modules
 
-### Vehicles
+### Authentication (`/api/v1/auth`)
 
-Manage vehicle information and operations.
+- **Login**: Authenticate with Malambi credentials to receive JWT tokens
+- **Refresh Token**: Obtain new access tokens using refresh tokens
+- **Check**: Verify authentication status
+- **Auto-sync**: User data automatically synced on login via background jobs
 
-### Arrivals
+### Users (`/api/v1/users`)
 
-Track vehicle arrivals at centers.
+- **List Users**: Paginated list with filtering, searching, and sorting
+- **Get User Details**: Retrieve user information by ID or current user (`/me`)
+- **Delete User**: Remove user by internal ID
+- **Data Source**: Synced from Malambi API on login
 
-### Exits
+### Centers (`/api/v1/centers`)
 
-Track vehicle exits from centers.
+- **List Centers**: Paginated list with filtering and relations
+- **Get Center Details**: Retrieve center information by ID
+- **Sync Center**: Trigger background job to sync center from Malambi by geozone ID
+- **Get Centers from API**: Fetch all centers from Malambi API without saving
+- **Delete Center**: Remove center by internal ID
+- **Data Source**: Synced from Malambi API on-demand
 
-### Incoming
+### Vehicles (`/api/v1/vehicles`)
 
-Handle incoming vehicle operations.
+- **List Vehicles**: Paginated list with filtering and relations
+- **Get Vehicle Details**: Retrieve vehicle information by ID
+- **Sync Vehicle**: Trigger background job to sync vehicle from Malambi by vehicle ID
+- **Get Vehicle from API**: Fetch vehicle details from Malambi API without saving
+- **Delete Vehicle**: Remove vehicle by internal ID
+- **Data Source**: Synced from Malambi API on-demand
 
-### Centers
+### Arrivals (`/api/v1/arrivals`)
 
-Manage center/location information.
+- **Create Arrival**: Record vehicle arrival at a center (scan QR code)
+- **List Arrivals**: Paginated list with filtering, searching, and sorting
+- **Get Arrival Details**: Retrieve arrival information with optional relations
+- **Update Status**: Update arrival status
+- **Start Processing Stage**: Create a new processing stage for an arrival
+- **Update Processing Stage**: Update processing stage status and notes
+- **Features**: QR code tracking, GPS coordinates, multi-stage processing workflows
 
-### Users
+### Exits (`/api/v1/exits`)
 
-User management and authentication.
+- **Create Exit**: Record vehicle exit from a center
+- **List Exits**: Paginated list with filtering and relations
+- **Get Exit Details**: Retrieve exit information with optional relations
+- **Update Exit**: Update exit information (destination, notes, etc.)
+- **Delete Exit**: Remove exit by internal ID
+- **Features**: Exit type tracking, destination center/name, GPS coordinates
 
-### Reports
+### Incoming Vehicles (`/api/v1/incoming`)
 
-Generate and manage reports.
+- **Create Incoming Vehicle**: Record vehicle in transit between centers
+- **List Incoming Vehicles**: Paginated list with filtering and relations
+- **Get Incoming Vehicle Details**: Retrieve incoming vehicle information
+- **Update Incoming Vehicle**: Update status, estimated/actual arrival, distance
+- **Delete Incoming Vehicle**: Remove incoming vehicle by internal ID
+- **Features**: Status tracking, arrival estimates, distance calculation
+
+### Reports (`/api/v1/reports`)
+
+Generate and manage reports (coming soon).
 
 ## 🧪 Testing
 
@@ -262,11 +353,24 @@ npm run format          # Format code with Prettier
 ### Code Structure
 
 - **Modules**: Feature-based modules in `src/modules/`
+  - Each module contains: controller, service, DTOs, and optional sync service
 - **Services**: Business logic in `*.service.ts` files
+  - Extend `BaseService` for common CRUD operations
+  - Handle error wrapping and logging
 - **Controllers**: API endpoints in `*.controller.ts` files
+  - Use `@CurrentUserCredentials()` decorator for authenticated user info
+  - Swagger documentation with `@ApiTags` and `@ApiOperation`
 - **DTOs**: Data transfer objects in `dto/` folders
+  - Validation with `class-validator`
+  - Swagger documentation with `@ApiProperty`
 - **Schemas**: Database schemas in `src/modules/schemas/`
+  - Drizzle ORM table definitions
+  - Relations defined in `relations.ts`
 - **Base Service**: Reusable CRUD operations in `src/common/services/base.service.ts`
+- **Background Jobs**: Queue-based processing in `src/common/queue/`
+  - Async data synchronization with Malambi API
+- **Integrations**: Third-party API clients in `src/integrations/`
+  - Malambi API service for external data fetching
 
 ## 🐳 Docker
 
@@ -287,13 +391,27 @@ docker run -p 5001:5000 proof-arrive-api
 - **proof-arrive-api**: The NestJS application
 - **postgres**: PostgreSQL 16 database
 
-## 🔒 Security
+## 🔒 Security & Authentication
+
+### JWT Authentication
+
+The API uses JWT (JSON Web Token) authentication:
+
+- **Access Tokens**: Short-lived tokens (default: 1 hour) for API requests
+- **Refresh Tokens**: Long-lived tokens (default: 3 days) for obtaining new access tokens
+- **Token Format**: `Authorization: Bearer <token>`
+- **Public Endpoints**: Only `/auth/login`, `/auth/refresh-token`, and `/auth/check` are publicly accessible
+- **Global Guard**: All other endpoints require a valid JWT token
+
+### Security Features
 
 - Environment variables for sensitive data
 - CORS configuration for allowed origins
 - Input validation with class-validator
 - Error tracking with Sentry (production)
 - SQL injection protection via Drizzle ORM
+- Audit trail with `createdBy` fields on all records
+- Background job processing for data synchronization
 
 ## 📦 Dependencies
 
@@ -326,6 +444,99 @@ docker run -p 5001:5000 proof-arrive-api
 ## 📄 License
 
 This project is private and proprietary.
+
+## 🔄 Data Synchronization
+
+The API integrates with the **Malambi** third-party system to keep data synchronized:
+
+### Automatic Sync
+
+- **Users**: Automatically synced on login via background jobs if not already present in local database
+- **Last Login Tracking**: User's `lastLoginAt` is updated on each login
+
+### On-Demand Sync
+
+- **Vehicles**: Sync by vehicle ID via `POST /api/v1/vehicles/sync?vehicle_id=xxx`
+- **Centers**: Sync by geozone ID via `POST /api/v1/centers/sync?geozone_id=xxx`
+
+### Background Jobs
+
+All sync operations run asynchronously in the background using a queue system:
+- Jobs are processed by `QueueProcessorService`
+- Prevents blocking API responses
+- Automatic retry on failures
+- Job status tracking
+
+### Fetch Without Saving
+
+- **Vehicles**: `GET /api/v1/vehicles/from-api?vehicle_id=xxx` - Fetch vehicle details without saving
+- **Centers**: `GET /api/v1/centers/from-api` - Fetch all centers from Malambi API without saving
+
+## 📊 Common Workflows
+
+### Arrival Workflow
+
+1. **Create Arrival**: `POST /api/v1/arrivals`
+   - Vehicle arrives at center
+   - QR code scanned (optional)
+   - GPS coordinates recorded (optional)
+   - Status defaults to "arrived"
+
+2. **Start Processing**: `POST /api/v1/arrivals/:id/process`
+   - Create processing stage (e.g., "unloading", "inspection")
+   - Status defaults to "pending"
+   - `startedAt` timestamp set automatically
+
+3. **Update Processing Stage**: `PUT /api/v1/arrivals/:id/process/:stageId`
+   - Update stage status
+   - When status set to "completed", `completedAt` is set automatically
+
+4. **Update Arrival Status**: `PUT /api/v1/arrivals/:id/status`
+   - Change overall arrival status
+
+### Exit Workflow
+
+1. **Create Exit**: `POST /api/v1/exits`
+   - Vehicle exits from center
+   - Exit type specified (e.g., "delivery", "transfer")
+   - Destination center/name recorded (optional)
+   - GPS coordinates recorded (optional)
+
+2. **Create Incoming Vehicle** (if inter-center transfer): `POST /api/v1/incoming`
+   - Link to exit record
+   - Source and destination centers specified
+   - Status defaults to "in_transit"
+   - Estimated arrival time set (optional)
+
+3. **Update Incoming Vehicle**: `PUT /api/v1/incoming/:id`
+   - Update status (e.g., "in_transit", "arrived")
+   - Set actual arrival time when vehicle arrives
+   - Update distance if needed
+
+## 🔍 Query Parameters
+
+Most list endpoints support the following query parameters:
+
+### Pagination
+
+- `page` - Page number (default: 1)
+- `limit` - Items per page (default: 100, max: 1000)
+
+### Search & Filter
+
+- `search` - Search term to match against specified fields
+- `searchBy` - Comma-separated list of fields to search in (e.g., `searchBy=name,plate`)
+- `sortBy` - Comma-separated sort fields (format: `field:direction`, e.g., `sortBy=createdAt:DESC,id:ASC`)
+
+### Relations
+
+- `include` - Comma-separated list of relations to load (e.g., `include=vehicle,center,agent`)
+
+### Example
+
+```
+GET /api/v1/arrivals?page=1&limit=50&search=truck&searchBy=qrCode,notes&sortBy=arrivedAt:DESC&include=vehicle,center
+```
 
 ## 🆘 Support
 
