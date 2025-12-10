@@ -2,26 +2,32 @@ import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { CentersSyncService } from './centers-sync.service';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
-import { PaginateQuery, PaginateResult } from '@common/interfaces';
-import { eq, and, SQL, desc, asc, count, sql } from 'drizzle-orm';
+import { PaginateQuery, PaginateResult, BaseEntity } from '@common/interfaces';
+import { BaseService } from '@common/services/base.service';
+import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 
-type Center = typeof schema.centers.$inferSelect;
+type Center = typeof schema.centers.$inferSelect & BaseEntity;
 
 @Injectable()
-export class CentersService {
+export class CentersService extends BaseService<Center> {
   private readonly logger = new Logger(CentersService.name);
+  private readonly dbConnection: any;
 
   constructor(
     @Inject(DATABASE_CONNECTION)
-    private readonly db: any,
+    db: any,
     private readonly centersSyncService: CentersSyncService,
     private readonly malambiApi: MalambiApiService,
-  ) {}
+  ) {
+    // Note: centers table uses serial ID and no deletedAt, so we pass it but override methods
+    super(db, schema.centers as any);
+    this.dbConnection = db;
+  }
 
   async findAll(
     query: PaginateQuery = {},
-    options?: any,
+    options?: { include?: string[] },
   ): Promise<PaginateResult<Center>> {
     const page = query.page || 1;
     const limit = query.limit || 100;
@@ -70,19 +76,71 @@ export class CentersService {
 
     // Get total count
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-    const [{ count: total }] = await this.db
+    const [{ count: total }] = await this.dbConnection
       .select({ count: count() })
       .from(schema.centers)
       .where(whereClause);
 
-    // Get paginated results
-    const data = await this.db
-      .select()
-      .from(schema.centers)
-      .where(whereClause)
-      .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-      .limit(limit)
-      .offset(offset);
+    // Build relations object for Drizzle query API
+    const withRelations: any = {};
+    if (options?.include) {
+      if (options.include.includes('geozone')) {
+        withRelations.geozone = true;
+      }
+      if (options.include.includes('arrivals')) {
+        withRelations.arrivals = true;
+      }
+      if (options.include.includes('exits')) {
+        withRelations.exits = true;
+      }
+      if (options.include.includes('incomingVehicles')) {
+        withRelations.incomingVehiclesAsDestination = true;
+        withRelations.incomingVehiclesAsSource = true;
+      }
+    }
+
+    // Get paginated results with relations
+    let data: any[];
+    if (Object.keys(withRelations).length > 0) {
+      // When relations are requested, first get the IDs that match the conditions
+      const matchingIds = await this.dbConnection
+        .select({ id: schema.centers.id })
+        .from(schema.centers)
+        .where(whereClause)
+        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+        .limit(limit)
+        .offset(offset);
+
+      const ids = matchingIds.map((row: any) => row.id);
+
+      if (ids.length > 0) {
+        // Use relational query API to get data with relations
+        // Drizzle query API where clause uses operators from drizzle-orm
+        const allData = await this.dbConnection.query.centers.findMany({
+          where: (centers: any, { inArray: inArrayFn }: any) => inArrayFn(centers.id, ids),
+          with: withRelations,
+        });
+        // Re-sort to match original order
+        const idMap = new Map<number, number>(ids.map((id: number, idx: number) => [id, idx]));
+        allData.sort((a: any, b: any) => {
+          const aIdx: number = idMap.get(a.id) ?? 0;
+          const bIdx: number = idMap.get(b.id) ?? 0;
+          return aIdx - bIdx;
+        });
+        data = allData;
+      } else {
+        data = [];
+      }
+    } else {
+      // Use standard query when no relations
+      data = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(whereClause)
+        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+        .limit(limit)
+        .offset(offset);
+    }
 
     return {
       data: data as Center[],
@@ -105,12 +163,42 @@ export class CentersService {
     };
   }
 
-  async findOneById(id: number): Promise<Center> {
-    const [center] = await this.db
-      .select()
-      .from(schema.centers)
-      .where(eq(schema.centers.id, id))
-      .limit(1);
+  // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
+  async findOneById(id: number | string, options?: { include?: string[] }): Promise<Center> {
+    const numericId = typeof id === 'string' ? Number(id) : id;
+    // Build relations object for Drizzle query API
+    const withRelations: any = {};
+    if (options?.include) {
+      if (options.include.includes('geozone')) {
+        withRelations.geozone = true;
+      }
+      if (options.include.includes('arrivals')) {
+        withRelations.arrivals = true;
+      }
+      if (options.include.includes('exits')) {
+        withRelations.exits = true;
+      }
+      if (options.include.includes('incomingVehicles')) {
+        withRelations.incomingVehiclesAsDestination = true;
+        withRelations.incomingVehiclesAsSource = true;
+      }
+    }
+
+    let center: any;
+    if (Object.keys(withRelations).length > 0) {
+      // Use relational query API when relations are requested
+      center = await this.dbConnection.query.centers.findFirst({
+        where: (centers: any, { eq: eqFn }: any) => eqFn(centers.id, numericId),
+        with: withRelations,
+      });
+    } else {
+      // Use standard query when no relations
+      [center] = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(eq(schema.centers.id, numericId))
+        .limit(1);
+    }
 
     if (!center) {
       throw new NotFoundException('Center not found');
@@ -129,7 +217,7 @@ export class CentersService {
       })
       .filter(Boolean) as any[];
 
-    const [center] = await this.db
+    const [center] = await this.dbConnection
       .select()
       .from(schema.centers)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -139,6 +227,20 @@ export class CentersService {
       throw new NotFoundException('Center not found');
     }
     return center as Center;
+  }
+
+  // Override BaseService.remove to handle number IDs (serial) instead of string IDs (UUID)
+  async remove(id: number | string): Promise<Center> {
+    const numericId = typeof id === 'string' ? Number(id) : id;
+    // First check if center exists
+    const center = await this.findOneById(numericId);
+    
+    // Delete the center
+    await this.dbConnection
+      .delete(schema.centers)
+      .where(eq(schema.centers.id, numericId));
+
+    return center;
   }
 
   /**

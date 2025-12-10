@@ -23,8 +23,10 @@ export class VehiclesController {
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles)' })
   async findAll(
     @Query() filterDto: FilterVehiclesDto,
+    @Query('include') include?: string,
   ): Promise<PaginateResult<Vehicle>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -39,7 +41,11 @@ export class VehiclesController {
         : undefined,
     };
 
-    return this.vehiclesService.findAll(query);
+    const options = {
+      include: include ? include.split(',') : undefined,
+    };
+
+    return this.vehiclesService.findAll(query, options);
   }
 
   @Get('from-api')
@@ -69,8 +75,15 @@ export class VehiclesController {
     summary: 'Get vehicle details by ID',
     description: 'Provides access to view the details of a specific vehicle by its internal ID (serial integer).',
   })
-  async findOneById(@Param('id') id: string): Promise<Vehicle> {
-    return this.vehiclesService.findOneById(Number(id));
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles)' })
+  async findOneById(
+    @Param('id') id: string,
+    @Query('include') include?: string,
+  ): Promise<Vehicle> {
+    const options = {
+      include: include ? include.split(',') : undefined,
+    };
+    return this.vehiclesService.findOneById(Number(id), options);
   }
 
   @Post('sync')

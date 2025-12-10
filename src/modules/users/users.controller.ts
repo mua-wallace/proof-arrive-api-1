@@ -30,8 +30,10 @@ export class UsersController {
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits)' })
   async findAllWithFilter(
     @Query() filterDto: FilterUsersDto,
+    @Query('include') include?: string,
   ): Promise<PaginateResult<User>> {
     const query: PaginateQuery = {
       page: filterDto.page ?? 1,
@@ -46,9 +48,9 @@ export class UsersController {
         : undefined,
     };
 
-    // Note: filter object cannot be passed as query param easily, 
-    // so we'll skip it for query params. If needed, use POST with body.
-    const options = undefined;
+    const options = {
+      include: include ? include.split(',') : undefined,
+    };
 
     return this.usersService.findAll(query, options);
   }
@@ -70,8 +72,15 @@ export class UsersController {
   @ApiOperation({
     summary: 'Get user details by ID (UUID)',
   })
-  async findOneById(@Param('id') id: string): Promise<User> {
-    return this.usersService.findOneById(id);
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits)' })
+  async findOneById(
+    @Param('id') id: string,
+    @Query('include') include?: string,
+  ): Promise<User> {
+    const options = {
+      include: include ? include.split(',') : undefined,
+    };
+    return this.usersService.findOneById(id, options);
   }
 
   @Delete(':id')

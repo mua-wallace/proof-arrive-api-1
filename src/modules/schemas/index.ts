@@ -9,3 +9,4 @@ export * from './arrivals.schema';
 export * from './processing-stages.schema';
 export * from './exits.schema';
 export * from './incoming-vehicles.schema';
+export * from './relations';

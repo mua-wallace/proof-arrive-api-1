@@ -23,8 +23,10 @@ export class CentersController {
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, arrivals, exits, incomingVehicles)' })
   async findAll(
     @Query() filterDto: FilterCentersDto,
+    @Query('include') include?: string,
   ): Promise<PaginateResult<Center>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -39,7 +41,11 @@ export class CentersController {
         : undefined,
     };
 
-    return this.centersService.findAll(query);
+    const options = {
+      include: include ? include.split(',') : undefined,
+    };
+
+    return this.centersService.findAll(query, options);
   }
 
   @Get('from-api')
@@ -73,8 +79,15 @@ export class CentersController {
     summary: 'Get center details by ID',
     description: 'Provides access to view the details of a specific center by its internal ID (serial integer).',
   })
-  async findOneById(@Param('id') id: string): Promise<Center> {
-    return this.centersService.findOneById(Number(id));
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, arrivals, exits, incomingVehicles)' })
+  async findOneById(
+    @Param('id') id: string,
+    @Query('include') include?: string,
+  ): Promise<Center> {
+    const options = {
+      include: include ? include.split(',') : undefined,
+    };
+    return this.centersService.findOneById(Number(id), options);
   }
 
   @Post('sync')

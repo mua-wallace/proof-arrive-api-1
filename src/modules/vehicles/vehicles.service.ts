@@ -2,26 +2,32 @@ import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { VehiclesSyncService } from './vehicles-sync.service';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
-import { PaginateQuery, PaginateResult } from '@common/interfaces';
-import { eq, and, SQL, desc, asc, count, sql } from 'drizzle-orm';
+import { PaginateQuery, PaginateResult, BaseEntity } from '@common/interfaces';
+import { BaseService } from '@common/services/base.service';
+import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 
-type Vehicle = typeof schema.vehicles.$inferSelect;
+type Vehicle = typeof schema.vehicles.$inferSelect & BaseEntity;
 
 @Injectable()
-export class VehiclesService {
+export class VehiclesService extends BaseService<Vehicle> {
   private readonly logger = new Logger(VehiclesService.name);
+  private readonly dbConnection: any;
 
   constructor(
     @Inject(DATABASE_CONNECTION)
-    private readonly db: any,
+    db: any,
     private readonly vehiclesSyncService: VehiclesSyncService,
     private readonly malambiApi: MalambiApiService,
-  ) {}
+  ) {
+    // Note: vehicles table uses serial ID and no deletedAt, so we pass it but override methods
+    super(db, schema.vehicles as any);
+    this.dbConnection = db;
+  }
 
   async findAll(
     query: PaginateQuery = {},
-    options?: any,
+    options?: { include?: string[] },
   ): Promise<PaginateResult<Vehicle>> {
     const page = query.page || 1;
     const limit = query.limit || 100;
@@ -70,19 +76,66 @@ export class VehiclesService {
 
     // Get total count
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-    const [{ count: total }] = await this.db
+    const [{ count: total }] = await this.dbConnection
       .select({ count: count() })
       .from(schema.vehicles)
       .where(whereClause);
 
-    // Get paginated results
-    const data = await this.db
-      .select()
-      .from(schema.vehicles)
-      .where(whereClause)
-      .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-      .limit(limit)
-      .offset(offset);
+    // Build relations object for Drizzle query API
+    const withRelations: any = {};
+    if (options?.include) {
+      if (options.include.includes('arrivals')) {
+        withRelations.arrivals = true;
+      }
+      if (options.include.includes('exits')) {
+        withRelations.exits = true;
+      }
+      if (options.include.includes('incomingVehicles')) {
+        withRelations.incomingVehicles = true;
+      }
+    }
+
+    // Get paginated results with relations
+    let data: any[];
+    if (Object.keys(withRelations).length > 0) {
+      // When relations are requested, first get the IDs that match the conditions
+      const matchingIds = await this.dbConnection
+        .select({ id: schema.vehicles.id })
+        .from(schema.vehicles)
+        .where(whereClause)
+        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+        .limit(limit)
+        .offset(offset);
+
+      const ids = matchingIds.map((row: any) => row.id);
+
+      if (ids.length > 0) {
+        // Use relational query API to get data with relations
+        const allData = await this.dbConnection.query.vehicles.findMany({
+          where: (vehicles: any, { inArray: inArrayFn }: any) => inArrayFn(vehicles.id, ids),
+          with: withRelations,
+        });
+        // Re-sort to match original order
+        const idMap = new Map<number, number>(ids.map((id: number, idx: number) => [id, idx]));
+        allData.sort((a: any, b: any) => {
+          const aIdx: number = idMap.get(a.id) ?? 0;
+          const bIdx: number = idMap.get(b.id) ?? 0;
+          return aIdx - bIdx;
+        });
+        data = allData;
+      } else {
+        data = [];
+      }
+    } else {
+      // Use standard query when no relations
+      data = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(whereClause)
+        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+        .limit(limit)
+        .offset(offset);
+    }
 
     return {
       data: data as Vehicle[],
@@ -105,12 +158,38 @@ export class VehiclesService {
     };
   }
 
-  async findOneById(id: number): Promise<Vehicle> {
-    const [vehicle] = await this.db
-      .select()
-      .from(schema.vehicles)
-      .where(eq(schema.vehicles.id, id))
-      .limit(1);
+  // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
+  async findOneById(id: number | string, options?: { include?: string[] }): Promise<Vehicle> {
+    const numericId = typeof id === 'string' ? Number(id) : id;
+    // Build relations object for Drizzle query API
+    const withRelations: any = {};
+    if (options?.include) {
+      if (options.include.includes('arrivals')) {
+        withRelations.arrivals = true;
+      }
+      if (options.include.includes('exits')) {
+        withRelations.exits = true;
+      }
+      if (options.include.includes('incomingVehicles')) {
+        withRelations.incomingVehicles = true;
+      }
+    }
+
+    let vehicle: any;
+    if (Object.keys(withRelations).length > 0) {
+      // Use relational query API when relations are requested
+      vehicle = await this.dbConnection.query.vehicles.findFirst({
+        where: (vehicles: any, { eq: eqFn }: any) => eqFn(vehicles.id, numericId),
+        with: withRelations,
+      });
+    } else {
+      // Use standard query when no relations
+      [vehicle] = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(eq(schema.vehicles.id, numericId))
+        .limit(1);
+    }
 
     if (!vehicle) {
       throw new NotFoundException('Vehicle not found');
@@ -129,7 +208,7 @@ export class VehiclesService {
       })
       .filter(Boolean) as any[];
 
-    const [vehicle] = await this.db
+    const [vehicle] = await this.dbConnection
       .select()
       .from(schema.vehicles)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -167,16 +246,17 @@ export class VehiclesService {
   }
 
   /**
-   * Remove vehicle by ID
+   * Override BaseService.remove to handle number IDs (serial) instead of string IDs (UUID)
    */
-  async remove(id: number): Promise<Vehicle> {
+  async remove(id: number | string): Promise<Vehicle> {
+    const numericId = typeof id === 'string' ? Number(id) : id;
     // First check if vehicle exists
-    const vehicle = await this.findOneById(id);
+    const vehicle = await this.findOneById(numericId);
     
     // Delete the vehicle
-    await this.db
+    await this.dbConnection
       .delete(schema.vehicles)
-      .where(eq(schema.vehicles.id, id));
+      .where(eq(schema.vehicles.id, numericId));
 
     return vehicle;
   }
