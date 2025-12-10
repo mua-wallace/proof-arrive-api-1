@@ -13,5 +13,6 @@ export default defineConfig({
     user: config.database.username || 'postgres',
     password: config.database.password || 'postgres',
     database: config.database.name || 'proof_arrive',
+    ssl: false,
   },
 });

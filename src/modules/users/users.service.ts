@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger, InternalServerErrorException } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import * as schema from '@modules/schemas';
 import { BaseService } from '@common/services/base.service';
@@ -24,11 +24,21 @@ export class UsersService extends BaseService<User> {
     query: PaginateQuery = {},
     options?: { include?: string[] },
   ): Promise<PaginateResult<User>> {
-    // If relations are requested, use custom implementation
-    if (options?.include && options.include.length > 0) {
-      return this.findAllWithRelations(query, options);
+    this.logger.log(`Fetching all users with query: ${JSON.stringify(query)}`);
+    
+    try {
+      // If relations are requested, use custom implementation
+      if (options?.include && options.include.length > 0) {
+        return await this.findAllWithRelations(query, options);
+      }
+      return await super.findAll(query, options);
+    } catch (error: any) {
+      this.logger.error(`Failed to fetch users: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to fetch users: ${error?.message || 'Unknown error occurred'}`,
+      );
     }
-    return super.findAll(query, options);
   }
 
   private async findAllWithRelations(
@@ -162,68 +172,142 @@ export class UsersService extends BaseService<User> {
   }
 
   async findOneById(id: string, options?: { include?: string[] }): Promise<User> {
-    // Build relations object for Drizzle query API
-    const withRelations: any = {};
-    if (options?.include) {
-      if (options.include.includes('arrivals')) {
-        withRelations.arrivals = true;
-      }
-      if (options.include.includes('exits')) {
-        withRelations.exits = true;
-      }
+    this.logger.log(`Fetching user with id=${id}`);
+
+    if (!id) {
+      throw new NotFoundException(`Invalid user ID: ${id}`);
     }
 
-    let user: any;
-    if (Object.keys(withRelations).length > 0) {
-      // Use relational query API when relations are requested
-      user = await this.dbConnection.query.users.findFirst({
-        where: (users: any, { eq: eqFn }: any) => eqFn(users.id, id),
-        with: withRelations,
-      });
-    } else {
-      // Use standard query when no relations
-      user = await super.findOneById(id);
-    }
+    try {
+      // Build relations object for Drizzle query API
+      const withRelations: any = {};
+      if (options?.include) {
+        if (options.include.includes('arrivals')) {
+          withRelations.arrivals = true;
+        }
+        if (options.include.includes('exits')) {
+          withRelations.exits = true;
+        }
+      }
 
-    if (!user) {
-      throw new NotFoundException('User not found');
+      let user: any;
+      if (Object.keys(withRelations).length > 0) {
+        // Use relational query API when relations are requested
+        user = await this.dbConnection.query.users.findFirst({
+          where: (users: any, { eq: eqFn }: any) => eqFn(users.id, id),
+          with: withRelations,
+        });
+      } else {
+        // Use standard query when no relations
+        user = await super.findOneById(id);
+      }
+
+      if (!user) {
+        throw new NotFoundException(`User with ID ${id} not found`);
+      }
+      return user;
+    } catch (error: any) {
+      this.logger.error(`Failed to fetch user with id=${id}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to get user details: ${error?.message || 'Unknown error occurred'}`,
+      );
     }
-    return user;
   }
 
   async findOneBy(requestData: any): Promise<User> {
-    const user = await super.findOneBy(requestData);
-    if (!user) {
-      throw new NotFoundException('User not found');
+    this.logger.log(`Finding user by criteria: ${JSON.stringify(requestData)}`);
+
+    try {
+      if (!requestData || Object.keys(requestData).length === 0) {
+        throw new NotFoundException('No search criteria provided');
+      }
+
+      const user = await super.findOneBy(requestData);
+      if (!user) {
+        throw new NotFoundException(`User not found with criteria: ${JSON.stringify(requestData)}`);
+      }
+      return user;
+    } catch (error: any) {
+      this.logger.error(`Failed to find user by criteria: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to find user: ${error?.message || 'Unknown error occurred'}`,
+      );
     }
-    return user;
   }
 
   async findByUsername(username: string): Promise<User> {
-    const user = await this.findOneBy({ username } as any);
-    if (!user) {
-      throw new NotFoundException('User not found');
+    this.logger.log(`Finding user by username=${username}`);
+
+    if (!username) {
+      throw new NotFoundException('Username is required');
     }
-    return user;
+
+    try {
+      return await this.findOneBy({ username } as any);
+    } catch (error: any) {
+      this.logger.error(`Failed to find user by username=${username}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to find user by username: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
   }
 
   async findByAccid(accid: string): Promise<User> {
-    const user = await this.findOneBy({ accid } as any);
-    if (!user) {
-      throw new NotFoundException('User not found');
+    this.logger.log(`Finding user by accid=${accid}`);
+
+    if (!accid) {
+      throw new NotFoundException('Accid is required');
     }
-    return user;
+
+    try {
+      return await this.findOneBy({ accid } as any);
+    } catch (error: any) {
+      this.logger.error(`Failed to find user by accid=${accid}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to find user by accid: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
   }
 
   async findByAccidAndSubid(accid: string, subid: string): Promise<User> {
-    const user = await this.findOneBy({ accid, subid } as any);
-    if (!user) {
-      throw new NotFoundException('User not found');
+    this.logger.log(`Finding user by accid=${accid}, subid=${subid}`);
+
+    if (!accid || !subid) {
+      throw new NotFoundException('Accid and subid are required');
     }
-    return user;
+
+    try {
+      return await this.findOneBy({ accid, subid } as any);
+    } catch (error: any) {
+      this.logger.error(`Failed to find user by accid=${accid}, subid=${subid}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to find user by accid and subid: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
   }
 
   async remove(id: string): Promise<User> {
-    return super.remove(id);
+    this.logger.log(`Removing user with id=${id}`);
+
+    if (!id) {
+      throw new NotFoundException(`Invalid user ID: ${id}`);
+    }
+
+    try {
+      const user = await super.remove(id);
+      this.logger.log(`Successfully removed user with id=${id}`);
+      return user;
+    } catch (error: any) {
+      this.logger.error(`Failed to remove user with id=${id}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to remove user: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
   }
 }

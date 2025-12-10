@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { VehiclesSyncService } from './vehicles-sync.service';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
@@ -29,195 +29,233 @@ export class VehiclesService extends BaseService<Vehicle> {
     query: PaginateQuery = {},
     options?: { include?: string[] },
   ): Promise<PaginateResult<Vehicle>> {
-    const page = query.page || 1;
-    const limit = query.limit || 100;
-    const offset = (page - 1) * limit;
+    this.logger.log(`Fetching all vehicles with query: ${JSON.stringify(query)}`);
+    
+    try {
+      const page = query.page || 1;
+      const limit = query.limit || 100;
+      const offset = (page - 1) * limit;
 
-    // Build where conditions (vehicles don't have deletedAt)
-    const conditions: SQL[] = [];
+      // Build where conditions (vehicles don't have deletedAt)
+      const conditions: SQL[] = [];
 
-    // Add search functionality
-    if (query.search && query.searchBy && query.searchBy.length > 0) {
-      const searchConditions = query.searchBy
-        .map((field) => {
+      // Add search functionality
+      if (query.search && query.searchBy && query.searchBy.length > 0) {
+        const searchConditions = query.searchBy
+          .map((field) => {
+            const column = (schema.vehicles as any)[field];
+            if (column) {
+              return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+            }
+            return null;
+          })
+          .filter(Boolean) as SQL[];
+
+        if (searchConditions.length > 0) {
+          conditions.push(sql`(${sql.join(searchConditions, sql` OR `)})`);
+        }
+      }
+
+      // Build order by
+      let orderByClause: any;
+      if (query.sortBy && query.sortBy.length > 0) {
+        const sortFields = query.sortBy.map(([field, direction]) => {
           const column = (schema.vehicles as any)[field];
           if (column) {
-            return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+            return direction === 'DESC' ? desc(column) : asc(column);
           }
           return null;
-        })
-        .filter(Boolean) as SQL[];
+        }).filter(Boolean);
 
-      if (searchConditions.length > 0) {
-        conditions.push(sql`(${sql.join(searchConditions, sql` OR `)})`);
-      }
-    }
-
-    // Build order by
-    let orderByClause: any;
-    if (query.sortBy && query.sortBy.length > 0) {
-      const sortFields = query.sortBy.map(([field, direction]) => {
-        const column = (schema.vehicles as any)[field];
-        if (column) {
-          return direction === 'DESC' ? desc(column) : asc(column);
+        if (sortFields.length > 0) {
+          orderByClause = sortFields;
         }
-        return null;
-      }).filter(Boolean);
-
-      if (sortFields.length > 0) {
-        orderByClause = sortFields;
       }
-    }
 
-    // Default ordering by createdAt DESC if no sort specified
-    if (!orderByClause) {
-      orderByClause = [desc(schema.vehicles.createdAt)];
-    }
-
-    // Get total count
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-    const [{ count: total }] = await this.dbConnection
-      .select({ count: count() })
-      .from(schema.vehicles)
-      .where(whereClause);
-
-    // Build relations object for Drizzle query API
-    const withRelations: any = {};
-    if (options?.include) {
-      if (options.include.includes('arrivals')) {
-        withRelations.arrivals = true;
+      // Default ordering by createdAt DESC if no sort specified
+      if (!orderByClause) {
+        orderByClause = [desc(schema.vehicles.createdAt)];
       }
-      if (options.include.includes('exits')) {
-        withRelations.exits = true;
-      }
-      if (options.include.includes('incomingVehicles')) {
-        withRelations.incomingVehicles = true;
-      }
-    }
 
-    // Get paginated results with relations
-    let data: any[];
-    if (Object.keys(withRelations).length > 0) {
-      // When relations are requested, first get the IDs that match the conditions
-      const matchingIds = await this.dbConnection
-        .select({ id: schema.vehicles.id })
+      // Get total count
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const [{ count: total }] = await this.dbConnection
+        .select({ count: count() })
         .from(schema.vehicles)
-        .where(whereClause)
-        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-        .limit(limit)
-        .offset(offset);
+        .where(whereClause);
 
-      const ids = matchingIds.map((row: any) => row.id);
+      // Build relations object for Drizzle query API
+      const withRelations: any = {};
+      if (options?.include) {
+        if (options.include.includes('arrivals')) {
+          withRelations.arrivals = true;
+        }
+        if (options.include.includes('exits')) {
+          withRelations.exits = true;
+        }
+        if (options.include.includes('incomingVehicles')) {
+          withRelations.incomingVehicles = true;
+        }
+      }
 
-      if (ids.length > 0) {
-        // Use relational query API to get data with relations
-        const allData = await this.dbConnection.query.vehicles.findMany({
-          where: (vehicles: any, { inArray: inArrayFn }: any) => inArrayFn(vehicles.id, ids),
-          with: withRelations,
-        });
-        // Re-sort to match original order
-        const idMap = new Map<number, number>(ids.map((id: number, idx: number) => [id, idx]));
-        allData.sort((a: any, b: any) => {
-          const aIdx: number = idMap.get(a.id) ?? 0;
-          const bIdx: number = idMap.get(b.id) ?? 0;
-          return aIdx - bIdx;
-        });
-        data = allData;
+      // Get paginated results with relations
+      let data: any[];
+      if (Object.keys(withRelations).length > 0) {
+        // When relations are requested, first get the IDs that match the conditions
+        const matchingIds = await this.dbConnection
+          .select({ id: schema.vehicles.id })
+          .from(schema.vehicles)
+          .where(whereClause)
+          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+          .limit(limit)
+          .offset(offset);
+
+        const ids = matchingIds.map((row: any) => row.id);
+
+        if (ids.length > 0) {
+          // Use relational query API to get data with relations
+          const allData = await this.dbConnection.query.vehicles.findMany({
+            where: (vehicles: any, { inArray: inArrayFn }: any) => inArrayFn(vehicles.id, ids),
+            with: withRelations,
+          });
+          // Re-sort to match original order
+          const idMap = new Map<number, number>(ids.map((id: number, idx: number) => [id, idx]));
+          allData.sort((a: any, b: any) => {
+            const aIdx: number = idMap.get(a.id) ?? 0;
+            const bIdx: number = idMap.get(b.id) ?? 0;
+            return aIdx - bIdx;
+          });
+          data = allData;
+        } else {
+          data = [];
+        }
       } else {
-        data = [];
+        // Use standard query when no relations
+        data = await this.dbConnection
+          .select()
+          .from(schema.vehicles)
+          .where(whereClause)
+          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+          .limit(limit)
+          .offset(offset);
       }
-    } else {
-      // Use standard query when no relations
-      data = await this.dbConnection
-        .select()
-        .from(schema.vehicles)
-        .where(whereClause)
-        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-        .limit(limit)
-        .offset(offset);
-    }
 
-    return {
-      data: data as Vehicle[],
-      meta: {
-        itemsPerPage: limit,
-        totalItems: total,
-        currentPage: page,
-        totalPages: Math.ceil(total / limit),
-        sortBy: query.sortBy || [],
-        search: query.search,
-        searchBy: query.searchBy,
-      },
-      links: {
-        first: page > 1 ? `?page=1&limit=${limit}` : undefined,
-        previous: page > 1 ? `?page=${page - 1}&limit=${limit}` : undefined,
-        current: `?page=${page}&limit=${limit}`,
-        next: page < Math.ceil(total / limit) ? `?page=${page + 1}&limit=${limit}` : undefined,
-        last: page < Math.ceil(total / limit) ? `?page=${Math.ceil(total / limit)}&limit=${limit}` : undefined,
-      },
-    };
+      return {
+        data: data as Vehicle[],
+        meta: {
+          itemsPerPage: limit,
+          totalItems: total,
+          currentPage: page,
+          totalPages: Math.ceil(total / limit),
+          sortBy: query.sortBy || [],
+          search: query.search,
+          searchBy: query.searchBy,
+        },
+        links: {
+          first: page > 1 ? `?page=1&limit=${limit}` : undefined,
+          previous: page > 1 ? `?page=${page - 1}&limit=${limit}` : undefined,
+          current: `?page=${page}&limit=${limit}`,
+          next: page < Math.ceil(total / limit) ? `?page=${page + 1}&limit=${limit}` : undefined,
+          last: page < Math.ceil(total / limit) ? `?page=${Math.ceil(total / limit)}&limit=${limit}` : undefined,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to fetch vehicles: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to fetch vehicles: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
   }
 
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
   async findOneById(id: number | string, options?: { include?: string[] }): Promise<Vehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    // Build relations object for Drizzle query API
-    const withRelations: any = {};
-    if (options?.include) {
-      if (options.include.includes('arrivals')) {
-        withRelations.arrivals = true;
-      }
-      if (options.include.includes('exits')) {
-        withRelations.exits = true;
-      }
-      if (options.include.includes('incomingVehicles')) {
-        withRelations.incomingVehicles = true;
-      }
+    this.logger.log(`Fetching vehicle with id=${numericId}`);
+
+    if (!numericId || isNaN(numericId)) {
+      throw new NotFoundException(`Invalid vehicle ID: ${id}`);
     }
 
-    let vehicle: any;
-    if (Object.keys(withRelations).length > 0) {
-      // Use relational query API when relations are requested
-      vehicle = await this.dbConnection.query.vehicles.findFirst({
-        where: (vehicles: any, { eq: eqFn }: any) => eqFn(vehicles.id, numericId),
-        with: withRelations,
-      });
-    } else {
-      // Use standard query when no relations
-      [vehicle] = await this.dbConnection
-        .select()
-        .from(schema.vehicles)
-        .where(eq(schema.vehicles.id, numericId))
-        .limit(1);
-    }
+    try {
+      // Build relations object for Drizzle query API
+      const withRelations: any = {};
+      if (options?.include) {
+        if (options.include.includes('arrivals')) {
+          withRelations.arrivals = true;
+        }
+        if (options.include.includes('exits')) {
+          withRelations.exits = true;
+        }
+        if (options.include.includes('incomingVehicles')) {
+          withRelations.incomingVehicles = true;
+        }
+      }
 
-    if (!vehicle) {
-      throw new NotFoundException('Vehicle not found');
+      let vehicle: any;
+      if (Object.keys(withRelations).length > 0) {
+        // Use relational query API when relations are requested
+        vehicle = await this.dbConnection.query.vehicles.findFirst({
+          where: (vehicles: any, { eq: eqFn }: any) => eqFn(vehicles.id, numericId),
+          with: withRelations,
+        });
+      } else {
+        // Use standard query when no relations
+        [vehicle] = await this.dbConnection
+          .select()
+          .from(schema.vehicles)
+          .where(eq(schema.vehicles.id, numericId))
+          .limit(1);
+      }
+
+      if (!vehicle) {
+        throw new NotFoundException(`Vehicle with ID ${numericId} not found`);
+      }
+      return vehicle as Vehicle;
+    } catch (error: any) {
+      this.logger.error(`Failed to fetch vehicle with id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to get vehicle details: ${error?.message || 'Unknown error occurred'}`,
+      );
     }
-    return vehicle as Vehicle;
   }
 
   async findOneBy(requestData: any): Promise<Vehicle> {
-    const conditions = Object.entries(requestData)
-      .map(([key, value]) => {
-        const column = (schema.vehicles as any)[key];
-        if (column && value !== undefined) {
-          return eq(column, value as any);
-        }
-        return null;
-      })
-      .filter(Boolean) as any[];
+    this.logger.log(`Finding vehicle by criteria: ${JSON.stringify(requestData)}`);
 
-    const [vehicle] = await this.dbConnection
-      .select()
-      .from(schema.vehicles)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .limit(1);
+    try {
+      const conditions = Object.entries(requestData)
+        .map(([key, value]) => {
+          const column = (schema.vehicles as any)[key];
+          if (column && value !== undefined) {
+            return eq(column, value as any);
+          }
+          return null;
+        })
+        .filter(Boolean) as any[];
 
-    if (!vehicle) {
-      throw new NotFoundException('Vehicle not found');
+      if (conditions.length === 0) {
+        throw new NotFoundException('No search criteria provided');
+      }
+
+      const [vehicle] = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .limit(1);
+
+      if (!vehicle) {
+        throw new NotFoundException(`Vehicle not found with criteria: ${JSON.stringify(requestData)}`);
+      }
+      return vehicle as Vehicle;
+    } catch (error: any) {
+      this.logger.error(`Failed to find vehicle by criteria: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to find vehicle: ${error?.message || 'Unknown error occurred'}`,
+      );
     }
-    return vehicle as Vehicle;
   }
 
   /**
@@ -230,7 +268,27 @@ export class VehiclesService extends BaseService<Vehicle> {
     subId: string,
     vehicleId: string,
   ) {
-    return this.vehiclesSyncService.syncVehicleByVehicleId(token, accId, subId, vehicleId);
+    this.logger.log(`Syncing vehicle by vehicleId=${vehicleId}`);
+
+    if (!token || !accId || !subId) {
+      throw new UnauthorizedException(
+        'Unauthorized. Please make sure you are logged in correctly',
+      );
+    }
+
+    if (!vehicleId) {
+      throw new NotFoundException(`Invalid vehicle ID: ${vehicleId}`);
+    }
+
+    try {
+      return await this.vehiclesSyncService.syncVehicleByVehicleId(token, accId, subId, vehicleId);
+    } catch (error: any) {
+      this.logger.error(`Failed to sync vehicle by vehicleId=${vehicleId}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException || error instanceof UnauthorizedException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to sync vehicle: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
   }
 
   /**
@@ -242,7 +300,31 @@ export class VehiclesService extends BaseService<Vehicle> {
     subId: string,
     vehicleId: string,
   ) {
-    return this.malambiApi.getVehicleDetail(token, accId, subId, vehicleId);
+    this.logger.log(`Fetching vehicle from API with vehicleId=${vehicleId}`);
+
+    if (!token || !accId || !subId) {
+      throw new UnauthorizedException(
+        'Unauthorized. Please make sure you are logged in correctly',
+      );
+    }
+
+    if (!vehicleId) {
+      throw new NotFoundException(`Invalid vehicle ID: ${vehicleId}`);
+    }
+
+    try {
+      const vehicle = await this.malambiApi.getVehicleDetail(token, accId, subId, vehicleId);
+      if (!vehicle) {
+        throw new NotFoundException(`Vehicle with ID ${vehicleId} not found from Malambi API`);
+      }
+      return vehicle;
+    } catch (error: any) {
+      this.logger.error(`Failed to get vehicle from API with vehicleId=${vehicleId}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException || error instanceof UnauthorizedException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to get vehicle from API: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
   }
 
   /**
@@ -250,15 +332,30 @@ export class VehiclesService extends BaseService<Vehicle> {
    */
   async remove(id: number | string): Promise<Vehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    // First check if vehicle exists
-    const vehicle = await this.findOneById(numericId);
-    
-    // Delete the vehicle
-    await this.dbConnection
-      .delete(schema.vehicles)
-      .where(eq(schema.vehicles.id, numericId));
+    this.logger.log(`Removing vehicle with id=${numericId}`);
 
-    return vehicle;
+    if (!numericId || isNaN(numericId)) {
+      throw new NotFoundException(`Invalid vehicle ID: ${id}`);
+    }
+
+    try {
+      // First check if vehicle exists
+      const vehicle = await this.findOneById(numericId);
+      
+      // Delete the vehicle
+      await this.dbConnection
+        .delete(schema.vehicles)
+        .where(eq(schema.vehicles.id, numericId));
+
+      this.logger.log(`Successfully removed vehicle with id=${numericId}`);
+      return vehicle;
+    } catch (error: any) {
+      this.logger.error(`Failed to remove vehicle with id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to remove vehicle: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
   }
 }
 
