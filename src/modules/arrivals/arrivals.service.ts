@@ -8,8 +8,7 @@ import { CreateArrivalDto } from './dto/create-arrival.dto';
 import { UpdateArrivalStatusDto } from './dto/update-arrival-status.dto';
 import { CreateProcessingStageDto } from './dto/create-processing-stage.dto';
 import { UpdateProcessingStageDto } from './dto/update-processing-stage.dto';
-import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-credentials.decorator';
-import { Credentials } from '@common/interfaces';
+
 
 type Arrival = typeof schema.arrivals.$inferSelect & BaseEntity;
 type ProcessingStage = typeof schema.processingStages.$inferSelect & BaseEntity;
@@ -276,6 +275,7 @@ export class ArrivalsService extends BaseService<Arrival> {
           vehicleId: createDto.vehicleId,
           centerId: createDto.centerId,
           agentId: agentId,
+          createdBy: agentId, // The logged-in user who created the record
           qrCode: createDto.qrCode || null,
           status: createDto.status || 'arrived',
           latitude: createDto.latitude || null,

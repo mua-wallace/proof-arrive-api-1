@@ -78,7 +78,7 @@ async function bootstrap() {
         .addTag('Vehicles', 'API for managing vehicles')
         .addTag('Arrivals', 'API for tracking vehicle arrivals')
         .addTag('Exits', 'API for tracking vehicle exits')
-        .addTag('Incoming', 'API for managing incoming operations')
+        .addTag('Incoming Vehicles', 'API for managing incoming operations')
         .addTag('Reports', 'API for generating and managing reports')
         .addBearerAuth(
           {

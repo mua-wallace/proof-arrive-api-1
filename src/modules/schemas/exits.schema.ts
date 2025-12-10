@@ -10,6 +10,7 @@ export const exits = pgTable('exits', {
   vehicleId: integer('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
   centerId: integer('center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
   agentId: text('agent_id').notNull().references(() => users.accid, { onDelete: 'restrict' }),
+  createdBy: text('created_by').notNull().references(() => users.accid, { onDelete: 'restrict' }),
   exitType: varchar('exit_type', { length: 50 }).notNull(),
   destinationCenterId: integer('destination_center_id').references(() => centers.id, { onDelete: 'set null' }),
   destinationName: varchar('destination_name', { length: 255 }),
@@ -21,6 +22,7 @@ export const exits = pgTable('exits', {
   vehicleIdx: index('idx_exits_vehicle').on(table.vehicleId),
   centerIdx: index('idx_exits_center').on(table.centerId),
   agentIdx: index('idx_exits_agent').on(table.agentId),
+  createdByIdx: index('idx_exits_created_by').on(table.createdBy),
   destinationIdx: index('idx_exits_destination').on(table.destinationCenterId),
   exitedAtIdx: index('idx_exits_exited_at').on(table.exitedAt),
 }));

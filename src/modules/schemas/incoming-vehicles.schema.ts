@@ -1,8 +1,9 @@
-import { pgTable, integer, varchar, timestamp, decimal, index } from 'drizzle-orm/pg-core';
+import { pgTable, integer, varchar, text, timestamp, decimal, index } from 'drizzle-orm/pg-core';
 import { baseColumnsSerial } from './base.schema';
 import { exits } from './exits.schema';
 import { vehicles } from './vehicles.schema';
 import { centers } from './centers.schema';
+import { users } from './users.schema';
 
 // Incoming Vehicles
 export const incomingVehicles = pgTable('incoming_vehicles', {
@@ -11,6 +12,7 @@ export const incomingVehicles = pgTable('incoming_vehicles', {
   vehicleId: integer('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
   destinationCenterId: integer('destination_center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
   sourceCenterId: integer('source_center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
+  createdBy: text('created_by').notNull().references(() => users.accid, { onDelete: 'restrict' }),
   status: varchar('status', { length: 50 }).default('in_transit'),
   estimatedArrival: timestamp('estimated_arrival'),
   actualArrival: timestamp('actual_arrival'),
@@ -18,6 +20,7 @@ export const incomingVehicles = pgTable('incoming_vehicles', {
 }, (table) => ({
   exitIdx: index('idx_incoming_exit').on(table.exitId),
   vehicleIdx: index('idx_incoming_vehicle').on(table.vehicleId),
+  createdByIdx: index('idx_incoming_created_by').on(table.createdBy),
   destinationIdx: index('idx_incoming_destination').on(table.destinationCenterId),
   statusIdx: index('idx_incoming_status').on(table.status),
   etaIdx: index('idx_incoming_eta').on(table.estimatedArrival),

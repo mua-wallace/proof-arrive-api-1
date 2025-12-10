@@ -45,6 +45,16 @@ export const usersRelations = relations(users, ({ many }) => ({
   arrivals: many(arrivals),
   // One user (agent) can have many exits
   exits: many(exits),
+  // One user can create many arrivals
+  createdArrivals: many(arrivals, {
+    relationName: 'createdBy',
+  }),
+  // One user can create many exits
+  createdExits: many(exits, {
+    relationName: 'createdBy',
+  }),
+  // One user can create many incoming vehicles
+  createdIncomingVehicles: many(incomingVehicles),
 }));
 
 // Arrivals Relations
@@ -63,6 +73,12 @@ export const arrivalsRelations = relations(arrivals, ({ one, many }) => ({
   agent: one(users, {
     fields: [arrivals.agentId],
     references: [users.accid],
+  }),
+  // One arrival was created by one user
+  creator: one(users, {
+    fields: [arrivals.createdBy],
+    references: [users.accid],
+    relationName: 'createdBy',
   }),
   // One arrival can have many processing stages
   processingStages: many(processingStages),
@@ -84,6 +100,12 @@ export const exitsRelations = relations(exits, ({ one, many }) => ({
   agent: one(users, {
     fields: [exits.agentId],
     references: [users.accid],
+  }),
+  // One exit was created by one user
+  creator: one(users, {
+    fields: [exits.createdBy],
+    references: [users.accid],
+    relationName: 'createdBy',
   }),
   // One exit can have an optional destination center
   destinationCenter: one(centers, {
@@ -130,6 +152,11 @@ export const incomingVehiclesRelations = relations(incomingVehicles, ({ one }) =
     fields: [incomingVehicles.sourceCenterId],
     references: [centers.id],
     relationName: 'sourceCenter',
+  }),
+  // One incoming vehicle record was created by one user
+  creator: one(users, {
+    fields: [incomingVehicles.createdBy],
+    references: [users.accid],
   }),
 }));
 
