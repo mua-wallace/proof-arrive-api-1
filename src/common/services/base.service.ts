@@ -132,10 +132,18 @@ export class BaseService<T extends BaseEntity> {
   ): Promise<T | null> {
     const whereConditions: SQL[] = [isNull(this.table.deletedAt)];
 
+    // Known text columns that should always be converted to strings
+    const textColumns = ['accid', 'subid', 'username', 'company', 'token', 'session', 'k_u', 'pid', 'partner', 'k_k', 'expire', 'k_p', 'createdBy'];
+
     Object.entries(conditions).forEach(([key, value]) => {
       const column = (this.table as any)[key];
       if (column !== undefined && value !== undefined) {
-        whereConditions.push(eq(column, value as any));
+        // Convert to string if it's a known text column and value is a number
+        let processedValue = value;
+        if (textColumns.includes(key) && typeof value === 'number') {
+          processedValue = String(value);
+        }
+        whereConditions.push(eq(column, processedValue as any));
       }
     });
 
@@ -210,11 +218,19 @@ export class BaseService<T extends BaseEntity> {
   async count(conditions?: Partial<T>): Promise<number> {
     const whereConditions: SQL[] = [isNull(this.table.deletedAt)];
 
+    // Known text columns that should always be converted to strings
+    const textColumns = ['accid', 'subid', 'username', 'company', 'token', 'session', 'k_u', 'pid', 'partner', 'k_k', 'expire', 'k_p', 'createdBy'];
+
     if (conditions) {
       Object.entries(conditions).forEach(([key, value]) => {
         const column = (this.table as any)[key];
         if (column !== undefined && value !== undefined) {
-          whereConditions.push(eq(column, value as any));
+          // Convert to string if it's a known text column and value is a number
+          let processedValue = value;
+          if (textColumns.includes(key) && typeof value === 'number') {
+            processedValue = String(value);
+          }
+          whereConditions.push(eq(column, processedValue as any));
         }
       });
     }

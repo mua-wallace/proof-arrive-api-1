@@ -255,17 +255,23 @@ export class UsersService extends BaseService<User> {
     }
   }
 
-  async findByAccid(accid: string): Promise<User> {
-    this.logger.log(`Finding user by accid=${accid}`);
+  async findByAccid(accid: string | number): Promise<User> {
+    // Ensure accid is always a string for text column
+    const accidStr = String(accid);
+    this.logger.log(`Finding user by accid=${accidStr}`);
 
-    if (!accid) {
+    if (!accidStr || accidStr.trim() === '') {
       throw new NotFoundException('Accid is required');
     }
 
     try {
-      return await this.findOneBy({ accid } as any);
+      const user = await this.findOneBy({ accid: accidStr } as any);
+      if (!user) {
+        throw new NotFoundException(`User with accid ${accidStr} not found`);
+      }
+      return user;
     } catch (error: any) {
-      this.logger.error(`Failed to find user by accid=${accid}: ${error?.message || 'Unknown error'}`, error?.stack);
+      this.logger.error(`Failed to find user by accid=${accidStr}: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
         `Failed to find user by accid: ${error?.message || 'Unknown error occurred'}`,
