@@ -279,17 +279,24 @@ export class UsersService extends BaseService<User> {
     }
   }
 
-  async findByAccidAndSubid(accid: string, subid: string): Promise<User> {
-    this.logger.log(`Finding user by accid=${accid}, subid=${subid}`);
+  async findByAccidAndSubid(accid: string | number, subid: string | number): Promise<User> {
+    // Ensure accid and subid are always strings for text columns
+    const accidStr = String(accid);
+    const subidStr = String(subid);
+    this.logger.log(`Finding user by accid=${accidStr}, subid=${subidStr}`);
 
-    if (!accid || !subid) {
+    if (!accidStr || !subidStr || accidStr.trim() === '' || subidStr.trim() === '') {
       throw new NotFoundException('Accid and subid are required');
     }
 
     try {
-      return await this.findOneBy({ accid, subid } as any);
+      const user = await this.findOneBy({ accid: accidStr, subid: subidStr } as any);
+      if (!user) {
+        throw new NotFoundException(`User with accid ${accidStr} and subid ${subidStr} not found`);
+      }
+      return user;
     } catch (error: any) {
-      this.logger.error(`Failed to find user by accid=${accid}, subid=${subid}: ${error?.message || 'Unknown error'}`, error?.stack);
+      this.logger.error(`Failed to find user by accid=${accidStr}, subid=${subidStr}: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
         `Failed to find user by accid and subid: ${error?.message || 'Unknown error occurred'}`,

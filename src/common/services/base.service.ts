@@ -137,10 +137,11 @@ export class BaseService<T extends BaseEntity> {
 
     Object.entries(conditions).forEach(([key, value]) => {
       const column = (this.table as any)[key];
-      if (column !== undefined && value !== undefined) {
-        // Convert to string if it's a known text column and value is a number
+      if (column !== undefined && value !== undefined && value !== null) {
+        // Convert to string if it's a known text column (handle both numbers and string numbers)
         let processedValue = value;
-        if (textColumns.includes(key) && typeof value === 'number') {
+        if (textColumns.includes(key)) {
+          // Always convert to string for text columns, regardless of input type
           processedValue = String(value);
         }
         whereConditions.push(eq(column, processedValue as any));
@@ -224,10 +225,11 @@ export class BaseService<T extends BaseEntity> {
     if (conditions) {
       Object.entries(conditions).forEach(([key, value]) => {
         const column = (this.table as any)[key];
-        if (column !== undefined && value !== undefined) {
-          // Convert to string if it's a known text column and value is a number
+        if (column !== undefined && value !== undefined && value !== null) {
+          // Convert to string if it's a known text column (handle both numbers and string numbers)
           let processedValue = value;
-          if (textColumns.includes(key) && typeof value === 'number') {
+          if (textColumns.includes(key)) {
+            // Always convert to string for text columns, regardless of input type
             processedValue = String(value);
           }
           whereConditions.push(eq(column, processedValue as any));
