@@ -29,9 +29,9 @@ jobs:
         run: |
           docker compose -f docker-compose-build.yml build
           docker compose -f docker-compose-build.yml push
-      # - name: Notify Portainer
-      #   run: |
-      #     curl --fail -X POST \
-      #       -H "Content-Type: application/json" \
-      #       -d '{"status": "success", "message": "Image successfully built and pushed"}' \
-      #       "${{ secrets.PORTAINER_WEBHOOK_URL }}"
+      - name: Notify Portainer
+        run: |
+          curl --fail -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"status": "success", "message": "Image successfully built and pushed"}' \
+            "${{ secrets.PORTAINER_WEBHOOK_URL }}"
