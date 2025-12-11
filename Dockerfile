@@ -73,6 +73,8 @@ COPY --from=build /usr/src/app/dist ./dist
 # Copy migration files and scripts for potential runtime migration
 COPY --from=build /usr/src/app/src/database/migrations ./src/database/migrations
 COPY --from=build /usr/src/app/src/database/drizzle.config.ts ./src/database/drizzle.config.ts
+# Copy schema source files (needed for drizzle-kit migrate to work)
+COPY --from=build /usr/src/app/src/modules/schemas ./src/modules/schemas
 COPY --from=build /usr/src/app/scripts ./scripts
 
 # Copy .env file created in build stage (environment variables source)

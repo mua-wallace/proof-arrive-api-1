@@ -15,7 +15,13 @@ fi
 
 # Run migrations using drizzle-kit
 echo "Connecting to database: $DATABASE_HOST:$DATABASE_PORT/$DATABASE_NAME"
-npx drizzle-kit migrate --config=src/database/drizzle.config.ts
+echo "Running migrations with drizzle-kit..."
 
-echo "Migrations completed successfully!"
+# Run migrations and capture output
+if npx drizzle-kit migrate --config=src/database/drizzle.config.ts; then
+  echo "Migrations completed successfully!"
+else
+  echo "Error: Migration failed. Check the error messages above."
+  exit 1
+fi
 

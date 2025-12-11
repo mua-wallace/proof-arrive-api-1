@@ -14,9 +14,12 @@ fi
 
 # Try to run migrations (will skip if already applied)
 echo "Checking and running pending migrations..."
-npx drizzle-kit migrate --config=src/database/drizzle.config.ts || {
-  echo "Warning: Migration check failed. Starting application anyway..."
-}
+if npx drizzle-kit migrate --config=src/database/drizzle.config.ts; then
+  echo "Migrations applied successfully!"
+else
+  echo "Warning: Migration check failed. This might be normal if migrations were already applied."
+  echo "Starting application anyway..."
+fi
 
 # Start the application
 echo "Starting application..."
