@@ -24,6 +24,7 @@ export class UsersController {
   @Get()
   @ApiOperation({
     summary: 'List all users in the system with filtering and pagination',
+    description: 'Retrieves a paginated list of users synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (arrivals, exits).',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
@@ -58,6 +59,7 @@ export class UsersController {
   @Get('me')
   @ApiOperation({
     summary: 'Get current authenticated user details',
+    description: 'Retrieves the details of the currently authenticated user based on their JWT token credentials (accid and subid).',
   })
   async getMe(
     @CurrentUserCredentials() credentials: Credentials,
@@ -71,6 +73,7 @@ export class UsersController {
   @Get('details/:id')
   @ApiOperation({
     summary: 'Get user details by ID (UUID)',
+    description: 'Retrieves detailed information about a specific user by their internal UUID. Supports optional relation loading (arrivals, exits).',
   })
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits)' })
   async findOneById(
@@ -86,6 +89,7 @@ export class UsersController {
   @Delete(':id')
   @ApiOperation({
     summary: 'Removes a user from the system by ID (UUID)',
+    description: 'Permanently removes a user from the database by their internal UUID. This is a soft delete operation that sets the deletedAt timestamp.',
   })
   async remove(@Param('id') id: string): Promise<User> {
     return this.usersService.remove(id);
