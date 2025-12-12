@@ -159,7 +159,7 @@ export class CentersSyncService {
     accId: string,
     subId: string,
     geozoneId: number,
-  ): Promise<{ found: boolean; synced: boolean; skipped: boolean; message: string }> {
+  ): Promise<{ found: boolean; synced: boolean; skipped: boolean; message: string; center?: any }> {
     try {
       if (!geozoneId || geozoneId === 0) {
         return {
@@ -170,14 +170,20 @@ export class CentersSyncService {
         };
       }
 
-      // Check if center already exists in database
-      const exists = await this.centerExistsByGeozoneId(geozoneId);
-      if (exists) {
+      // Check if center already exists in database and fetch it
+      const existingCenter = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(eq(schema.centers.geozoneId, geozoneId))
+        .limit(1);
+
+      if (existingCenter.length > 0) {
         return {
           found: true,
           synced: false,
           skipped: true,
           message: `Center with gzone_id=${geozoneId} already exists in database`,
+          center: existingCenter[0],
         };
       }
 
@@ -242,6 +248,7 @@ export class CentersSyncService {
         synced: true,
         skipped: false,
         message: `Center with gzone_id=${geozoneId} (${centerData.name}) sync job triggered`,
+        center: centerData,
       };
     } catch (error) {
       this.logger.error(
