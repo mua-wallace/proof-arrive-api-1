@@ -1,34 +1,24 @@
 #!/bin/sh
-# Startup script that runs migrations before starting the application
-# This is useful if migrations weren't run at build time
+# Startup script that syncs schema to database before starting the application
+# Uses drizzle-kit push to directly sync schema without migration files
 
 set -e
 
-echo "Starting application with migration check..."
+echo "Starting application with schema sync check..."
 
 # Check if database connection is available
 if [ -z "$DATABASE_HOST" ] || [ -z "$DATABASE_NAME" ]; then
-  echo "Warning: Database environment variables not set. Starting application without migrations."
+  echo "Warning: Database environment variables not set. Starting application without schema sync."
   exec node dist/main
 fi
 
-# Try to run migrations using Node.js script (more reliable)
-# Falls back to drizzle-kit if Node script fails
-echo "Checking and running pending migrations..."
-
-# First, try the Node.js migration runner (runs SQL files directly)
-if node scripts/run-migrations.js 2>&1; then
-  echo "Migrations applied successfully using Node.js runner!"
+# Try to sync schema using drizzle-kit push
+echo "Syncing database schema..."
+if npx drizzle-kit push --config=src/database/drizzle.config.ts 2>&1; then
+  echo "✓ Schema synced successfully!"
 else
-  echo "Node.js migration runner failed, trying drizzle-kit..."
-  
-  # Fallback to drizzle-kit migrate
-  if npx drizzle-kit migrate --config=src/database/drizzle.config.ts 2>&1; then
-    echo "Migrations applied successfully using drizzle-kit!"
-  else
-    echo "Warning: All migration methods failed. This might be normal if migrations were already applied."
-    echo "Check the error messages above for details."
-  fi
+  echo "⚠ Schema sync failed or had warnings. Check the messages above."
+  echo "Starting application anyway..."
 fi
 
 # Start the application
