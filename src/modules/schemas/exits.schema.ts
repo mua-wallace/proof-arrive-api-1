@@ -10,7 +10,7 @@ export const exits = pgTable('exits', {
   vehicleId: integer('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
   centerId: integer('center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
   agentId: text('agent_id').notNull().references(() => users.accid, { onDelete: 'restrict' }),
-  createdBy: text('created_by').notNull().references(() => users.accid, { onDelete: 'restrict' }),
+  createdBy: text('created_by').notNull(), // No FK constraint since accid is not unique
   exitType: varchar('exit_type', { length: 50 }).notNull(),
   destinationCenterId: integer('destination_center_id').references(() => centers.id, { onDelete: 'set null' }),
   destinationName: varchar('destination_name', { length: 255 }),

@@ -10,7 +10,7 @@ export const arrivals = pgTable('arrivals', {
   vehicleId: integer('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
   centerId: integer('center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
   agentId: text('agent_id').notNull().references(() => users.accid, { onDelete: 'restrict' }),
-  createdBy: text('created_by').notNull().references(() => users.accid, { onDelete: 'restrict' }),
+  createdBy: text('created_by').notNull(), // No FK constraint since accid is not unique
   qrCode: varchar('qr_code', { length: 255 }).unique(),
   status: varchar('status', { length: 50 }).default('arrived'),
   arrivedAt: timestamp('arrived_at').notNull().defaultNow(),

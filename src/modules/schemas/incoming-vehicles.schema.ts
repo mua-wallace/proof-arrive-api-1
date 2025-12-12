@@ -12,7 +12,7 @@ export const incomingVehicles = pgTable('incoming_vehicles', {
   vehicleId: integer('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
   destinationCenterId: integer('destination_center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
   sourceCenterId: integer('source_center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
-  createdBy: text('created_by').notNull().references(() => users.accid, { onDelete: 'restrict' }),
+  createdBy: text('created_by').notNull(), // No FK constraint since accid is not unique
   status: varchar('status', { length: 50 }).default('in_transit'),
   estimatedArrival: timestamp('estimated_arrival'),
   actualArrival: timestamp('actual_arrival'),

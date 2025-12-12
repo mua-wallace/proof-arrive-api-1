@@ -12,13 +12,23 @@ if [ -z "$DATABASE_HOST" ] || [ -z "$DATABASE_NAME" ]; then
   exec node dist/main
 fi
 
-# Try to run migrations (will skip if already applied)
+# Try to run migrations using Node.js script (more reliable)
+# Falls back to drizzle-kit if Node script fails
 echo "Checking and running pending migrations..."
-if npx drizzle-kit migrate --config=src/database/drizzle.config.ts; then
-  echo "Migrations applied successfully!"
+
+# First, try the Node.js migration runner (runs SQL files directly)
+if node scripts/run-migrations.js 2>&1; then
+  echo "Migrations applied successfully using Node.js runner!"
 else
-  echo "Warning: Migration check failed. This might be normal if migrations were already applied."
-  echo "Starting application anyway..."
+  echo "Node.js migration runner failed, trying drizzle-kit..."
+  
+  # Fallback to drizzle-kit migrate
+  if npx drizzle-kit migrate --config=src/database/drizzle.config.ts 2>&1; then
+    echo "Migrations applied successfully using drizzle-kit!"
+  else
+    echo "Warning: All migration methods failed. This might be normal if migrations were already applied."
+    echo "Check the error messages above for details."
+  fi
 fi
 
 # Start the application

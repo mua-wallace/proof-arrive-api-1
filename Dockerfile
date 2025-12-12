@@ -76,6 +76,8 @@ COPY --from=build /usr/src/app/src/database/drizzle.config.ts ./src/database/dri
 # Copy schema source files (needed for drizzle-kit migrate to work)
 COPY --from=build /usr/src/app/src/modules/schemas ./src/modules/schemas
 COPY --from=build /usr/src/app/scripts ./scripts
+# Ensure Node.js migration script is executable
+RUN chmod +x scripts/run-migrations.js || true
 
 # Copy .env file created in build stage (environment variables source)
 COPY --from=build /usr/src/app/.env ./.env

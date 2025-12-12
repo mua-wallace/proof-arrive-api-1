@@ -13,11 +13,16 @@ if [ -z "$DATABASE_HOST" ] || [ -z "$DATABASE_NAME" ]; then
   exit 0
 fi
 
-# Run migrations using drizzle-kit
 echo "Connecting to database: $DATABASE_HOST:$DATABASE_PORT/$DATABASE_NAME"
-echo "Running migrations with drizzle-kit..."
 
-# Run migrations and capture output
+# Try Node.js migration runner first (more reliable, runs SQL files directly)
+if node scripts/run-migrations.js; then
+  echo "Migrations completed successfully!"
+  exit 0
+fi
+
+# Fallback to drizzle-kit migrate
+echo "Node.js migration runner failed, trying drizzle-kit..."
 if npx drizzle-kit migrate --config=src/database/drizzle.config.ts; then
   echo "Migrations completed successfully!"
 else
