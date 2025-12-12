@@ -38,8 +38,6 @@ export class UsersSyncService {
       const accidStr = String(userData.accid);
       const subidStr = String(userData.subid);
       
-      this.logger.debug(`Syncing user: accid=${accidStr}, subid=${subidStr}`);
-
       // Check if user already exists
       // Use sql template to explicitly cast the parameter as text
       const existingUser = await this.dbConnection
@@ -49,7 +47,6 @@ export class UsersSyncService {
         .limit(1);
 
       if (existingUser.length > 0) {
-        this.logger.debug(`User ${accidStr} already exists, skipping sync`);
         return;
       }
 
@@ -71,8 +68,6 @@ export class UsersSyncService {
       };
 
       await this.dbConnection.insert(schema.users).values(userRecord).execute();
-
-      this.logger.log(`User ${accidStr} synced successfully with data from login response`);
     } catch (error) {
       this.logger.error(`Error syncing user:`, error instanceof Error ? error.stack : error);
       throw error;
@@ -94,8 +89,6 @@ export class UsersSyncService {
         })
         .where(sql`${schema.users.accid} = ${accidStr}::text`)
         .execute();
-
-      this.logger.debug(`Updated lastLoginAt for user: accid=${accidStr}`);
     } catch (error) {
       this.logger.error(`Error updating lastLoginAt for user ${accid}:`, error instanceof Error ? error.stack : error);
       throw error;
@@ -109,8 +102,6 @@ export class UsersSyncService {
     // Explicitly convert to string and ensure it's treated as a string type
     // This is critical because accid is a text column in the database
     const accidStr: string = typeof accid === 'number' ? accid.toString() : String(accid);
-    
-    this.logger.debug(`Checking if user exists: accid=${accidStr} (type: ${typeof accidStr})`);
     
     try {
       // Use sql template to explicitly cast the parameter as text

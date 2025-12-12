@@ -27,7 +27,6 @@ export class IncomingService extends BaseService<IncomingVehicle> {
     query: PaginateQuery = {},
     options?: { include?: string[] },
   ): Promise<PaginateResult<IncomingVehicle>> {
-    this.logger.log(`Fetching all incoming vehicles with query: ${JSON.stringify(query)}`);
     
     try {
       const page = query.page || 1;
@@ -172,7 +171,6 @@ export class IncomingService extends BaseService<IncomingVehicle> {
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
   async findOneById(id: number | string, options?: { include?: string[] }): Promise<IncomingVehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Fetching incoming vehicle with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid incoming vehicle ID: ${id}`);
@@ -226,7 +224,6 @@ export class IncomingService extends BaseService<IncomingVehicle> {
   }
 
   async createIncomingVehicle(createDto: CreateIncomingVehicleDto, createdBy: string): Promise<IncomingVehicle> {
-    this.logger.log(`Creating incoming vehicle for exitId=${createDto.exitId}, vehicleId=${createDto.vehicleId}`);
 
     try {
       // Validate exit exists
@@ -299,7 +296,6 @@ export class IncomingService extends BaseService<IncomingVehicle> {
         })
         .returning();
 
-      this.logger.log(`Successfully created incoming vehicle with id=${incomingVehicle.id}`);
       return incomingVehicle as IncomingVehicle;
     } catch (error: any) {
       this.logger.error(`Failed to create incoming vehicle: ${error?.message || 'Unknown error'}`, error?.stack);
@@ -312,7 +308,6 @@ export class IncomingService extends BaseService<IncomingVehicle> {
 
   async update(id: number | string, updateDto: UpdateIncomingVehicleDto): Promise<IncomingVehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Updating incoming vehicle with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid incoming vehicle ID: ${id}`);
@@ -347,7 +342,6 @@ export class IncomingService extends BaseService<IncomingVehicle> {
         .where(eq(schema.incomingVehicles.id, numericId))
         .returning();
 
-      this.logger.log(`Successfully updated incoming vehicle with id=${numericId}`);
       return updated as IncomingVehicle;
     } catch (error: any) {
       this.logger.error(`Failed to update incoming vehicle with id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);
@@ -361,7 +355,6 @@ export class IncomingService extends BaseService<IncomingVehicle> {
   // Override BaseService.remove to handle number IDs (serial) instead of string IDs (UUID)
   async remove(id: number | string): Promise<IncomingVehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Removing incoming vehicle with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid incoming vehicle ID: ${id}`);
@@ -376,7 +369,6 @@ export class IncomingService extends BaseService<IncomingVehicle> {
         .delete(schema.incomingVehicles)
         .where(eq(schema.incomingVehicles.id, numericId));
 
-      this.logger.log(`Successfully removed incoming vehicle with id=${numericId}`);
       return incomingVehicle;
     } catch (error: any) {
       this.logger.error(`Failed to remove incoming vehicle with id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);

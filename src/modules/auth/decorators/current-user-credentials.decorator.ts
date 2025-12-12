@@ -11,12 +11,6 @@ export const CurrentUserCredentials = createParamDecorator(
       throw new Error('User credentials not found in request');
     }
 
-    // Log the raw req.user structure for debugging
-    logger.debug('Raw req.user structure:', {
-      keys: Object.keys(request.user),
-      user: request.user,
-    });
-
     // Handle both structures:
     // 1. Middleware structure: { acc_id, acc_token, acc_sid, session }
     // 2. JWT payload structure: { token, accid, subid, iat, exp }
@@ -65,17 +59,6 @@ export const CurrentUserCredentials = createParamDecorator(
       subid,
       session,
     };
-    
-    logger.debug('Extracting user credentials from request:', {
-      path: request.path,
-      method: request.method,
-      credentials: {
-        token: credentials.token ? `${credentials.token.substring(0, 10)}...` : 'missing',
-        accid: credentials.accid,
-        subid: credentials.subid,
-        session: credentials.session || 'missing',
-      },
-    });
     
     return credentials;
   },

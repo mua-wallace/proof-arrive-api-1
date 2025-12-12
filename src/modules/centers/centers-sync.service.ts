@@ -49,8 +49,6 @@ export class CentersSyncService {
       const thirdPartyId = centerData.id;
       const siteid = centerData.siteid;
       
-      this.logger.debug(`Syncing center: thirdPartyId=${thirdPartyId}, siteid=${siteid}, name=${centerData.name}`);
-
       // Check if center already exists by thirdPartyId, siteid, or geozoneId
       const geozoneId = centerData.gzone_id;
       const conditions = [
@@ -69,7 +67,6 @@ export class CentersSyncService {
         .limit(1);
 
       if (existingCenter.length > 0) {
-        this.logger.debug(`Center ${thirdPartyId} (siteid: ${siteid}, gzone_id: ${geozoneId}) already exists, skipping sync`);
         return;
       }
 
@@ -99,8 +96,6 @@ export class CentersSyncService {
       };
 
       await this.dbConnection.insert(schema.centers).values(centerRecord).execute();
-
-      this.logger.log(`Center ${thirdPartyId} (siteid: ${siteid}) synced successfully`);
     } catch (error) {
       this.logger.error(`Error syncing center:`, error instanceof Error ? error.stack : error);
       throw error;
@@ -175,12 +170,9 @@ export class CentersSyncService {
         };
       }
 
-      this.logger.debug(`Fetching centers from Malambi API to find center with gzone_id=${geozoneId}`);
-
       // Check if center already exists in database
       const exists = await this.centerExistsByGeozoneId(geozoneId);
       if (exists) {
-        this.logger.debug(`Center with gzone_id=${geozoneId} already exists in database, skipping sync`);
         return {
           found: true,
           synced: false,
@@ -210,7 +202,6 @@ export class CentersSyncService {
       const centerData = response.rows.find((center) => center.gzone_id === geozoneId);
 
       if (!centerData) {
-        this.logger.debug(`Center with gzone_id=${geozoneId} not found in API response`);
         return {
           found: false,
           synced: false,
@@ -220,7 +211,6 @@ export class CentersSyncService {
       }
 
       // Center found in API, trigger background job to save it
-      this.logger.debug(`Center with gzone_id=${geozoneId} (${centerData.name}) found in API, triggering sync job`);
       await this.queueService.add('center-sync', 'sync-center', {
         centerData: {
           id: centerData.id,
@@ -247,8 +237,6 @@ export class CentersSyncService {
         },
       });
 
-      this.logger.log(`Center sync job triggered for gzone_id=${geozoneId} (${centerData.name})`);
-
       return {
         found: true,
         synced: true,
@@ -271,7 +259,6 @@ export class CentersSyncService {
   async ensureCenterSynced(thirdPartyId?: number, siteid?: number): Promise<void> {
     const exists = await this.centerExists(thirdPartyId, siteid);
     if (!exists) {
-      this.logger.debug(`Center not found (thirdPartyId: ${thirdPartyId}, siteid: ${siteid}), triggering sync job`);
       await this.queueService.add('center-sync', 'sync-center', { thirdPartyId, siteid });
     }
   }

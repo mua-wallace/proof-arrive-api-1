@@ -29,8 +29,6 @@ export class CentersService extends BaseService<Center> {
     query: PaginateQuery = {},
     options?: { include?: string[] },
   ): Promise<PaginateResult<Center>> {
-    this.logger.log(`Fetching all centers with query: ${JSON.stringify(query)}`);
-    
     try {
       const page = query.page || 1;
       const limit = query.limit || 100;
@@ -176,7 +174,6 @@ export class CentersService extends BaseService<Center> {
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
   async findOneById(id: number | string, options?: { include?: string[] }): Promise<Center> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Fetching center with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid center ID: ${id}`);
@@ -231,7 +228,6 @@ export class CentersService extends BaseService<Center> {
   }
 
   async findOneBy(requestData: any): Promise<Center> {
-    this.logger.log(`Finding center by criteria: ${JSON.stringify(requestData)}`);
 
     try {
       const conditions = Object.entries(requestData)
@@ -270,7 +266,6 @@ export class CentersService extends BaseService<Center> {
   // Override BaseService.remove to handle number IDs (serial) instead of string IDs (UUID)
   async remove(id: number | string): Promise<Center> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Removing center with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid center ID: ${id}`);
@@ -285,7 +280,6 @@ export class CentersService extends BaseService<Center> {
         .delete(schema.centers)
         .where(eq(schema.centers.id, numericId));
 
-      this.logger.log(`Successfully removed center with id=${numericId}`);
       return center;
     } catch (error: any) {
       this.logger.error(`Failed to remove center with id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);
@@ -307,7 +301,6 @@ export class CentersService extends BaseService<Center> {
     subId: string,
     geozoneId: number,
   ) {
-    this.logger.log(`Syncing center by geozoneId=${geozoneId}`);
 
     if (!token || !accId || !subId) {
       throw new UnauthorizedException(
@@ -343,7 +336,6 @@ export class CentersService extends BaseService<Center> {
       filtertype?: number;
     },
   ) {
-    this.logger.log(`Fetching all centers from Malambi API with options: ${JSON.stringify(options)}`);
 
     if (!token || !accId || !subId) {
       throw new UnauthorizedException(

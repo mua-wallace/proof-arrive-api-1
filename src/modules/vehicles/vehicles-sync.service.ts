@@ -34,8 +34,6 @@ export class VehiclesSyncService {
     try {
       const thirdPartyId = vehicleData.id;
       
-      this.logger.debug(`Syncing vehicle: thirdPartyId=${thirdPartyId}, plate=${vehicleData.plate}`);
-
       // Check if vehicle already exists by thirdPartyId
       const existingVehicle = await this.dbConnection
         .select()
@@ -44,7 +42,6 @@ export class VehiclesSyncService {
         .limit(1);
 
       if (existingVehicle.length > 0) {
-        this.logger.debug(`Vehicle ${thirdPartyId} already exists, skipping sync`);
         return;
       }
 
@@ -62,8 +59,6 @@ export class VehiclesSyncService {
       };
 
       await this.dbConnection.insert(schema.vehicles).values(vehicleRecord).execute();
-
-      this.logger.log(`Vehicle ${thirdPartyId} (plate: ${vehicleData.plate}) synced successfully`);
     } catch (error) {
       this.logger.error(`Error syncing vehicle:`, error instanceof Error ? error.stack : error);
       throw error;
@@ -126,12 +121,9 @@ export class VehiclesSyncService {
         };
       }
 
-      this.logger.debug(`Fetching vehicle from Malambi API with vehicleId=${vehicleId}`);
-
       // Check if vehicle already exists in database
       const exists = await this.vehicleExistsByVehicleId(vehicleIdNum);
       if (exists) {
-        this.logger.debug(`Vehicle with vehicleId=${vehicleId} already exists in database, skipping sync`);
         return {
           found: true,
           synced: false,
@@ -144,7 +136,6 @@ export class VehiclesSyncService {
       const vehicleData = await this.malambiApi.getVehicleDetail(token, accId, subId, vehicleId);
 
       // Vehicle found in API, trigger background job to save it
-      this.logger.debug(`Vehicle with vehicleId=${vehicleId} (${vehicleData.plate}) found in API, triggering sync job`);
       await this.queueService.add('vehicle-sync', 'sync-vehicle', {
         vehicleData: {
           id: vehicleData.id,
@@ -156,8 +147,6 @@ export class VehiclesSyncService {
           groupId: vehicleData.groupId,
         },
       });
-
-      this.logger.log(`Vehicle sync job triggered for vehicleId=${vehicleId} (${vehicleData.plate})`);
 
       return {
         found: true,
@@ -192,7 +181,6 @@ export class VehiclesSyncService {
   async ensureVehicleSynced(thirdPartyId: number): Promise<void> {
     const exists = await this.vehicleExists(thirdPartyId);
     if (!exists) {
-      this.logger.debug(`Vehicle ${thirdPartyId} not found in database, triggering sync job`);
       await this.queueService.add('vehicle-sync', 'sync-vehicle', { thirdPartyId });
     }
   }

@@ -116,13 +116,6 @@ export class MalambiAuthMiddleware implements NestMiddleware {
         session: session || '',
       };
 
-      this.logger.debug(`Set req.user for path ${req.path}:`, {
-        acc_id: numericAccid,
-        acc_sid: numericSubid,
-        acc_token: token ? `${token.substring(0, 10)}...` : 'missing',
-        session: session || 'missing',
-      });
-
       next();
     } catch {
       throw new UnauthorizedException(

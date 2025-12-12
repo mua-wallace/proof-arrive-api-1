@@ -31,7 +31,6 @@ export class ArrivalsService extends BaseService<Arrival> {
     query: PaginateQuery = {},
     options?: { include?: string[] },
   ): Promise<PaginateResult<Arrival>> {
-    this.logger.log(`Fetching all arrivals with query: ${JSON.stringify(query)}`);
     
     try {
       const page = query.page || 1;
@@ -176,7 +175,6 @@ export class ArrivalsService extends BaseService<Arrival> {
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
   async findOneById(id: number | string, options?: { include?: string[] }): Promise<Arrival> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Fetching arrival with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid arrival ID: ${id}`);
@@ -230,7 +228,6 @@ export class ArrivalsService extends BaseService<Arrival> {
   }
 
   async createArrival(createDto: CreateArrivalDto, agentId: string): Promise<Arrival> {
-    this.logger.log(`Creating arrival for vehicleId=${createDto.vehicleId}, centerId=${createDto.centerId}`);
 
     try {
       // Validate vehicle exists
@@ -285,7 +282,6 @@ export class ArrivalsService extends BaseService<Arrival> {
         })
         .returning();
 
-      this.logger.log(`Successfully created arrival with id=${arrival.id}`);
       return arrival as Arrival;
     } catch (error: any) {
       this.logger.error(`Failed to create arrival: ${error?.message || 'Unknown error'}`, error?.stack);
@@ -298,7 +294,6 @@ export class ArrivalsService extends BaseService<Arrival> {
 
   async updateStatus(id: number | string, updateDto: UpdateArrivalStatusDto): Promise<Arrival> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Updating arrival status for id=${numericId} to ${updateDto.status}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid arrival ID: ${id}`);
@@ -318,7 +313,6 @@ export class ArrivalsService extends BaseService<Arrival> {
         .where(eq(schema.arrivals.id, numericId))
         .returning();
 
-      this.logger.log(`Successfully updated arrival status for id=${numericId}`);
       return updated as Arrival;
     } catch (error: any) {
       this.logger.error(`Failed to update arrival status for id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);
@@ -334,7 +328,6 @@ export class ArrivalsService extends BaseService<Arrival> {
     createDto: CreateProcessingStageDto,
   ): Promise<ProcessingStage> {
     const numericArrivalId = typeof arrivalId === 'string' ? Number(arrivalId) : arrivalId;
-    this.logger.log(`Creating processing stage for arrivalId=${numericArrivalId}, stageType=${createDto.stageType}`);
 
     if (!numericArrivalId || isNaN(numericArrivalId)) {
       throw new NotFoundException(`Invalid arrival ID: ${arrivalId}`);
@@ -356,7 +349,6 @@ export class ArrivalsService extends BaseService<Arrival> {
         })
         .returning();
 
-      this.logger.log(`Successfully created processing stage with id=${stage.id}`);
       return stage as ProcessingStage;
     } catch (error: any) {
       this.logger.error(`Failed to create processing stage for arrivalId=${numericArrivalId}: ${error?.message || 'Unknown error'}`, error?.stack);
@@ -374,7 +366,6 @@ export class ArrivalsService extends BaseService<Arrival> {
   ): Promise<ProcessingStage> {
     const numericArrivalId = typeof arrivalId === 'string' ? Number(arrivalId) : arrivalId;
     const numericStageId = typeof stageId === 'string' ? Number(stageId) : stageId;
-    this.logger.log(`Updating processing stage id=${numericStageId} for arrivalId=${numericArrivalId}`);
 
     if (!numericArrivalId || isNaN(numericArrivalId)) {
       throw new NotFoundException(`Invalid arrival ID: ${arrivalId}`);
@@ -433,7 +424,6 @@ export class ArrivalsService extends BaseService<Arrival> {
         .where(eq(schema.processingStages.id, numericStageId))
         .returning();
 
-      this.logger.log(`Successfully updated processing stage id=${numericStageId}`);
       return updated as ProcessingStage;
     } catch (error: any) {
       this.logger.error(`Failed to update processing stage id=${numericStageId}: ${error?.message || 'Unknown error'}`, error?.stack);

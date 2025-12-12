@@ -24,8 +24,6 @@ export class UsersService extends BaseService<User> {
     query: PaginateQuery = {},
     options?: { include?: string[] },
   ): Promise<PaginateResult<User>> {
-    this.logger.log(`Fetching all users with query: ${JSON.stringify(query)}`);
-    
     try {
       // If relations are requested, use custom implementation
       if (options?.include && options.include.length > 0) {
@@ -172,8 +170,6 @@ export class UsersService extends BaseService<User> {
   }
 
   async findOneById(id: string, options?: { include?: string[] }): Promise<User> {
-    this.logger.log(`Fetching user with id=${id}`);
-
     if (!id) {
       throw new NotFoundException(`Invalid user ID: ${id}`);
     }
@@ -216,8 +212,6 @@ export class UsersService extends BaseService<User> {
   }
 
   async findOneBy(requestData: any): Promise<User> {
-    this.logger.log(`Finding user by criteria: ${JSON.stringify(requestData)}`);
-
     try {
       if (!requestData || Object.keys(requestData).length === 0) {
         throw new NotFoundException('No search criteria provided');
@@ -238,8 +232,6 @@ export class UsersService extends BaseService<User> {
   }
 
   async findByUsername(username: string): Promise<User> {
-    this.logger.log(`Finding user by username=${username}`);
-
     if (!username) {
       throw new NotFoundException('Username is required');
     }
@@ -258,7 +250,6 @@ export class UsersService extends BaseService<User> {
   async findByAccid(accid: string | number): Promise<User> {
     // Ensure accid is always a string for text column
     const accidStr = String(accid);
-    this.logger.log(`Finding user by accid=${accidStr}`);
 
     if (!accidStr || accidStr.trim() === '') {
       throw new NotFoundException('Accid is required');
@@ -283,7 +274,6 @@ export class UsersService extends BaseService<User> {
     // Ensure accid and subid are always strings for text columns
     const accidStr = String(accid);
     const subidStr = String(subid);
-    this.logger.log(`Finding user by accid=${accidStr}, subid=${subidStr}`);
 
     if (!accidStr || !subidStr || accidStr.trim() === '' || subidStr.trim() === '') {
       throw new NotFoundException('Accid and subid are required');
@@ -305,15 +295,12 @@ export class UsersService extends BaseService<User> {
   }
 
   async remove(id: string): Promise<User> {
-    this.logger.log(`Removing user with id=${id}`);
-
     if (!id) {
       throw new NotFoundException(`Invalid user ID: ${id}`);
     }
 
     try {
       const user = await super.remove(id);
-      this.logger.log(`Successfully removed user with id=${id}`);
       return user;
     } catch (error: any) {
       this.logger.error(`Failed to remove user with id=${id}: ${error?.message || 'Unknown error'}`, error?.stack);

@@ -73,9 +73,6 @@ export class MalambiApiService extends MalambiBaseApiService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Log the raw API response for debugging
-    this.logger.debug(`Malambi API login response: accid=${data.accid} (${typeof data.accid}), subid=${data.subid} (${typeof data.subid})`);
-    
     // Ensure accid and subid are valid
     const accid = data.accid?.toString() || '';
     const subid = data.subid?.toString() || '';
@@ -256,8 +253,6 @@ export class MalambiApiService extends MalambiBaseApiService {
       undefined,
       { token, accId, subId },
     );
-
-    console.log(`Malambi API vehicle detail response: ${JSON.stringify(data, null, 2)}`);
 
     if (!data) {
       throw new NotFoundException(`Vehicle not found, id: ${vehicleId}`);

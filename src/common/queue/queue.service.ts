@@ -32,9 +32,6 @@ export class QueueService {
     
     // Sort by priority (higher priority first)
     queue.sort((a, b) => (b.priority || 0) - (a.priority || 0));
-
-    this.logger.debug(`Job added to queue ${queueName}: ${jobType} (${job.id})`);
-    // Jobs are processed by QueueProcessorService, not here
   }
 
   /**

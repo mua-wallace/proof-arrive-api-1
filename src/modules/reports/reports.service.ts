@@ -24,7 +24,6 @@ export class ReportsService {
    * Get dashboard summary with key metrics
    */
   async getDashboardSummary(query: ReportQueryDto = {}) {
-    this.logger.log('Generating dashboard summary');
     
     try {
       const conditions = this.buildDateConditions(query);
@@ -111,7 +110,6 @@ export class ReportsService {
    * Get arrival analytics
    */
   async getArrivalAnalytics(query: ReportQueryDto = {}) {
-    this.logger.log('Generating arrival analytics');
     
     try {
       const conditions = this.buildDateConditions(query);
@@ -198,7 +196,6 @@ export class ReportsService {
    * Get exit analytics
    */
   async getExitAnalytics(query: ReportQueryDto = {}) {
-    this.logger.log('Generating exit analytics');
     
     try {
       const conditions = this.buildDateConditions(query);
@@ -271,7 +268,6 @@ export class ReportsService {
    * Get incoming vehicle analytics
    */
   async getIncomingVehicleAnalytics(query: ReportQueryDto = {}) {
-    this.logger.log('Generating incoming vehicle analytics');
     
     try {
       const conditions = this.buildDateConditions(query);
@@ -363,7 +359,6 @@ export class ReportsService {
    * Get processing stage analytics
    */
   async getProcessingStageAnalytics(query: ReportQueryDto = {}) {
-    this.logger.log('Generating processing stage analytics');
     
     try {
       const conditions = this.buildDateConditions(query);
@@ -450,7 +445,6 @@ export class ReportsService {
    * Get center performance metrics
    */
   async getCenterPerformance(query: ReportQueryDto = {}) {
-    this.logger.log('Generating center performance metrics');
     
     try {
       const conditions = this.buildDateConditions(query);
@@ -526,7 +520,6 @@ export class ReportsService {
    * Get vehicle activity report
    */
   async getVehicleActivity(query: ReportQueryDto = {}) {
-    this.logger.log('Generating vehicle activity report');
     
     try {
       const conditions = this.buildDateConditions(query);
@@ -602,7 +595,6 @@ export class ReportsService {
    * Get agent activity report
    */
   async getAgentActivity(query: ReportQueryDto = {}) {
-    this.logger.log('Generating agent activity report');
     
     try {
       const conditions = this.buildDateConditions(query);

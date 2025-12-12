@@ -27,7 +27,6 @@ export class ExitsService extends BaseService<Exit> {
     query: PaginateQuery = {},
     options?: { include?: string[] },
   ): Promise<PaginateResult<Exit>> {
-    this.logger.log(`Fetching all exits with query: ${JSON.stringify(query)}`);
     
     try {
       const page = query.page || 1;
@@ -175,7 +174,6 @@ export class ExitsService extends BaseService<Exit> {
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
   async findOneById(id: number | string, options?: { include?: string[] }): Promise<Exit> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Fetching exit with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid exit ID: ${id}`);
@@ -232,7 +230,6 @@ export class ExitsService extends BaseService<Exit> {
   }
 
   async createExit(createDto: CreateExitDto, agentId: string): Promise<Exit> {
-    this.logger.log(`Creating exit for vehicleId=${createDto.vehicleId}, centerId=${createDto.centerId}`);
 
     try {
       // Validate vehicle exists
@@ -288,7 +285,6 @@ export class ExitsService extends BaseService<Exit> {
         })
         .returning();
 
-      this.logger.log(`Successfully created exit with id=${exit.id}`);
       return exit as Exit;
     } catch (error: any) {
       this.logger.error(`Failed to create exit: ${error?.message || 'Unknown error'}`, error?.stack);
@@ -301,7 +297,6 @@ export class ExitsService extends BaseService<Exit> {
 
   async update(id: number | string, updateDto: UpdateExitDto): Promise<Exit> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Updating exit with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid exit ID: ${id}`);
@@ -354,7 +349,6 @@ export class ExitsService extends BaseService<Exit> {
         .where(eq(schema.exits.id, numericId))
         .returning();
 
-      this.logger.log(`Successfully updated exit with id=${numericId}`);
       return updated as Exit;
     } catch (error: any) {
       this.logger.error(`Failed to update exit with id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);
@@ -368,7 +362,6 @@ export class ExitsService extends BaseService<Exit> {
   // Override BaseService.remove to handle number IDs (serial) instead of string IDs (UUID)
   async remove(id: number | string): Promise<Exit> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Removing exit with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid exit ID: ${id}`);
@@ -383,7 +376,6 @@ export class ExitsService extends BaseService<Exit> {
         .delete(schema.exits)
         .where(eq(schema.exits.id, numericId));
 
-      this.logger.log(`Successfully removed exit with id=${numericId}`);
       return exit;
     } catch (error: any) {
       this.logger.error(`Failed to remove exit with id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);

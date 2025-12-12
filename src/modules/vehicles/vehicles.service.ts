@@ -29,8 +29,6 @@ export class VehiclesService extends BaseService<Vehicle> {
     query: PaginateQuery = {},
     options?: { include?: string[] },
   ): Promise<PaginateResult<Vehicle>> {
-    this.logger.log(`Fetching all vehicles with query: ${JSON.stringify(query)}`);
-    
     try {
       const page = query.page || 1;
       const limit = query.limit || 100;
@@ -171,7 +169,6 @@ export class VehiclesService extends BaseService<Vehicle> {
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
   async findOneById(id: number | string, options?: { include?: string[] }): Promise<Vehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Fetching vehicle with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid vehicle ID: ${id}`);
@@ -222,7 +219,6 @@ export class VehiclesService extends BaseService<Vehicle> {
   }
 
   async findOneBy(requestData: any): Promise<Vehicle> {
-    this.logger.log(`Finding vehicle by criteria: ${JSON.stringify(requestData)}`);
 
     try {
       const conditions = Object.entries(requestData)
@@ -268,7 +264,6 @@ export class VehiclesService extends BaseService<Vehicle> {
     subId: string,
     vehicleId: string,
   ) {
-    this.logger.log(`Syncing vehicle by vehicleId=${vehicleId}`);
 
     if (!token || !accId || !subId) {
       throw new UnauthorizedException(
@@ -300,7 +295,6 @@ export class VehiclesService extends BaseService<Vehicle> {
     subId: string,
     vehicleId: string,
   ) {
-    this.logger.log(`Fetching vehicle from API with vehicleId=${vehicleId}`);
 
     if (!token || !accId || !subId) {
       throw new UnauthorizedException(
@@ -332,7 +326,6 @@ export class VehiclesService extends BaseService<Vehicle> {
    */
   async remove(id: number | string): Promise<Vehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
-    this.logger.log(`Removing vehicle with id=${numericId}`);
 
     if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid vehicle ID: ${id}`);
@@ -347,7 +340,6 @@ export class VehiclesService extends BaseService<Vehicle> {
         .delete(schema.vehicles)
         .where(eq(schema.vehicles.id, numericId));
 
-      this.logger.log(`Successfully removed vehicle with id=${numericId}`);
       return vehicle;
     } catch (error: any) {
       this.logger.error(`Failed to remove vehicle with id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);

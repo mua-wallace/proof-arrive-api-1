@@ -50,7 +50,6 @@ export class AuthController {
     @Body() loginDto: LoginRequest,
     @CurrentUser() user: MalambiUser,
   ) {
-    this.logger.log(`User ${user.username} is attempting to log in`);
     return this.authService.login(user);
   }
 

@@ -30,7 +30,6 @@ export class QueueProcessorService implements OnModuleInit {
     }
 
     this.isProcessing = true;
-    this.logger.log('Queue processor started');
 
     // Process jobs continuously
     while (this.isProcessing) {
@@ -87,7 +86,6 @@ export class QueueProcessorService implements OnModuleInit {
       }
 
       await this.usersSyncService.syncUser(jobData.userData);
-      this.logger.debug(`User sync job completed: accid=${jobData.userData.accid}`);
     } catch (error) {
       this.logger.error(`Error processing user sync job:`, error instanceof Error ? error.stack : error);
     }
@@ -118,7 +116,6 @@ export class QueueProcessorService implements OnModuleInit {
       
       if (jobData.vehicleData) {
         await this.vehiclesSyncService.syncVehicle(jobData.vehicleData);
-        this.logger.debug(`Vehicle sync job completed: thirdPartyId=${jobData.vehicleData.id}, plate=${jobData.vehicleData.plate}`);
       } else if (jobData.thirdPartyId) {
         // Legacy support: if only thirdPartyId is provided, we would need to fetch vehicle data from Malambi API
         // For now, log an error as we need full vehicle data
@@ -171,7 +168,6 @@ export class QueueProcessorService implements OnModuleInit {
       
       if (jobData.centerData) {
         await this.centersSyncService.syncCenter(jobData.centerData);
-        this.logger.debug(`Center sync job completed: thirdPartyId=${jobData.centerData.id}, siteid=${jobData.centerData.siteid}`);
       } else if (jobData.thirdPartyId || jobData.siteid) {
         // If only IDs are provided, we would need to fetch center data from Malambi API
         // For now, log an error as we need full center data
@@ -189,7 +185,6 @@ export class QueueProcessorService implements OnModuleInit {
    */
   stopProcessing(): void {
     this.isProcessing = false;
-    this.logger.log('Queue processor stopped');
   }
 }
 

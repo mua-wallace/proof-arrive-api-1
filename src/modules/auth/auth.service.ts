@@ -45,8 +45,6 @@ export class AuthService {
   ) {}
 
   async login(user: MalambiUser): Promise<any> {
-    this.logger.debug(`Login attempt for user: accid=${user.accid}, subid=${user.subid}, type: accid=${typeof user.accid}, subid=${typeof user.subid}`);
-    
     // Convert accid and subid to numbers, handling empty strings and invalid values
     const accidStr = String(user.accid || '').trim();
     const subidStr = String(user.subid || '').trim();
@@ -64,14 +62,11 @@ export class AuthService {
       throw new UnauthorizedException('Invalid user credentials: invalid account IDs');
     }
     
-    this.logger.debug(`Valid credentials: accid=${accid}, subid=${subid}`);
-    
     // Check if user exists in database
     const userExists = await this.usersSyncService.userExists(accidStr);
     
     if (!userExists) {
       // User doesn't exist, trigger background sync job with full user data
-      this.logger.debug(`User ${accidStr} not found in database, triggering sync job with full user data`);
       await this.queueService.add('user-sync', 'sync-user', { 
         userData: {
           accid: accidStr,
@@ -90,7 +85,6 @@ export class AuthService {
       });
     } else {
       // User exists, update lastLoginAt
-      this.logger.debug(`User ${accidStr} exists, updating lastLoginAt`);
       await this.usersSyncService.updateLastLogin(accidStr);
     }
     
@@ -149,8 +143,6 @@ export class AuthService {
       },
     );
 
-    this.logger.debug(`Generating tokens for user: accid=${accid}, subid=${subid}`);
-
     // ✅ Persist refresh token record
     await this.storeRefreshToken(refreshtoken, accid, subid);
 
@@ -158,7 +150,6 @@ export class AuthService {
   }
 
   async storeRefreshToken(token: string, accid: number, subid: number) {
-    this.logger.debug(`Storing refresh token for user: accid=${accid}, subid=${subid}`);
     // calc expiry date, 3 days from now
     try {
       const expirationRefreshTokenDays = Number(
@@ -229,10 +220,8 @@ export class AuthService {
           and(
             eq(schema.refreshTokens.accid, accid),
             eq(schema.refreshTokens.subid, subid),
-          ),
-        );
-
-      this.logger.debug(`Remaining refresh tokens for accid=${accid}, subid=${subid}: ${remainingTokens.length}`);
+        ),
+      );
 
       // 3️⃣ Find a valid refresh token
       const validTokenRecord = await this.dbConnection
@@ -247,8 +236,6 @@ export class AuthService {
           ),
         )
         .limit(1);
-
-      this.logger.debug(`Valid token record found: ${validTokenRecord.length > 0}`);
 
       if (!validTokenRecord || validTokenRecord.length === 0) {
         throw new UnauthorizedException('Invalid or expired refresh token');
@@ -275,7 +262,6 @@ export class AuthService {
     credentials: Credentials,
   ): Promise<{ success: boolean; message: string }> {
     const { token, accid, subid } = credentials;
-    this.logger.debug(`Logging out user: accid=${accid}, subid=${subid}`);
     
     // Validate credentials
     if (!token || !accid || !subid || isNaN(accid) || isNaN(subid)) {
@@ -298,7 +284,6 @@ export class AuthService {
               eq(schema.refreshTokens.subid, subid),
             ),
           );
-        this.logger.debug(`Cleared refresh tokens for user: accid=${accid}, subid=${subid}`);
       } catch (dbError) {
         this.logger.error('Error clearing refresh tokens:', dbError instanceof Error ? dbError.stack : dbError);
         // Continue even if clearing tokens fails
