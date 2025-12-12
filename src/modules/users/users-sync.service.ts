@@ -3,7 +3,7 @@ import { Inject } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '@modules/schemas';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
 
 @Injectable()
@@ -41,10 +41,11 @@ export class UsersSyncService {
       this.logger.debug(`Syncing user: accid=${accidStr}, subid=${subidStr}`);
 
       // Check if user already exists
+      // Use sql template to explicitly cast the parameter as text
       const existingUser = await this.dbConnection
         .select()
         .from(schema.users)
-        .where(eq(schema.users.accid, accidStr))
+        .where(sql`${schema.users.accid} = ${accidStr}::text`)
         .limit(1);
 
       if (existingUser.length > 0) {
@@ -91,7 +92,7 @@ export class UsersSyncService {
           lastLoginAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(eq(schema.users.accid, accidStr))
+        .where(sql`${schema.users.accid} = ${accidStr}::text`)
         .execute();
 
       this.logger.debug(`Updated lastLoginAt for user: accid=${accidStr}`);
@@ -105,14 +106,26 @@ export class UsersSyncService {
    * Check if user exists in database
    */
   async userExists(accid: number | string): Promise<boolean> {
-    const accidStr = String(accid);
-    const user = await this.dbConnection
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.accid, accidStr))
-      .limit(1);
+    // Explicitly convert to string and ensure it's treated as a string type
+    // This is critical because accid is a text column in the database
+    const accidStr: string = typeof accid === 'number' ? accid.toString() : String(accid);
+    
+    this.logger.debug(`Checking if user exists: accid=${accidStr} (type: ${typeof accidStr})`);
+    
+    try {
+      // Use sql template to explicitly cast the parameter as text
+      // This ensures PostgreSQL receives it as a string, not a number
+      const user = await this.dbConnection
+        .select()
+        .from(schema.users)
+        .where(sql`${schema.users.accid} = ${accidStr}::text`)
+        .limit(1);
 
-    return user.length > 0;
+      return user.length > 0;
+    } catch (error) {
+      this.logger.error(`Error checking if user exists (accid=${accidStr}):`, error instanceof Error ? error.message : error);
+      throw error;
+    }
   }
 }
 
