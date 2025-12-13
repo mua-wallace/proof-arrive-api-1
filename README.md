@@ -270,7 +270,10 @@ The Swagger documentation includes detailed information about:
 
 - **List Centers**: Paginated list with filtering and relations
 - **Get Center Details**: Retrieve center information by ID
-- **Sync Center**: Trigger background job to sync center from Malambi by geozone ID
+- **Sync Center**: Find and sync center from Malambi by geozone ID - **Returns center data immediately**
+  - If center exists in database: Returns the database record
+  - If center found in API: Returns API data and triggers background sync job
+  - Response includes: `found`, `synced`, `skipped`, `message`, and `center` (center data object)
 - **Get Centers from API**: Fetch all centers from Malambi API without saving
 - **Delete Center**: Remove center by internal ID
 - **Data Source**: Synced from Malambi API on-demand
@@ -449,6 +452,15 @@ This project is private and proprietary.
 
 The API integrates with the **Malambi** third-party system to keep data synchronized:
 
+### Enhanced Integration Features
+
+The API provides **immediate data access** during sync operations:
+
+- **Center Sync with Data Return**: When syncing a center by geozone ID, the endpoint returns the center data immediately
+  - No need for a separate API call to fetch center details after syncing
+  - Works seamlessly whether the center exists in the database or needs to be fetched from the Malambi API
+  - Background sync job runs asynchronously while you can use the returned data immediately
+
 ### Automatic Sync
 
 - **Users**: Automatically synced on login via background jobs if not already present in local database
@@ -458,6 +470,26 @@ The API integrates with the **Malambi** third-party system to keep data synchron
 
 - **Vehicles**: Sync by vehicle ID via `POST /api/v1/vehicles/sync?vehicle_id=xxx`
 - **Centers**: Sync by geozone ID via `POST /api/v1/centers/sync?geozone_id=xxx`
+  - **Enhanced Response**: The endpoint now returns center data immediately in the response
+  - If center already exists in database: Returns the existing center record
+  - If center found in Malambi API: Returns the API center data and triggers background sync job
+  - This eliminates the need for a separate API call to fetch center data after syncing
+  - Response format:
+    ```json
+    {
+      "found": true,
+      "synced": true,
+      "skipped": false,
+      "message": "Center with gzone_id=3656 (Center Name) sync job triggered",
+      "center": {
+        "id": 84,
+        "siteid": 9164,
+        "name": "Center Name",
+        "gzone_id": 3656,
+        ...
+      }
+    }
+    ```
 
 ### Background Jobs
 
