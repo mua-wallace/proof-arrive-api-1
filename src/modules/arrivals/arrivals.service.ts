@@ -8,6 +8,7 @@ import { CreateArrivalDto } from './dto/create-arrival.dto';
 import { UpdateArrivalStatusDto } from './dto/update-arrival-status.dto';
 import { CreateProcessingStageDto } from './dto/create-processing-stage.dto';
 import { UpdateProcessingStageDto } from './dto/update-processing-stage.dto';
+import { ArrivalStatus } from './dto/arrival-status.enum';
 
 
 type Arrival = typeof schema.arrivals.$inferSelect & BaseEntity;
@@ -252,29 +253,15 @@ export class ArrivalsService extends BaseService<Arrival> {
         throw new NotFoundException(`Center with ID ${createDto.centerId} not found`);
       }
 
-      // Check if QR code is unique (if provided)
-      if (createDto.qrCode) {
-        const existing = await this.dbConnection
-          .select()
-          .from(schema.arrivals)
-          .where(eq(schema.arrivals.qrCode, createDto.qrCode))
-          .limit(1);
-
-        if (existing && existing.length > 0) {
-          throw new BadRequestException(`QR code ${createDto.qrCode} already exists`);
-        }
-      }
-
       // Create arrival
       const [arrival] = await this.dbConnection
         .insert(schema.arrivals)
         .values({
           vehicleId: createDto.vehicleId,
           centerId: createDto.centerId,
-          agentId: agentId,
+          agentId: agentId, // Keep for backward compatibility with schema
           createdBy: agentId, // The logged-in user who created the record
-          qrCode: createDto.qrCode || null,
-          status: createDto.status || 'arrived',
+          status: createDto.status || ArrivalStatus.ARRIVED,
           latitude: createDto.latitude || null,
           longitude: createDto.longitude || null,
           notes: createDto.notes || null,

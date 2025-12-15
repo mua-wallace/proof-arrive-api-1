@@ -1,11 +1,15 @@
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsEnum } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { ArrivalStatus } from './arrival-status.enum';
 
 export class UpdateArrivalStatusDto {
-  @ApiProperty({ description: 'New status for the arrival' })
+  @ApiProperty({ 
+    description: 'New status for the arrival',
+    enum: ArrivalStatus,
+    example: ArrivalStatus.PROCESSING 
+  })
   @IsNotEmpty()
-  @IsString()
-  @MaxLength(50)
-  status: string;
+  @IsEnum(ArrivalStatus)
+  status: ArrivalStatus;
 }
 

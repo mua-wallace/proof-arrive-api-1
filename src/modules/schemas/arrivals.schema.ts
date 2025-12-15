@@ -11,7 +11,6 @@ export const arrivals = pgTable('arrivals', {
   centerId: integer('center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
   agentId: text('agent_id').notNull().references(() => users.accid, { onDelete: 'restrict' }),
   createdBy: text('created_by').notNull(), // No FK constraint since accid is not unique
-  qrCode: varchar('qr_code', { length: 255 }).unique(),
   status: varchar('status', { length: 50 }).default('arrived'),
   arrivedAt: timestamp('arrived_at').notNull().defaultNow(),
   latitude: decimal('latitude', { precision: 10, scale: 8 }),
@@ -24,6 +23,5 @@ export const arrivals = pgTable('arrivals', {
   createdByIdx: index('idx_arrivals_created_by').on(table.createdBy),
   statusIdx: index('idx_arrivals_status').on(table.status),
   arrivedAtIdx: index('idx_arrivals_arrived_at').on(table.arrivedAt),
-  qrCodeIdx: index('idx_arrivals_qr_code').on(table.qrCode),
 }));
 

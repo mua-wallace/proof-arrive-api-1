@@ -61,9 +61,12 @@ FROM node:22.17.0 AS production
 
 WORKDIR /usr/src/app
 
-# Copy package files and install dependencies (including drizzle-kit for schema sync)
+# Copy package files and install dependencies (including drizzle-kit and TypeScript for schema sync)
 COPY package.json package-lock.json* ./
 RUN npm ci && npm cache clean --force
+# Note: We install all dependencies (including devDependencies) because:
+# - drizzle-kit needs TypeScript to read drizzle.config.ts
+# - TypeScript is needed for schema files
 
 # Copy built application from build stage
 COPY --from=build /usr/src/app/dist ./dist

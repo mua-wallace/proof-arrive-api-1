@@ -1,5 +1,6 @@
-import { IsNotEmpty, IsString, IsNumber, IsOptional, IsDecimal, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, IsOptional, IsDecimal, MaxLength, IsEnum } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ArrivalStatus } from './arrival-status.enum';
 
 export class CreateArrivalDto {
   @ApiProperty({ description: 'Vehicle ID (internal database ID)' })
@@ -12,17 +13,15 @@ export class CreateArrivalDto {
   @IsNumber()
   centerId: number;
 
-  @ApiPropertyOptional({ description: 'QR Code (unique identifier for the arrival)' })
+  @ApiPropertyOptional({ 
+    description: 'Status of the arrival', 
+    enum: ArrivalStatus,
+    default: ArrivalStatus.ARRIVED,
+    example: ArrivalStatus.ARRIVED 
+  })
   @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  qrCode?: string;
-
-  @ApiPropertyOptional({ description: 'Status of the arrival', default: 'arrived' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  status?: string;
+  @IsEnum(ArrivalStatus)
+  status?: ArrivalStatus;
 
   @ApiPropertyOptional({ description: 'Latitude coordinate' })
   @IsOptional()

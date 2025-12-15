@@ -40,11 +40,11 @@ export class ArrivalsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Create new arrival (scan QR code)',
-    description: 'Creates a new arrival record when a vehicle arrives at a center. The agent ID is automatically extracted from the authenticated user.',
+    summary: 'Create new arrival',
+    description: 'Creates a new arrival record when a vehicle arrives at a center. The agent ID is automatically extracted from the authenticated user. Vehicle ID should be obtained from scanning the QR code and fetching vehicle details via /api/v1/vehicles/from-api?vehicle_id={qr_code_value}.',
   })
   @ApiResponse({ status: 201, description: 'Arrival created successfully' })
-  @ApiResponse({ status: 400, description: 'Bad request (e.g., QR code already exists)' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 404, description: 'Vehicle or center not found' })
   async create(
     @Body() createDto: CreateArrivalDto,

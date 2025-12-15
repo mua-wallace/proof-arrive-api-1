@@ -179,18 +179,36 @@ See `.env.example` for all available environment variables. Key variables includ
 
 ## 🗄️ Database
 
-### Migrations
+### Automatic Schema Synchronization
 
-Generate migrations with Drizzle Kit:
+**The application automatically syncs the database schema on every container startup!**
+
+When the container starts, the `scripts/start-with-migrations.sh` script automatically:
+1. Checks for database connection
+2. Syncs the schema using `drizzle-kit push` (with retry logic)
+3. Starts the NestJS application
+
+**You don't need to manually run migrations in production** - the schema is automatically kept in sync with your code.
+
+### Manual Migrations (Development)
+
+If you need to manually sync the schema:
 
 ```bash
-npx drizzle-kit generate
+# Inside Docker container
+sh scripts/run-migrations.sh
+
+# Or use the helper script
+sh scripts/drizzle.sh push
+
+# Or use npm scripts
+npm run db:push
 ```
 
-Run migrations:
+Generate migration files (if needed):
 
 ```bash
-npx drizzle-kit migrate
+npm run db:generate
 ```
 
 ### Database Schema

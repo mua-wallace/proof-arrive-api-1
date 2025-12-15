@@ -15,6 +15,13 @@
       "when": 1765274655919,
       "tag": "0002_add_created_by_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1765810159839,
+      "tag": "0002_next_venom",
+      "breakpoints": true
     }
   ]
 }
