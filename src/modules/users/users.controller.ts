@@ -34,7 +34,6 @@ export class UsersController {
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits)' })
   async findAllWithFilter(
     @Query() filterDto: FilterUsersDto,
-    @Query('include') include?: string,
   ): Promise<PaginateResult<User>> {
     const query: PaginateQuery = {
       page: filterDto.page ?? 1,
@@ -50,7 +49,7 @@ export class UsersController {
     };
 
     const options = {
-      include: include ? include.split(',') : undefined,
+      include: filterDto.include ? filterDto.include.split(',') : undefined,
     };
 
     return this.usersService.findAll(query, options);

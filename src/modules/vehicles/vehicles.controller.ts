@@ -27,7 +27,6 @@ export class VehiclesController {
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles)' })
   async findAll(
     @Query() filterDto: FilterVehiclesDto,
-    @Query('include') include?: string,
   ): Promise<PaginateResult<Vehicle>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -43,7 +42,7 @@ export class VehiclesController {
     };
 
     const options = {
-      include: include ? include.split(',') : undefined,
+      include: filterDto.include ? filterDto.include.split(',') : undefined,
     };
 
     return this.vehiclesService.findAll(query, options);
@@ -69,6 +68,46 @@ export class VehiclesController {
       credentials.subid.toString(),
       vehicleId,
     );
+  }
+
+  @Get('find')
+  @ApiOperation({
+    summary: 'Find a vehicle by any field(s)',
+    description: 'Searches for a vehicle using one or more field criteria. Returns the first matching vehicle. Supports fields like: plate, thirdPartyId, model, brand, year, tag2, groupId, isActive, etc.',
+  })
+  @ApiQuery({ name: 'plate', required: false, type: String, description: 'Vehicle plate number' })
+  @ApiQuery({ name: 'thirdPartyId', required: false, type: Number, description: 'Third party ID from Malambi API' })
+  @ApiQuery({ name: 'model', required: false, type: String, description: 'Vehicle model' })
+  @ApiQuery({ name: 'brand', required: false, type: String, description: 'Vehicle brand' })
+  @ApiQuery({ name: 'year', required: false, type: Number, description: 'Vehicle year' })
+  @ApiQuery({ name: 'tag2', required: false, type: String, description: 'Vehicle tag2' })
+  @ApiQuery({ name: 'groupId', required: false, type: Number, description: 'Group ID' })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Active status' })
+  @ApiQuery({ name: 'id', required: false, type: Number, description: 'Internal vehicle ID' })
+  async findOneBy(
+    @Query() query: Record<string, any>,
+  ): Promise<Vehicle> {
+    // Convert string numbers to numbers for numeric fields
+    const requestData: Record<string, any> = {};
+    
+    if (query.id !== undefined) requestData.id = Number(query.id);
+    if (query.thirdPartyId !== undefined) requestData.thirdPartyId = Number(query.thirdPartyId);
+    if (query.plate !== undefined) requestData.plate = query.plate;
+    if (query.model !== undefined) requestData.model = query.model;
+    if (query.brand !== undefined) requestData.brand = query.brand;
+    if (query.year !== undefined) requestData.year = Number(query.year);
+    if (query.tag2 !== undefined) requestData.tag2 = query.tag2;
+    if (query.groupId !== undefined) requestData.groupId = Number(query.groupId);
+    if (query.isActive !== undefined) {
+      requestData.isActive = query.isActive === 'true' || query.isActive === true;
+    }
+    
+    // Validate that at least one search criterion is provided
+    if (Object.keys(requestData).length === 0) {
+      throw new BadRequestException('At least one search criterion must be provided (e.g., plate, thirdPartyId, id, etc.)');
+    }
+    
+    return this.vehiclesService.findOneBy(requestData);
   }
 
   @Get(':id')

@@ -64,7 +64,6 @@ export class ExitsController {
   @ApiResponse({ status: 200, description: 'List of exits retrieved successfully' })
   async findAll(
     @Query() filterDto: FilterExitsDto,
-    @Query('include') include?: string,
   ): Promise<PaginateResult<Exit>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -80,7 +79,7 @@ export class ExitsController {
     };
 
     const options = {
-      include: include ? include.split(',') : undefined,
+      include: filterDto.include ? filterDto.include.split(',') : undefined,
     };
 
     return this.exitsService.findAll(query, options);

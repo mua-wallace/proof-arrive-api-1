@@ -49,5 +49,12 @@ export class FilterUsersDto {
   @IsOptional()
   @IsString()
   sortBy?: string;
+
+  @ApiPropertyOptional({
+    description: 'Comma-separated relations to include (arrivals, exits)',
+  })
+  @IsOptional()
+  @IsString()
+  include?: string;
 }
 

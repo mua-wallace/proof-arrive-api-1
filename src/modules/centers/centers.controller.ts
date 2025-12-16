@@ -27,7 +27,6 @@ export class CentersController {
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, arrivals, exits, incomingVehicles)' })
   async findAll(
     @Query() filterDto: FilterCentersDto,
-    @Query('include') include?: string,
   ): Promise<PaginateResult<Center>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -43,7 +42,7 @@ export class CentersController {
     };
 
     const options = {
-      include: include ? include.split(',') : undefined,
+      include: filterDto.include ? filterDto.include.split(',') : undefined,
     };
 
     return this.centersService.findAll(query, options);

@@ -65,7 +65,6 @@ export class IncomingController {
   @ApiResponse({ status: 200, description: 'List of incoming vehicles retrieved successfully' })
   async findAll(
     @Query() filterDto: FilterIncomingVehiclesDto,
-    @Query('include') include?: string,
   ): Promise<PaginateResult<IncomingVehicle>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -81,7 +80,7 @@ export class IncomingController {
     };
 
     const options = {
-      include: include ? include.split(',') : undefined,
+      include: filterDto.include ? filterDto.include.split(',') : undefined,
     };
 
     return this.incomingService.findAll(query, options);

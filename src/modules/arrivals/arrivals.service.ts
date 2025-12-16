@@ -28,6 +28,113 @@ export class ArrivalsService extends BaseService<Arrival> {
     this.dbConnection = db;
   }
 
+  /**
+   * Transform arrival response to show thirdPartyId and geozoneId instead of internal IDs
+   * This maintains API consistency while using internal IDs for database relationships
+   */
+  private async transformArrivalResponse(arrival: any): Promise<any> {
+    if (!arrival) return arrival;
+
+    const transformed = { ...arrival };
+
+    // If vehicleId exists (internal ID), look up the thirdPartyId
+    if (arrival.vehicleId && typeof arrival.vehicleId === 'number') {
+      try {
+        const [vehicle] = await this.dbConnection
+          .select({ thirdPartyId: schema.vehicles.thirdPartyId })
+          .from(schema.vehicles)
+          .where(eq(schema.vehicles.id, arrival.vehicleId))
+          .limit(1);
+        
+        if (vehicle) {
+          transformed.vehicleId = vehicle.thirdPartyId;
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to lookup vehicle thirdPartyId for vehicleId ${arrival.vehicleId}: ${error}`);
+      }
+    }
+
+    // If centerId exists (internal ID), look up the geozoneId
+    if (arrival.centerId && typeof arrival.centerId === 'number') {
+      try {
+        const [center] = await this.dbConnection
+          .select({ geozoneId: schema.centers.geozoneId })
+          .from(schema.centers)
+          .where(eq(schema.centers.id, arrival.centerId))
+          .limit(1);
+        
+        if (center) {
+          transformed.centerId = center.geozoneId;
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to lookup center geozoneId for centerId ${arrival.centerId}: ${error}`);
+      }
+    }
+
+    return transformed;
+  }
+
+  /**
+   * Transform multiple arrival responses
+   */
+  private async transformArrivalResponses(arrivals: any[]): Promise<any[]> {
+    if (!arrivals || arrivals.length === 0) return arrivals;
+
+    // Batch lookup vehicles and centers for better performance
+    const vehicleIds = [...new Set(arrivals.map(a => a.vehicleId).filter(Boolean))];
+    const centerIds = [...new Set(arrivals.map(a => a.centerId).filter(Boolean))];
+
+    const vehicleMap = new Map<number, number>();
+    const centerMap = new Map<number, number>();
+
+    // Batch fetch vehicles
+    if (vehicleIds.length > 0) {
+      try {
+        const vehicles = await this.dbConnection
+          .select({ id: schema.vehicles.id, thirdPartyId: schema.vehicles.thirdPartyId })
+          .from(schema.vehicles)
+          .where(inArray(schema.vehicles.id, vehicleIds));
+        
+        vehicles.forEach((v: any) => {
+          vehicleMap.set(v.id, v.thirdPartyId);
+        });
+      } catch (error) {
+        this.logger.warn(`Failed to batch lookup vehicle thirdPartyIds: ${error}`);
+      }
+    }
+
+    // Batch fetch centers
+    if (centerIds.length > 0) {
+      try {
+        const centers = await this.dbConnection
+          .select({ id: schema.centers.id, geozoneId: schema.centers.geozoneId })
+          .from(schema.centers)
+          .where(inArray(schema.centers.id, centerIds));
+        
+        centers.forEach((c: any) => {
+          centerMap.set(c.id, c.geozoneId);
+        });
+      } catch (error) {
+        this.logger.warn(`Failed to batch lookup center geozoneIds: ${error}`);
+      }
+    }
+
+    // Transform arrivals
+    return arrivals.map(arrival => {
+      const transformed = { ...arrival };
+      
+      if (arrival.vehicleId && vehicleMap.has(arrival.vehicleId)) {
+        transformed.vehicleId = vehicleMap.get(arrival.vehicleId);
+      }
+      
+      if (arrival.centerId && centerMap.has(arrival.centerId)) {
+        transformed.centerId = centerMap.get(arrival.centerId);
+      }
+      
+      return transformed;
+    });
+  }
+
   async findAll(
     query: PaginateQuery = {},
     options?: { include?: string[] },
@@ -118,19 +225,56 @@ export class ArrivalsService extends BaseService<Arrival> {
         const ids = matchingIds.map((row: any) => row.id);
 
         if (ids.length > 0) {
-          // Use relational query API to get data with relations
-          const allData = await this.dbConnection.query.arrivals.findMany({
-            where: (arrivals: any, { inArray: inArrayFn }: any) => inArrayFn(arrivals.id, ids),
-            with: withRelations,
-          });
-          // Re-sort to match original order
-          const idMap = new Map<number, number>(ids.map((id: number, idx: number) => [id, idx]));
-          allData.sort((a: any, b: any) => {
-            const aIdx: number = idMap.get(a.id) ?? 0;
-            const bIdx: number = idMap.get(b.id) ?? 0;
-            return aIdx - bIdx;
-          });
-          data = allData;
+          try {
+            // Use relational query API to get data with relations
+            const allData = await this.dbConnection.query.arrivals.findMany({
+              where: (arrivals: any, { inArray: inArrayFn }: any) => inArrayFn(arrivals.id, ids),
+              with: withRelations,
+            });
+            // Re-sort to match original order
+            const idMap = new Map<number, number>(ids.map((id: number, idx: number) => [id, idx]));
+            allData.sort((a: any, b: any) => {
+              const aIdx: number = idMap.get(a.id) ?? 0;
+              const bIdx: number = idMap.get(b.id) ?? 0;
+              return aIdx - bIdx;
+            });
+            // Filter out arrivals with missing required relations (e.g., vehicle, center)
+            // This handles cases where foreign key references point to deleted records
+            data = allData.filter((arrival: any) => {
+              if (withRelations.vehicle && !arrival.vehicle) {
+                this.logger.warn(`Arrival ${arrival.id} references missing vehicle ${arrival.vehicleId} - excluding from results`);
+                return false; // Exclude arrivals with missing vehicles
+              }
+              if (withRelations.center && !arrival.center) {
+                this.logger.warn(`Arrival ${arrival.id} references missing center ${arrival.centerId} - excluding from results`);
+                return false; // Exclude arrivals with missing centers
+              }
+              if (withRelations.agent && !arrival.agent) {
+                this.logger.warn(`Arrival ${arrival.id} references missing agent ${arrival.agentId}`);
+                // Don't exclude - agent might be optional, but log for visibility
+              }
+              return true;
+            });
+          } catch (error: any) {
+            // If relational query fails (e.g., due to missing relations or database constraints),
+            // fall back to standard query without relations
+            this.logger.warn(
+              `Relational query failed for arrivals, falling back to standard query: ${error?.message}`,
+            );
+            // Fall back to query without relations to avoid breaking the request
+            data = await this.dbConnection
+              .select()
+              .from(schema.arrivals)
+              .where(
+                and(
+                  whereClause,
+                  inArray(schema.arrivals.id, ids),
+                ),
+              )
+              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+              .limit(limit)
+              .offset(offset);
+          }
         } else {
           data = [];
         }
@@ -145,8 +289,11 @@ export class ArrivalsService extends BaseService<Arrival> {
           .offset(offset);
       }
 
+      // Transform arrivals to show thirdPartyId and geozoneId instead of internal IDs
+      const transformedData = await this.transformArrivalResponses(data);
+
       return {
-        data: data as Arrival[],
+        data: transformedData as Arrival[],
         meta: {
           itemsPerPage: limit,
           totalItems: total,
@@ -218,7 +365,10 @@ export class ArrivalsService extends BaseService<Arrival> {
       if (!arrival) {
         throw new NotFoundException(`Arrival with ID ${numericId} not found`);
       }
-      return arrival as Arrival;
+      
+      // Transform arrival to show thirdPartyId and geozoneId instead of internal IDs
+      const transformedArrival = await this.transformArrivalResponse(arrival);
+      return transformedArrival as Arrival;
     } catch (error: any) {
       this.logger.error(`Failed to fetch arrival with id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException) throw error;
@@ -232,33 +382,36 @@ export class ArrivalsService extends BaseService<Arrival> {
 
     try {
       // Validate vehicle exists
-      const vehicle = await this.dbConnection
+      const [vehicle] = await this.dbConnection
         .select()
         .from(schema.vehicles)
-        .where(eq(schema.vehicles.id, createDto.vehicleId))
+        .where(eq(schema.vehicles.thirdPartyId, createDto.vehicleId))
         .limit(1);
 
-      if (!vehicle || vehicle.length === 0) {
-        throw new NotFoundException(`Vehicle with ID ${createDto.vehicleId} not found`);
+      if (!vehicle) {
+        throw new NotFoundException(
+          `Vehicle with thirdPartyId ${createDto.vehicleId} not found. ` +
+          `Please ensure the vehicle is synced from the Malambi API first using POST /api/v1/vehicles/sync?vehicle_id=${createDto.vehicleId}`
+        );
       }
 
       // Validate center exists
-      const center = await this.dbConnection
+      const [center] = await this.dbConnection
         .select()
         .from(schema.centers)
-        .where(eq(schema.centers.id, createDto.centerId))
+        .where(eq(schema.centers.geozoneId, createDto.centerId))
         .limit(1);
 
-      if (!center || center.length === 0) {
-        throw new NotFoundException(`Center with ID ${createDto.centerId} not found`);
+      if (!center) {
+        throw new NotFoundException(`Center with geozoneId ${createDto.centerId} not found`);
       }
 
-      // Create arrival
+      // Create arrival using internal database IDs
       const [arrival] = await this.dbConnection
         .insert(schema.arrivals)
         .values({
-          vehicleId: createDto.vehicleId,
-          centerId: createDto.centerId,
+          vehicleId: vehicle.id, // Use internal vehicle ID
+          centerId: center.id, // Use internal center ID
           agentId: agentId, // Keep for backward compatibility with schema
           createdBy: agentId, // The logged-in user who created the record
           status: createDto.status || ArrivalStatus.ARRIVED,
@@ -269,7 +422,12 @@ export class ArrivalsService extends BaseService<Arrival> {
         })
         .returning();
 
-      return arrival as Arrival;
+      // Transform response to show original thirdPartyId and geozoneId from payload
+      return {
+        ...arrival,
+        vehicleId: createDto.vehicleId, // Return original thirdPartyId from payload
+        centerId: createDto.centerId, // Return original geozoneId from payload
+      } as Arrival;
     } catch (error: any) {
       this.logger.error(`Failed to create arrival: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
@@ -300,7 +458,9 @@ export class ArrivalsService extends BaseService<Arrival> {
         .where(eq(schema.arrivals.id, numericId))
         .returning();
 
-      return updated as Arrival;
+      // Transform arrival to show thirdPartyId and geozoneId instead of internal IDs
+      const transformedArrival = await this.transformArrivalResponse(updated);
+      return transformedArrival as Arrival;
     } catch (error: any) {
       this.logger.error(`Failed to update arrival status for id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException) throw error;

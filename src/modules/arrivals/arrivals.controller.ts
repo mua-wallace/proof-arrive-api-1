@@ -41,7 +41,7 @@ export class ArrivalsController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create new arrival',
-    description: 'Creates a new arrival record when a vehicle arrives at a center. The agent ID is automatically extracted from the authenticated user. Vehicle ID should be obtained from scanning the QR code and fetching vehicle details via /api/v1/vehicles/from-api?vehicle_id={qr_code_value}.',
+    description: 'Creates a new arrival record when a vehicle arrives at a center. The agent ID is automatically extracted from the authenticated user. Accepts vehicle thirdPartyId (from Malambi API) and center geozoneId (from Malambi API) - these are automatically resolved to internal database IDs.',
   })
   @ApiResponse({ status: 201, description: 'Arrival created successfully' })
   @ApiResponse({ status: 400, description: 'Bad request' })
@@ -67,7 +67,6 @@ export class ArrivalsController {
   @ApiResponse({ status: 200, description: 'List of arrivals retrieved successfully' })
   async findAll(
     @Query() filterDto: FilterArrivalsDto,
-    @Query('include') include?: string,
   ): Promise<PaginateResult<Arrival>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -83,7 +82,7 @@ export class ArrivalsController {
     };
 
     const options = {
-      include: include ? include.split(',') : undefined,
+      include: filterDto.include ? filterDto.include.split(',') : undefined,
     };
 
     return this.arrivalsService.findAll(query, options);

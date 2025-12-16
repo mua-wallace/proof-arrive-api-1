@@ -3,12 +3,18 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrivalStatus } from './arrival-status.enum';
 
 export class CreateArrivalDto {
-  @ApiProperty({ description: 'Vehicle ID (internal database ID)' })
+  @ApiProperty({ 
+    description: 'Vehicle thirdPartyId (from Malambi API, not internal database ID)',
+    example: 17589
+  })
   @IsNotEmpty()
   @IsNumber()
   vehicleId: number;
 
-  @ApiProperty({ description: 'Center ID (internal database ID)' })
+  @ApiProperty({ 
+    description: 'Center geozoneId (from Malambi API, not internal database ID)',
+    example: 4114
+  })
   @IsNotEmpty()
   @IsNumber()
   centerId: number;

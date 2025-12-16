@@ -49,5 +49,12 @@ export class FilterVehiclesDto {
   @IsOptional()
   @IsString()
   sortBy?: string;
+
+  @ApiPropertyOptional({
+    description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles)',
+  })
+  @IsOptional()
+  @IsString()
+  include?: string;
 }
 
