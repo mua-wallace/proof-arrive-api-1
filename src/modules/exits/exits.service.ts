@@ -314,6 +314,9 @@ export class ExitsService extends BaseService<Exit> {
       if (updateDto.exitType !== undefined) {
         updateData.exitType = updateDto.exitType;
       }
+      if (updateDto.status !== undefined) {
+        updateData.status = updateDto.status;
+      }
       if (updateDto.destinationCenterId !== undefined) {
         // Validate destination center exists if provided
         if (updateDto.destinationCenterId !== null) {

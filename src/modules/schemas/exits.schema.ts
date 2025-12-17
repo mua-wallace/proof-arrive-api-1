@@ -12,6 +12,7 @@ export const exits = pgTable('exits', {
   agentId: text('agent_id').notNull().references(() => users.accid, { onDelete: 'restrict' }),
   createdBy: text('created_by').notNull(), // No FK constraint since accid is not unique
   exitType: varchar('exit_type', { length: 50 }).notNull(),
+  status: varchar('status', { length: 50 }).default('in_transit'),
   destinationCenterId: integer('destination_center_id').references(() => centers.id, { onDelete: 'set null' }),
   destinationName: varchar('destination_name', { length: 255 }),
   exitedAt: timestamp('exited_at').notNull().defaultNow(),
@@ -23,6 +24,7 @@ export const exits = pgTable('exits', {
   centerIdx: index('idx_exits_center').on(table.centerId),
   agentIdx: index('idx_exits_agent').on(table.agentId),
   createdByIdx: index('idx_exits_created_by').on(table.createdBy),
+  statusIdx: index('idx_exits_status').on(table.status),
   destinationIdx: index('idx_exits_destination').on(table.destinationCenterId),
   exitedAtIdx: index('idx_exits_exited_at').on(table.exitedAt),
 }));

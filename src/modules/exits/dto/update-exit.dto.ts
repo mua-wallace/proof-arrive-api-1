@@ -8,6 +8,12 @@ export class UpdateExitDto {
   @MaxLength(50)
   exitType?: string;
 
+  @ApiPropertyOptional({ description: 'Status of the exit' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  status?: string;
+
   @ApiPropertyOptional({ description: 'Destination center ID' })
   @IsOptional()
   @IsNumber()

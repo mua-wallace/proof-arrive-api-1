@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Put,
+  Delete,
   Param,
   Body,
   Query,
@@ -22,6 +23,7 @@ import { Credentials, PaginateResult } from '@common/interfaces';
 import {
   CreateArrivalDto,
   FilterArrivalsDto,
+  FilterProcessingStagesDto,
   UpdateArrivalStatusDto,
   CreateProcessingStageDto,
   UpdateProcessingStageDto,
@@ -88,6 +90,41 @@ export class ArrivalsController {
     return this.arrivalsService.findAll(query, options);
   }
 
+  @Get('process')
+  @ApiOperation({
+    summary: 'List all processing stages',
+    description: 'Retrieves a paginated list of processing stages with optional filtering, searching, and sorting. Returns processing stages from all arrivals. No arrival ID is required.',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
+  @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
+  @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrival)' })
+  @ApiResponse({ status: 200, description: 'List of processing stages retrieved successfully' })
+  async getAllProcessingStages(
+    @Query() filterDto: FilterProcessingStagesDto,
+  ): Promise<PaginateResult<ProcessingStage>> {
+    const query = {
+      page: filterDto.page ?? 1,
+      limit: filterDto.limit ?? 100,
+      search: filterDto.search,
+      searchBy: filterDto.searchBy ? filterDto.searchBy.split(',') : undefined,
+      sortBy: filterDto.sortBy
+        ? (filterDto.sortBy.split(',').map((s) => {
+            const [field, direction] = s.split(':');
+            return [field, (direction || 'ASC').toUpperCase()] as [string, 'ASC' | 'DESC'];
+          }) as [string, 'ASC' | 'DESC'][])
+        : undefined,
+    };
+
+    const options = {
+      include: filterDto.include ? filterDto.include.split(',') : undefined,
+    };
+
+    return this.arrivalsService.getAllProcessingStages(query, options);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get arrival details',
@@ -120,6 +157,20 @@ export class ArrivalsController {
     return this.arrivalsService.updateStatus(Number(id), updateDto);
   }
 
+  @Get(':id/process/:stageId')
+  @ApiOperation({
+    summary: 'Get processing stage details',
+    description: 'Retrieves detailed information about a specific processing stage for an arrival.',
+  })
+  @ApiResponse({ status: 200, description: 'Processing stage details retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Arrival or processing stage not found' })
+  async getProcessingStage(
+    @Param('id') id: string,
+    @Param('stageId') stageId: string,
+  ): Promise<ProcessingStage> {
+    return this.arrivalsService.getProcessingStage(Number(id), Number(stageId));
+  }
+
   @Post(':id/process')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -148,5 +199,19 @@ export class ArrivalsController {
     @Body() updateDto: UpdateProcessingStageDto,
   ): Promise<ProcessingStage> {
     return this.arrivalsService.updateProcessingStage(Number(id), Number(stageId), updateDto);
+  }
+
+  @Delete(':id/process/:stageId')
+  @ApiOperation({
+    summary: 'Remove processing stage',
+    description: 'Removes a processing stage from an arrival.',
+  })
+  @ApiResponse({ status: 200, description: 'Processing stage removed successfully' })
+  @ApiResponse({ status: 404, description: 'Arrival or processing stage not found' })
+  async removeProcessingStage(
+    @Param('id') id: string,
+    @Param('stageId') stageId: string,
+  ): Promise<ProcessingStage> {
+    return this.arrivalsService.removeProcessingStage(Number(id), Number(stageId));
   }
 }

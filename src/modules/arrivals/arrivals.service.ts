@@ -461,6 +461,209 @@ export class ArrivalsService extends BaseService<Arrival> {
     }
   }
 
+  async getAllProcessingStages(
+    query: PaginateQuery = {},
+    options?: { include?: string[] },
+  ): Promise<PaginateResult<ProcessingStage>> {
+    try {
+      const page = query.page || 1;
+      const limit = query.limit || 100;
+      const offset = (page - 1) * limit;
+
+      // Build where conditions
+      const conditions: SQL[] = [];
+
+      // Add search functionality
+      if (query.search && query.searchBy && query.searchBy.length > 0) {
+        const searchConditions = query.searchBy
+          .map((field) => {
+            const column = (schema.processingStages as any)[field];
+            if (column) {
+              return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+            }
+            return null;
+          })
+          .filter(Boolean) as SQL[];
+
+        if (searchConditions.length > 0) {
+          conditions.push(sql`(${sql.join(searchConditions, sql` OR `)})`);
+        }
+      }
+
+      // Build order by
+      let orderByClause: any;
+      if (query.sortBy && query.sortBy.length > 0) {
+        const sortFields = query.sortBy.map(([field, direction]) => {
+          const column = (schema.processingStages as any)[field];
+          if (column) {
+            return direction === 'DESC' ? desc(column) : asc(column);
+          }
+          return null;
+        }).filter(Boolean);
+
+        if (sortFields.length > 0) {
+          orderByClause = sortFields;
+        }
+      }
+
+      // Default ordering by startedAt DESC if no sort specified
+      if (!orderByClause) {
+        orderByClause = [desc(schema.processingStages.startedAt)];
+      }
+
+      // Get total count
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const [{ count: total }] = await this.dbConnection
+        .select({ count: count() })
+        .from(schema.processingStages)
+        .where(whereClause);
+
+      // Build relations object for Drizzle query API
+      const withRelations: any = {};
+      if (options?.include) {
+        if (options.include.includes('arrival')) {
+          withRelations.arrival = true;
+        }
+      }
+
+      // Get paginated results with relations
+      let data: any[];
+      if (Object.keys(withRelations).length > 0) {
+        // When relations are requested, first get the IDs that match the conditions
+        const matchingIds = await this.dbConnection
+          .select({ id: schema.processingStages.id })
+          .from(schema.processingStages)
+          .where(whereClause)
+          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+          .limit(limit)
+          .offset(offset);
+
+        const ids = matchingIds.map((row: any) => row.id);
+
+        if (ids.length > 0) {
+          try {
+            // Use relational query API to get data with relations
+            const allData = await this.dbConnection.query.processingStages.findMany({
+              where: (processingStages: any, { inArray: inArrayFn }: any) => inArrayFn(processingStages.id, ids),
+              with: withRelations,
+            });
+            // Re-sort to match original order
+            const idMap = new Map<number, number>(ids.map((id: number, idx: number) => [id, idx]));
+            allData.sort((a: any, b: any) => {
+              const aIdx: number = idMap.get(a.id) ?? 0;
+              const bIdx: number = idMap.get(b.id) ?? 0;
+              return aIdx - bIdx;
+            });
+            // Filter out processing stages with missing required relations
+            data = allData.filter((stage: any) => {
+              if (withRelations.arrival && !stage.arrival) {
+                return false; // Exclude stages with missing arrivals
+              }
+              return true;
+            });
+          } catch (error: any) {
+            // If relational query fails, fall back to standard query without relations
+            data = await this.dbConnection
+              .select()
+              .from(schema.processingStages)
+              .where(
+                and(
+                  whereClause,
+                  inArray(schema.processingStages.id, ids),
+                ),
+              )
+              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+              .limit(limit)
+              .offset(offset);
+          }
+        } else {
+          data = [];
+        }
+      } else {
+        // Use standard query when no relations
+        data = await this.dbConnection
+          .select()
+          .from(schema.processingStages)
+          .where(whereClause)
+          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+          .limit(limit)
+          .offset(offset);
+      }
+
+      return {
+        data: data as ProcessingStage[],
+        meta: {
+          itemsPerPage: limit,
+          totalItems: total,
+          currentPage: page,
+          totalPages: Math.ceil(total / limit),
+          sortBy: query.sortBy || [],
+          search: query.search,
+          searchBy: query.searchBy,
+        },
+        links: {
+          first: page > 1 ? `?page=1&limit=${limit}` : undefined,
+          previous: page > 1 ? `?page=${page - 1}&limit=${limit}` : undefined,
+          current: `?page=${page}&limit=${limit}`,
+          next: page < Math.ceil(total / limit) ? `?page=${page + 1}&limit=${limit}` : undefined,
+          last: page < Math.ceil(total / limit) ? `?page=${Math.ceil(total / limit)}&limit=${limit}` : undefined,
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to fetch all processing stages: ${error?.message || 'Unknown error'}`, error?.stack);
+      throw new InternalServerErrorException(
+        `Failed to fetch processing stages: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  async getProcessingStage(
+    arrivalId: number | string,
+    stageId: number | string,
+  ): Promise<ProcessingStage> {
+    const numericArrivalId = typeof arrivalId === 'string' ? Number(arrivalId) : arrivalId;
+    const numericStageId = typeof stageId === 'string' ? Number(stageId) : stageId;
+
+    if (!numericArrivalId || isNaN(numericArrivalId)) {
+      throw new NotFoundException(`Invalid arrival ID: ${arrivalId}`);
+    }
+
+    if (!numericStageId || isNaN(numericStageId)) {
+      throw new NotFoundException(`Invalid processing stage ID: ${stageId}`);
+    }
+
+    try {
+      // Check if arrival exists
+      await this.findOneById(numericArrivalId);
+
+      // Get processing stage
+      const [stage] = await this.dbConnection
+        .select()
+        .from(schema.processingStages)
+        .where(
+          and(
+            eq(schema.processingStages.id, numericStageId),
+            eq(schema.processingStages.arrivalId, numericArrivalId),
+          ),
+        )
+        .limit(1);
+
+      if (!stage) {
+        throw new NotFoundException(
+          `Processing stage with ID ${numericStageId} not found for arrival ${numericArrivalId}`,
+        );
+      }
+
+      return stage as ProcessingStage;
+    } catch (error: any) {
+      this.logger.error(`Failed to fetch processing stage id=${numericStageId} for arrivalId=${numericArrivalId}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to get processing stage details: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
   async createProcessingStage(
     arrivalId: number | string,
     createDto: CreateProcessingStageDto,
@@ -568,6 +771,58 @@ export class ArrivalsService extends BaseService<Arrival> {
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
         `Failed to update processing stage: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  async removeProcessingStage(
+    arrivalId: number | string,
+    stageId: number | string,
+  ): Promise<ProcessingStage> {
+    const numericArrivalId = typeof arrivalId === 'string' ? Number(arrivalId) : arrivalId;
+    const numericStageId = typeof stageId === 'string' ? Number(stageId) : stageId;
+
+    if (!numericArrivalId || isNaN(numericArrivalId)) {
+      throw new NotFoundException(`Invalid arrival ID: ${arrivalId}`);
+    }
+
+    if (!numericStageId || isNaN(numericStageId)) {
+      throw new NotFoundException(`Invalid processing stage ID: ${stageId}`);
+    }
+
+    try {
+      // Check if arrival exists
+      await this.findOneById(numericArrivalId);
+
+      // Check if processing stage exists and belongs to this arrival
+      const [stage] = await this.dbConnection
+        .select()
+        .from(schema.processingStages)
+        .where(
+          and(
+            eq(schema.processingStages.id, numericStageId),
+            eq(schema.processingStages.arrivalId, numericArrivalId),
+          ),
+        )
+        .limit(1);
+
+      if (!stage) {
+        throw new NotFoundException(
+          `Processing stage with ID ${numericStageId} not found for arrival ${numericArrivalId}`,
+        );
+      }
+
+      // Delete the processing stage
+      await this.dbConnection
+        .delete(schema.processingStages)
+        .where(eq(schema.processingStages.id, numericStageId));
+
+      return stage as ProcessingStage;
+    } catch (error: any) {
+      this.logger.error(`Failed to remove processing stage id=${numericStageId} for arrivalId=${numericArrivalId}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to remove processing stage: ${error?.message || 'Unknown error occurred'}`,
       );
     }
   }
