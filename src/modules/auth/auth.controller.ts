@@ -57,24 +57,13 @@ export class AuthController {
   @Post('refresh-token')
   @ApiOperation({
     summary: 'Refresh access token',
-    description: 'Generates a new access token using a valid refresh token. The refresh token must not be expired and must exist in the database.',
+    description: 'Generates new access and refresh tokens using a valid refresh token. The old refresh token is invalidated (token rotation) for security. The refresh token must not be expired and must exist in the database.',
   })
   @ApiBody({ type: RefreshTokenRequest })
   async refresh(
     @Body() body: RefreshTokenRequest,
   ) {
-    // Refresh token JWT contains all needed info (token, accid, subid)
-    // Credentials are optional and only used as fallback
-    const credentials: Credentials = {
-      token: body.acc_token || '',
-      accid: body.acc_id ? Number(body.acc_id) : 0,
-      subid: body.acc_sid ? Number(body.acc_sid) : 0,
-    };
-    
-    return this.authService.refreshToken(
-      credentials,
-      body.refreshToken,
-    );
+    return this.authService.refreshToken(body.refreshToken);
   }
 
   @Post('logout')

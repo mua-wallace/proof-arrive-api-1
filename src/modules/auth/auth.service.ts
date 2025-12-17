@@ -175,54 +175,35 @@ export class AuthService {
     }
   }
 
-  // Verify the refresh token locally
-  async refreshToken(
-    credentials: Credentials,
-    refreshToken: string,
-  ) {
-    try {
-      if (!refreshToken) {
-        throw new UnauthorizedException('Missing refresh token');
-      }
+  /**
+   * Refresh access token using a valid refresh token
+   * Implements token rotation: invalidates the old refresh token and issues a new one
+   */
+  async refreshToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+    if (!refreshToken) {
+      throw new UnauthorizedException('Missing refresh token');
+    }
 
-      // Decode the refresh token to get accid, subid, refreshtoken, and token
+    try {
+      // 1. Verify and decode the refresh token JWT
       const decoded = this.jwtService.verify(refreshToken, {
         secret: this.configService.getOrThrow<string>('jwt.refreshToken.secret'),
       }) as { refreshtoken: string; accid: number; subid: number; token?: string };
 
-      // Use accid and subid from the decoded token, not from credentials
-      const accid = decoded.accid;
-      const subid = decoded.subid;
-      const refreshtoken = decoded.refreshtoken;
-      // Get Malambi token from decoded token (preferred) or from credentials
-      const token = decoded.token || credentials.token || '';
+      const { refreshtoken, accid, subid, token } = decoded;
 
-      if (!accid || !subid || isNaN(accid) || isNaN(subid)) {
+      // Validate decoded payload
+      if (!accid || !subid || isNaN(accid) || isNaN(subid) || !refreshtoken) {
         throw new UnauthorizedException('Invalid token payload');
       }
 
-      // 2️⃣ Clean up expired refresh tokens for this user
-      await this.dbConnection.delete(schema.refreshTokens).where(
-        and(
-          eq(schema.refreshTokens.accid, accid),
-          eq(schema.refreshTokens.subid, subid),
-          lt(schema.refreshTokens.expiryDate, new Date()), // only expired
-        ),
-      );
+      // Malambi token is required for access token to work with middleware
+      if (!token) {
+        throw new UnauthorizedException('Malambi token missing from refresh token');
+      }
 
-      // Optional: log remaining valid tokens
-      const remainingTokens = await this.dbConnection
-        .select()
-        .from(schema.refreshTokens)
-        .where(
-          and(
-            eq(schema.refreshTokens.accid, accid),
-            eq(schema.refreshTokens.subid, subid),
-        ),
-      );
-
-      // 3️⃣ Find a valid refresh token
-      const validTokenRecord = await this.dbConnection
+      // 2. Verify the refresh token exists in database and is not expired
+      const [tokenRecord] = await this.dbConnection
         .select()
         .from(schema.refreshTokens)
         .where(
@@ -230,28 +211,49 @@ export class AuthService {
             eq(schema.refreshTokens.token, refreshtoken),
             eq(schema.refreshTokens.accid, accid),
             eq(schema.refreshTokens.subid, subid),
-            gt(schema.refreshTokens.expiryDate, new Date()), // must not be expired
+            gt(schema.refreshTokens.expiryDate, new Date()),
           ),
         )
         .limit(1);
 
-      if (!validTokenRecord || validTokenRecord.length === 0) {
+      if (!tokenRecord) {
         throw new UnauthorizedException('Invalid or expired refresh token');
       }
 
-      // 4️⃣ Generate new access/refresh tokens
+      // 3. Invalidate the old refresh token (token rotation for security)
+      await this.dbConnection
+        .delete(schema.refreshTokens)
+        .where(eq(schema.refreshTokens.token, refreshtoken));
+
+      // 4. Clean up any expired tokens for this user (housekeeping)
+      await this.dbConnection
+        .delete(schema.refreshTokens)
+        .where(
+          and(
+            eq(schema.refreshTokens.accid, accid),
+            eq(schema.refreshTokens.subid, subid),
+            lt(schema.refreshTokens.expiryDate, new Date()),
+          ),
+        );
+
+      // 5. Generate new access and refresh tokens
       // Use the Malambi token from the decoded refresh token
-      const { accessToken, refreshToken: newRefreshToken } = await this.generateUserTokens(token, accid, subid);
+      const { accessToken, refreshToken: newRefreshToken } = await this.generateUserTokens(
+        token,
+        accid,
+        subid,
+      );
 
       return {
-        success: true,
-        message: 'Tokens refreshed successfully',
         accessToken,
         refreshToken: newRefreshToken,
       };
     } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       this.logger.error('Refresh token error:', error instanceof Error ? error.stack : error);
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Invalid or expired refresh token');
     }
   }
 
