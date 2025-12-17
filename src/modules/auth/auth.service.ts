@@ -50,7 +50,6 @@ export class AuthService {
     const subidStr = String(user.subid || '').trim();
     
     if (!accidStr || !subidStr) {
-      this.logger.error(`Missing accid or subid: accid="${accidStr}", subid="${subidStr}"`);
       throw new UnauthorizedException('Invalid user credentials: missing account information');
     }
     
@@ -58,7 +57,6 @@ export class AuthService {
     const subid = Number(subidStr);
     
     if (isNaN(accid) || isNaN(subid) || accid <= 0 || subid <= 0) {
-      this.logger.error(`Invalid user credentials: accid="${accidStr}" (${accid}), subid="${subidStr}" (${subid})`);
       throw new UnauthorizedException('Invalid user credentials: invalid account IDs');
     }
     
@@ -265,7 +263,6 @@ export class AuthService {
     
     // Validate credentials
     if (!token || !accid || !subid || isNaN(accid) || isNaN(subid)) {
-      this.logger.warn(`Invalid credentials for logout: token=${token ? 'present' : 'missing'}, accid=${accid}, subid=${subid}`);
       return { success: false, message: 'Invalid user credentials' };
     }
     
@@ -285,7 +282,6 @@ export class AuthService {
             ),
           );
       } catch (dbError) {
-        this.logger.error('Error clearing refresh tokens:', dbError instanceof Error ? dbError.stack : dbError);
         // Continue even if clearing tokens fails
       }
       
@@ -295,7 +291,6 @@ export class AuthService {
         return { success: false, message: 'Logout failed on remote API' };
       }
     } catch (error) {
-      this.logger.error('Logout error in service:', error instanceof Error ? error.stack : error);
       // Even if Malambi logout fails, try to clear our refresh tokens
       try {
         await this.dbConnection

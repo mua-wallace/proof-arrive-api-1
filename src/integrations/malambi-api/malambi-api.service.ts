@@ -78,7 +78,6 @@ export class MalambiApiService extends MalambiBaseApiService {
     const subid = data.subid?.toString() || '';
     
     if (!accid || !subid) {
-      this.logger.error(`Missing accid or subid in API response: accid="${accid}", subid="${subid}", full response:`, JSON.stringify(data, null, 2));
       throw new UnauthorizedException('Invalid credentials: missing account information');
     }
     
@@ -146,10 +145,6 @@ export class MalambiApiService extends MalambiBaseApiService {
 
       return Array.isArray(response) && response[0]?.[0] === 1;
     } catch (error) {
-      this.logger.error(
-        `Session validation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        error instanceof Error ? error.stack : undefined,
-      );
       return false;
     }
   }

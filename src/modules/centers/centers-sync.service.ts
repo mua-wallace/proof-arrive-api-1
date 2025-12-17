@@ -195,7 +195,6 @@ export class CentersSyncService {
       });
 
       if (!response.success || !Array.isArray(response.rows)) {
-        this.logger.warn('Invalid response from Malambi API centers endpoint');
         return {
           found: false,
           synced: false,

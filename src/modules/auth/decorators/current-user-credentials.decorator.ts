@@ -1,13 +1,11 @@
-import { createParamDecorator, ExecutionContext, Logger } from '@nestjs/common';
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 import { Credentials } from '@common/interfaces';
 
 export const CurrentUserCredentials = createParamDecorator(
   (data: unknown, ctx: ExecutionContext): Credentials => {
     const request = ctx.switchToHttp().getRequest();
-    const logger = new Logger('CurrentUserCredentials');
     
     if (!request.user) {
-      logger.warn('No user found in request');
       throw new Error('User credentials not found in request');
     }
 
@@ -35,21 +33,11 @@ export const CurrentUserCredentials = createParamDecorator(
       subid = typeof user.acc_sid === 'number' ? user.acc_sid : Number(user.acc_sid);
       session = user.session || '';
     } else {
-      logger.error('Invalid user credentials structure in request:', {
-        keys: Object.keys(user),
-        user: user,
-      });
       throw new Error('Invalid user credentials structure in request');
     }
 
     // Validate converted values
     if (!token || isNaN(accid) || isNaN(subid)) {
-      logger.error('Invalid token or account IDs:', {
-        token: token ? 'present' : 'missing',
-        accid,
-        subid,
-        token_length: token ? token.length : 0,
-      });
       throw new Error('Invalid token or account IDs in user credentials');
     }
 

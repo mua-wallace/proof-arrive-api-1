@@ -50,7 +50,7 @@ export class ArrivalsService extends BaseService<Arrival> {
           transformed.vehicleId = vehicle.thirdPartyId;
         }
       } catch (error) {
-        this.logger.warn(`Failed to lookup vehicle thirdPartyId for vehicleId ${arrival.vehicleId}: ${error}`);
+        // Silently fail - vehicle might not exist
       }
     }
 
@@ -67,7 +67,7 @@ export class ArrivalsService extends BaseService<Arrival> {
           transformed.centerId = center.geozoneId;
         }
       } catch (error) {
-        this.logger.warn(`Failed to lookup center geozoneId for centerId ${arrival.centerId}: ${error}`);
+        // Silently fail - center might not exist
       }
     }
 
@@ -99,7 +99,7 @@ export class ArrivalsService extends BaseService<Arrival> {
           vehicleMap.set(v.id, v.thirdPartyId);
         });
       } catch (error) {
-        this.logger.warn(`Failed to batch lookup vehicle thirdPartyIds: ${error}`);
+        // Silently fail - vehicles might not exist
       }
     }
 
@@ -115,7 +115,7 @@ export class ArrivalsService extends BaseService<Arrival> {
           centerMap.set(c.id, c.geozoneId);
         });
       } catch (error) {
-        this.logger.warn(`Failed to batch lookup center geozoneIds: ${error}`);
+        // Silently fail - centers might not exist
       }
     }
 
@@ -242,25 +242,16 @@ export class ArrivalsService extends BaseService<Arrival> {
             // This handles cases where foreign key references point to deleted records
             data = allData.filter((arrival: any) => {
               if (withRelations.vehicle && !arrival.vehicle) {
-                this.logger.warn(`Arrival ${arrival.id} references missing vehicle ${arrival.vehicleId} - excluding from results`);
                 return false; // Exclude arrivals with missing vehicles
               }
               if (withRelations.center && !arrival.center) {
-                this.logger.warn(`Arrival ${arrival.id} references missing center ${arrival.centerId} - excluding from results`);
                 return false; // Exclude arrivals with missing centers
-              }
-              if (withRelations.agent && !arrival.agent) {
-                this.logger.warn(`Arrival ${arrival.id} references missing agent ${arrival.agentId}`);
-                // Don't exclude - agent might be optional, but log for visibility
               }
               return true;
             });
           } catch (error: any) {
             // If relational query fails (e.g., due to missing relations or database constraints),
             // fall back to standard query without relations
-            this.logger.warn(
-              `Relational query failed for arrivals, falling back to standard query: ${error?.message}`,
-            );
             // Fall back to query without relations to avoid breaking the request
             data = await this.dbConnection
               .select()
