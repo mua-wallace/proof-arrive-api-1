@@ -5,12 +5,13 @@ import { QueueModule } from '@common/queue/queue.module';
 import { CentersController } from './centers.controller';
 import { CentersService } from './centers.service';
 import { CentersSyncService } from './centers-sync.service';
+import { CentersSeederService } from './centers-seeder.service';
 
 @Module({
   imports: [DatabaseModule, MalambiApiModule, forwardRef(() => QueueModule)],
   controllers: [CentersController],
-  providers: [CentersService, CentersSyncService],
-  exports: [CentersService, CentersSyncService],
+  providers: [CentersService, CentersSyncService, CentersSeederService],
+  exports: [CentersService, CentersSyncService, CentersSeederService],
 })
 export class CentersModule {}
 

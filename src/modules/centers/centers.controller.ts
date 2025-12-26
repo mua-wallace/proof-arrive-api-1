@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Query, Param, BadRequestException } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { CentersService } from './centers.service';
+import { CentersSeederService } from './centers-seeder.service';
 import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-credentials.decorator';
 import { Credentials, PaginateResult } from '@common/interfaces';
 import { FilterCentersDto } from './dto';
@@ -12,7 +13,10 @@ type Center = typeof schema.centers.$inferSelect;
 @ApiTags('Centers')
 @ApiBearerAuth()
 export class CentersController {
-  constructor(private readonly centersService: CentersService) {}
+  constructor(
+    private readonly centersService: CentersService,
+    private readonly centersSeederService: CentersSeederService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -72,6 +76,15 @@ export class CentersController {
         filtertype: filtertype ? Number(filtertype) : undefined,
       },
     );
+  }
+
+  @Get('default')
+  @ApiOperation({
+    summary: 'Get default testing centers',
+    description: 'Retrieves the 3 default testing centers (Center 001, Center 002, Center 003) that users can choose from when their center cannot be located. These centers are automatically seeded on application startup.',
+  })
+  async getDefaultCenters(): Promise<Center[]> {
+    return this.centersSeederService.getDefaultCenters();
   }
 
   @Get(':id')
