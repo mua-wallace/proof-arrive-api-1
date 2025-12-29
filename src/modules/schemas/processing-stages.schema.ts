@@ -1,15 +1,17 @@
 import { pgTable, integer, varchar, text, timestamp, index } from 'drizzle-orm/pg-core';
 import { baseColumnsSerial } from './base.schema';
 import { arrivals } from './arrivals.schema';
-import { ArrivalStatus } from '@modules/arrivals/dto';
 
 // Processing Stages
 export const processingStages = pgTable('processing_stages', {
   ...baseColumnsSerial,
   arrivalId: integer('arrival_id').notNull().references(() => arrivals.id, { onDelete: 'cascade' }),
   stageType: varchar('stage_type', { length: 50 }).notNull(),
+  // Status: arrival, arrived, in_processing, completed, cancelled, in_transit, exited
   status: varchar('status', { length: 50 }),
+  // startedAt is set automatically when status changes to in_processing (not set on creation)
   startedAt: timestamp('started_at'),
+  // completedAt is set automatically when status changes to completed
   completedAt: timestamp('completed_at'),
   notes: text('notes'),
 }, (table) => ({

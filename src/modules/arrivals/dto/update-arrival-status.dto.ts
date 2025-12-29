@@ -6,7 +6,7 @@ export class UpdateArrivalStatusDto {
   @ApiProperty({ 
     description: 'New status for the arrival',
     enum: ArrivalStatus,
-    example: ArrivalStatus.PROCESSING 
+    example: ArrivalStatus.IN_PROCESSING
   })
   @IsNotEmpty()
   @IsEnum(ArrivalStatus)

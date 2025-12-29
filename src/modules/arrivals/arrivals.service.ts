@@ -679,10 +679,12 @@ export class ArrivalsService extends BaseService<Arrival> {
       await this.findOneById(numericArrivalId);
 
       // Create processing stage
-      // Note: startedAt is intentionally omitted - it will only be set when status changes to in_processing via updateProcessingStage
+      // Note: startedAt must be explicitly set to null - it will only be set when status changes to in_processing via updateProcessingStage
       const insertValues: any = {
         arrivalId: numericArrivalId,
         stageType: createDto.stageType,
+        startedAt: null, // Explicitly set to null to prevent any database defaults or triggers
+        completedAt: null, // Explicitly set to null for consistency
         notes: createDto.notes || null,
       };
 
