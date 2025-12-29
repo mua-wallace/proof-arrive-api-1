@@ -679,15 +679,21 @@ export class ArrivalsService extends BaseService<Arrival> {
       await this.findOneById(numericArrivalId);
 
       // Create processing stage
+      // Note: startedAt is intentionally omitted - it will only be set when status changes to in_processing via updateProcessingStage
+      const insertValues: any = {
+        arrivalId: numericArrivalId,
+        stageType: createDto.stageType,
+        notes: createDto.notes || null,
+      };
+
+      // Only include status if provided
+      if (createDto.status !== undefined) {
+        insertValues.status = createDto.status;
+      }
+
       const [stage] = await this.dbConnection
         .insert(schema.processingStages)
-        .values({
-          arrivalId: numericArrivalId,
-          stageType: createDto.stageType,
-          status: createDto.status,
-          startedAt: null, // startedAt is not set when creating, only when status changes to in_processing
-          notes: createDto.notes || null,
-        })
+        .values(insertValues)
         .returning();
 
       return stage as ProcessingStage;
