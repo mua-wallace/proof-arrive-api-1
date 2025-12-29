@@ -1,12 +1,16 @@
-import { IsOptional, IsString, IsDecimal, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsDecimal, MaxLength, IsEnum } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ArrivalStatus } from '@modules/arrivals/dto/arrival-status.enum';
 
 export class UpdateIncomingVehicleDto {
-  @ApiPropertyOptional({ description: 'Status of the incoming vehicle' })
+  @ApiPropertyOptional({ 
+    description: 'Status of the incoming vehicle', 
+    enum: ArrivalStatus,
+    example: ArrivalStatus.IN_TRANSIT 
+  })
   @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  status?: string;
+  @IsEnum(ArrivalStatus)
+  status?: ArrivalStatus;
 
   @ApiPropertyOptional({ description: 'Estimated arrival timestamp' })
   @IsOptional()

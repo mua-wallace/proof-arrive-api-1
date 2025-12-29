@@ -6,6 +6,7 @@ import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 import { CreateExitDto } from './dto/create-exit.dto';
 import { UpdateExitDto } from './dto/update-exit.dto';
+import { ArrivalStatus } from '@modules/arrivals/dto/arrival-status.enum';
 
 type Exit = typeof schema.exits.$inferSelect & BaseEntity;
 
@@ -276,6 +277,7 @@ export class ExitsService extends BaseService<Exit> {
           agentId: agentId,
           createdBy: agentId, // The logged-in user who created the record
           exitType: createDto.exitType,
+          status: createDto.status || ArrivalStatus.IN_TRANSIT,
           destinationCenterId: createDto.destinationCenterId || null,
           destinationName: createDto.destinationName || null,
           latitude: createDto.latitude || null,

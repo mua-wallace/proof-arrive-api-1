@@ -1,5 +1,6 @@
-import { IsOptional, IsString, IsNumber, IsDecimal, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsDecimal, MaxLength, IsEnum } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ArrivalStatus } from '@modules/arrivals/dto/arrival-status.enum';
 
 export class UpdateExitDto {
   @ApiPropertyOptional({ description: 'Exit type' })
@@ -8,11 +9,14 @@ export class UpdateExitDto {
   @MaxLength(50)
   exitType?: string;
 
-  @ApiPropertyOptional({ description: 'Status of the exit' })
+  @ApiPropertyOptional({ 
+    description: 'Status of the exit', 
+    enum: ArrivalStatus,
+    example: ArrivalStatus.IN_TRANSIT 
+  })
   @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  status?: string;
+  @IsEnum(ArrivalStatus)
+  status?: ArrivalStatus;
 
   @ApiPropertyOptional({ description: 'Destination center ID' })
   @IsOptional()

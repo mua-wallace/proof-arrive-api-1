@@ -6,6 +6,7 @@ import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 import { CreateIncomingVehicleDto } from './dto/create-incoming-vehicle.dto';
 import { UpdateIncomingVehicleDto } from './dto/update-incoming-vehicle.dto';
+import { ArrivalStatus } from '@modules/arrivals/dto/arrival-status.enum';
 
 type IncomingVehicle = typeof schema.incomingVehicles.$inferSelect & BaseEntity;
 
@@ -290,7 +291,7 @@ export class IncomingService extends BaseService<IncomingVehicle> {
           destinationCenterId: createDto.destinationCenterId,
           sourceCenterId: createDto.sourceCenterId,
           createdBy: createdBy, // The logged-in user who created the record
-          status: createDto.status || 'in_transit',
+          status: createDto.status || ArrivalStatus.IN_TRANSIT,
           estimatedArrival: createDto.estimatedArrival || null,
           distanceKm: createDto.distanceKm || null,
         })

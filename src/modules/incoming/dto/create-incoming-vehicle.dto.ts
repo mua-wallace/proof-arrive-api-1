@@ -1,5 +1,6 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString, IsDecimal, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString, IsDecimal, MaxLength, IsEnum } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ArrivalStatus } from '@modules/arrivals/dto/arrival-status.enum';
 
 export class CreateIncomingVehicleDto {
   @ApiProperty({ description: 'Exit ID (internal database ID) - the exit that triggered this incoming vehicle' })
@@ -22,11 +23,15 @@ export class CreateIncomingVehicleDto {
   @IsNumber()
   sourceCenterId: number;
 
-  @ApiPropertyOptional({ description: 'Status of the incoming vehicle', default: 'in_transit' })
+  @ApiPropertyOptional({ 
+    description: 'Status of the incoming vehicle', 
+    enum: ArrivalStatus,
+    default: ArrivalStatus.IN_TRANSIT,
+    example: ArrivalStatus.IN_TRANSIT 
+  })
   @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  status?: string;
+  @IsEnum(ArrivalStatus)
+  status?: ArrivalStatus;
 
   @ApiPropertyOptional({ description: 'Estimated arrival timestamp' })
   @IsOptional()

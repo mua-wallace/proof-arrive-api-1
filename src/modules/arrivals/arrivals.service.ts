@@ -684,8 +684,7 @@ export class ArrivalsService extends BaseService<Arrival> {
         .values({
           arrivalId: numericArrivalId,
           stageType: createDto.stageType,
-          status: createDto.status || 'pending',
-          startedAt: new Date(),
+          status: createDto.status,
           notes: createDto.notes || null,
         })
         .returning();
@@ -745,12 +744,16 @@ export class ArrivalsService extends BaseService<Arrival> {
 
       if (updateDto.status !== undefined) {
         updateData.status = updateDto.status;
+        // If status is being set to in_processing, set startedAt
+        if (updateDto.status === ArrivalStatus.IN_PROCESSING && !stage.startedAt) {
+          updateData.startedAt = new Date();
+        }
         // If status is being set to completed, set completedAt
-        if (updateDto.status === 'completed' && !stage.completedAt) {
+        if (updateDto.status === ArrivalStatus.COMPLETED && !stage.completedAt) {
           updateData.completedAt = new Date();
         }
         // If status is being changed from completed, clear completedAt
-        if (updateDto.status !== 'completed' && stage.completedAt) {
+        if (updateDto.status !== ArrivalStatus.COMPLETED && stage.completedAt) {
           updateData.completedAt = null;
         }
       }

@@ -3,7 +3,6 @@ import { baseColumnsSerial } from './base.schema';
 import { exits } from './exits.schema';
 import { vehicles } from './vehicles.schema';
 import { centers } from './centers.schema';
-import { users } from './users.schema';
 
 // Incoming Vehicles
 export const incomingVehicles = pgTable('incoming_vehicles', {
@@ -13,7 +12,8 @@ export const incomingVehicles = pgTable('incoming_vehicles', {
   destinationCenterId: integer('destination_center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
   sourceCenterId: integer('source_center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
   createdBy: text('created_by').notNull(), // No FK constraint since accid is not unique
-  status: varchar('status', { length: 50 }).default('in_transit'),
+  // Status: arrival, arrived, in_processing, completed, cancelled, in_transit, exited
+  status: varchar('status', { length: 50 }),
   estimatedArrival: timestamp('estimated_arrival'),
   actualArrival: timestamp('actual_arrival'),
   distanceKm: decimal('distance_km', { precision: 10, scale: 2 }),
