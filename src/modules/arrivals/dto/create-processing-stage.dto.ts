@@ -1,5 +1,6 @@
-import { IsNotEmpty, IsString, IsOptional, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, MaxLength, IsEnum } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ArrivalStatus } from './arrival-status.enum';
 
 export class CreateProcessingStageDto {
   @ApiProperty({ description: 'Type of processing stage' })
@@ -8,11 +9,10 @@ export class CreateProcessingStageDto {
   @MaxLength(50)
   stageType: string;
 
-  @ApiPropertyOptional({ description: 'Status of the processing stage', default: 'pending' })
+  @ApiPropertyOptional({ description: 'Status of the processing stage', default: 'arrival' })
   @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  status?: string;
+  @IsEnum(ArrivalStatus)
+  status?: ArrivalStatus;
 
   @ApiPropertyOptional({ description: 'Additional notes' })
   @IsOptional()

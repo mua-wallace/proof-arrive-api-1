@@ -685,6 +685,7 @@ export class ArrivalsService extends BaseService<Arrival> {
           arrivalId: numericArrivalId,
           stageType: createDto.stageType,
           status: createDto.status,
+          startedAt: null, // startedAt is not set when creating, only when status changes to in_processing
           notes: createDto.notes || null,
         })
         .returning();
