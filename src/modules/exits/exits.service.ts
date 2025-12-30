@@ -237,7 +237,7 @@ export class ExitsService extends BaseService<Exit> {
       const vehicle = await this.dbConnection
         .select()
         .from(schema.vehicles)
-        .where(eq(schema.vehicles.id, createDto.vehicleId))
+        .where(eq(schema.vehicles.thirdPartyId, createDto.vehicleId))
         .limit(1);
 
       if (!vehicle || vehicle.length === 0) {
@@ -248,7 +248,7 @@ export class ExitsService extends BaseService<Exit> {
       const center = await this.dbConnection
         .select()
         .from(schema.centers)
-        .where(eq(schema.centers.id, createDto.centerId))
+        .where(eq(schema.centers.geozoneId, createDto.centerId))
         .limit(1);
 
       if (!center || center.length === 0) {
@@ -260,7 +260,7 @@ export class ExitsService extends BaseService<Exit> {
         const destCenter = await this.dbConnection
           .select()
           .from(schema.centers)
-          .where(eq(schema.centers.id, createDto.destinationCenterId))
+          .where(eq(schema.centers.geozoneId, createDto.destinationCenterId))
           .limit(1);
 
         if (!destCenter || destCenter.length === 0) {
@@ -277,7 +277,7 @@ export class ExitsService extends BaseService<Exit> {
           agentId: agentId,
           createdBy: agentId, // The logged-in user who created the record
           exitType: createDto.exitType,
-          status: createDto.status || ArrivalStatus.IN_TRANSIT,
+          status: createDto.status,
           destinationCenterId: createDto.destinationCenterId || null,
           destinationName: createDto.destinationName || null,
           latitude: createDto.latitude || null,
