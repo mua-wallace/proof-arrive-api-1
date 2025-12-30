@@ -25,7 +25,7 @@ export class ExitsService extends BaseService<Exit> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[] },
+    options?: { include?: string[]; status?: string; destinationId?: number },
   ): Promise<PaginateResult<Exit>> {
     
     try {
@@ -35,6 +35,23 @@ export class ExitsService extends BaseService<Exit> {
 
       // Build where conditions (exits don't have deletedAt)
       const conditions: SQL[] = [];
+
+      // Filter by status if provided
+      if (options?.status) {
+        conditions.push(eq(schema.exits.status, options.status));
+      }
+
+      // Filter by destinationId (geozoneId) if provided
+      // Use SQL subquery to filter exits where destinationCenterId matches centers with the given geozoneId
+      if (options?.destinationId !== undefined && options?.destinationId !== null) {
+        conditions.push(
+          sql`${schema.exits.destinationCenterId} IN (
+            SELECT ${schema.centers.id} 
+            FROM ${schema.centers} 
+            WHERE ${schema.centers.geozoneId} = ${Number(options.destinationId)}
+          )`
+        );
+      }
 
       // Add search functionality
       if (query.search && query.searchBy && query.searchBy.length > 0) {
@@ -99,6 +116,12 @@ export class ExitsService extends BaseService<Exit> {
         if (options.include.includes('incomingVehicle')) {
           withRelations.incomingVehicle = true;
         }
+      }
+      
+      // Automatically include destinationCenter relation when filtering by destinationId
+      // This ensures the center's fullname is available in the response
+      if (options?.destinationId !== undefined && options?.destinationId !== null && !withRelations.destinationCenter) {
+        withRelations.destinationCenter = true;
       }
 
       // Get paginated results with relations
