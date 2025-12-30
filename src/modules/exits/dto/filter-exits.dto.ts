@@ -1,6 +1,7 @@
-import { IsOptional, IsNumber, IsString, Min, Max } from 'class-validator';
+import { IsOptional, IsNumber, IsString, Min, Max, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ArrivalStatus } from '@modules/arrivals/dto';
 
 export class FilterExitsDto {
   @ApiPropertyOptional({ description: 'Page number', default: 1, minimum: 1 })
@@ -17,6 +18,25 @@ export class FilterExitsDto {
   @Min(1)
   @Max(1000)
   limit?: number;
+
+  @ApiPropertyOptional({ 
+    description: 'Filter by status', 
+    enum: ArrivalStatus,
+    example: 'in_transit'
+  })
+  @IsOptional()
+  @IsEnum(ArrivalStatus)
+  status?: ArrivalStatus;
+
+  @ApiPropertyOptional({ 
+    description: 'Filter by destination center geozoneId (third-party ID)', 
+    example: 3003,
+    type: Number
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  destinationId?: number;
 
   @ApiPropertyOptional({ description: 'Search term' })
   @IsOptional()

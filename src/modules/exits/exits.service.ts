@@ -6,7 +6,6 @@ import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 import { CreateExitDto } from './dto/create-exit.dto';
 import { UpdateExitDto } from './dto/update-exit.dto';
-import { ArrivalStatus } from '@modules/arrivals/dto/arrival-status.enum';
 
 type Exit = typeof schema.exits.$inferSelect & BaseEntity;
 
@@ -26,7 +25,7 @@ export class ExitsService extends BaseService<Exit> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[] },
+    options?: { include?: string[]; status?: string; destinationId?: number },
   ): Promise<PaginateResult<Exit>> {
     
     try {
@@ -36,6 +35,46 @@ export class ExitsService extends BaseService<Exit> {
 
       // Build where conditions (exits don't have deletedAt)
       const conditions: SQL[] = [];
+
+      // Filter by status if provided
+      if (options?.status) {
+        conditions.push(eq(schema.exits.status, options.status));
+      }
+
+      // Filter by destinationId (geozoneId) if provided
+      if (options?.destinationId) {
+        // First, find the center by geozoneId to get the internal ID
+        const [destinationCenter] = await this.dbConnection
+          .select({ id: schema.centers.id })
+          .from(schema.centers)
+          .where(eq(schema.centers.geozoneId, options.destinationId))
+          .limit(1);
+
+        if (destinationCenter) {
+          conditions.push(eq(schema.exits.destinationCenterId, destinationCenter.id));
+        } else {
+          // If center not found, return empty results
+          return {
+            data: [],
+            meta: {
+              itemsPerPage: limit,
+              totalItems: 0,
+              currentPage: page,
+              totalPages: 0,
+              sortBy: query.sortBy || [],
+              search: query.search,
+              searchBy: query.searchBy,
+            },
+            links: {
+              first: undefined,
+              previous: undefined,
+              current: `?page=${page}&limit=${limit}`,
+              next: undefined,
+              last: undefined,
+            },
+          };
+        }
+      }
 
       // Add search functionality
       if (query.search && query.searchBy && query.searchBy.length > 0) {
