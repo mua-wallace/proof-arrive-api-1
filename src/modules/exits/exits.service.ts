@@ -25,7 +25,7 @@ export class ExitsService extends BaseService<Exit> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[]; status?: string; destinationId?: number },
+    options?: { include?: string[]; status?: string; destinationCenterId?: number },
   ): Promise<PaginateResult<Exit>> {
     
     try {
@@ -41,16 +41,9 @@ export class ExitsService extends BaseService<Exit> {
         conditions.push(eq(schema.exits.status, options.status));
       }
 
-      // Filter by destinationId (geozoneId) if provided
-      // Use SQL subquery to filter exits where destinationCenterId matches centers with the given geozoneId
-      if (options?.destinationId !== undefined && options?.destinationId !== null) {
-        conditions.push(
-          sql`${schema.exits.destinationCenterId} IN (
-            SELECT ${schema.centers.id} 
-            FROM ${schema.centers} 
-            WHERE ${schema.centers.geozoneId} = ${Number(options.destinationId)}
-          )`
-        );
+      // Filter by destinationCenterId (direct center ID) if provided
+      if (options?.destinationCenterId !== undefined && options?.destinationCenterId !== null) {
+        conditions.push(eq(schema.exits.destinationCenterId, Number(options.destinationCenterId)));
       }
 
       // Add search functionality
@@ -118,9 +111,9 @@ export class ExitsService extends BaseService<Exit> {
         }
       }
       
-      // Automatically include destinationCenter relation when filtering by destinationId
+      // Automatically include destinationCenter relation when filtering by destinationCenterId
       // This ensures the center's fullname is available in the response
-      if (options?.destinationId !== undefined && options?.destinationId !== null && !withRelations.destinationCenter) {
+      if (options?.destinationCenterId !== undefined && options?.destinationCenterId !== null && !withRelations.destinationCenter) {
         withRelations.destinationCenter = true;
       }
 

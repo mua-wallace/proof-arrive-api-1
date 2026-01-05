@@ -38,6 +38,16 @@ export class FilterExitsDto {
   @IsNumber()
   destinationId?: number;
 
+  @ApiPropertyOptional({ 
+    description: 'Filter by destination center ID (internal database ID)', 
+    example: 1,
+    type: Number
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  destinationCenterId?: number;
+
   @ApiPropertyOptional({ description: 'Search term' })
   @IsOptional()
   @IsString()
