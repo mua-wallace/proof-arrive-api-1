@@ -8,14 +8,14 @@ import { ArrivalStatus } from '@modules/arrivals/dto';
 // Exits
 export const exits = pgTable('exits', {
   ...baseColumnsSerial,
-  vehicleId: integer('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
-  centerId: integer('center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
+  vehicleId: integer('vehicle_id').notNull().references(() => vehicles.thirdPartyId, { onDelete: 'cascade' }),
+  centerId: integer('center_id').notNull().references(() => centers.geozoneId, { onDelete: 'restrict' }),
   agentId: text('agent_id').notNull().references(() => users.accid, { onDelete: 'restrict' }),
   createdBy: text('created_by').notNull(), // No FK constraint since accid is not unique
   exitType: varchar('exit_type', { length: 50 }).notNull(),
   // Status: arrival, arrived, in_processing, completed, cancelled, in_transit, exited
   status: varchar('status', { length: 50 }),
-  destinationCenterId: integer('destination_center_id').references(() => centers.id, { onDelete: 'set null' }),
+  destinationCenterId: integer('destination_center_id').references(() => centers.geozoneId, { onDelete: 'set null' }),
   destinationName: varchar('destination_name', { length: 255 }),
   exitedAt: timestamp('exited_at').notNull().defaultNow(),
   latitude: decimal('latitude', { precision: 10, scale: 8 }),
