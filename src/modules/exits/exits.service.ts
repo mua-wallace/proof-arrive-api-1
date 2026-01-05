@@ -249,51 +249,56 @@ export class ExitsService extends BaseService<Exit> {
 
     try {
       // Validate vehicle exists
-      const vehicle = await this.dbConnection
+      const [vehicle] = await this.dbConnection
         .select()
         .from(schema.vehicles)
         .where(eq(schema.vehicles.thirdPartyId, createDto.vehicleId))
         .limit(1);
 
-      if (!vehicle || vehicle.length === 0) {
-        throw new NotFoundException(`Vehicle with ID ${createDto.vehicleId} not found`);
+      if (!vehicle) {
+        throw new NotFoundException(
+          `Vehicle with thirdPartyId ${createDto.vehicleId} not found. ` +
+          `Please ensure the vehicle is synced from the Malambi API first using POST /api/v1/vehicles/sync?vehicle_id=${createDto.vehicleId}`
+        );
       }
 
       // Validate center exists
-      const center = await this.dbConnection
+      const [center] = await this.dbConnection
         .select()
         .from(schema.centers)
         .where(eq(schema.centers.geozoneId, createDto.centerId))
         .limit(1);
 
-      if (!center || center.length === 0) {
-        throw new NotFoundException(`Center with ID ${createDto.centerId} not found`);
+      if (!center) {
+        throw new NotFoundException(`Center with geozoneId ${createDto.centerId} not found`);
       }
 
       // Validate destination center exists (if provided)
+      let destinationCenterId: number | null = null;
       if (createDto.destinationCenterId) {
-        const destCenter = await this.dbConnection
+        const [destCenter] = await this.dbConnection
           .select()
           .from(schema.centers)
           .where(eq(schema.centers.geozoneId, createDto.destinationCenterId))
           .limit(1);
 
-        if (!destCenter || destCenter.length === 0) {
-          throw new NotFoundException(`Destination center with ID ${createDto.destinationCenterId} not found`);
+        if (!destCenter) {
+          throw new NotFoundException(`Destination center with geozoneId ${createDto.destinationCenterId} not found`);
         }
+        destinationCenterId = destCenter.id;
       }
 
-      // Create exit
+      // Create exit using internal database IDs
       const [exit] = await this.dbConnection
         .insert(schema.exits)
         .values({
-          vehicleId: createDto.vehicleId,
-          centerId: createDto.centerId,
+          vehicleId: vehicle.id, // Use internal vehicle ID
+          centerId: center.id, // Use internal center ID
           agentId: agentId,
           createdBy: agentId, // The logged-in user who created the record
           exitType: createDto.exitType,
           status: createDto.status,
-          destinationCenterId: createDto.destinationCenterId || null,
+          destinationCenterId: destinationCenterId,
           destinationName: createDto.destinationName || null,
           latitude: createDto.latitude || null,
           longitude: createDto.longitude || null,

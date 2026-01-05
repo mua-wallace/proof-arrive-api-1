@@ -3,12 +3,18 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrivalStatus } from '@modules/arrivals/dto/arrival-status.enum';
 
 export class CreateExitDto {
-  @ApiProperty({ description: 'Vehicle ID (internal database ID)' })
+  @ApiProperty({ 
+    description: 'Vehicle thirdPartyId (from Malambi API, not internal database ID)',
+    example: 17589
+  })
   @IsNotEmpty()
   @IsNumber()
   vehicleId: number;
 
-  @ApiProperty({ description: 'Center ID (internal database ID) - source center' })
+  @ApiProperty({ 
+    description: 'Center geozoneId (from Malambi API, not internal database ID) - source center',
+    example: 4114
+  })
   @IsNotEmpty()
   @IsNumber()
   centerId: number;
@@ -29,7 +35,10 @@ export class CreateExitDto {
   @IsEnum(ArrivalStatus)
   status?: ArrivalStatus;
 
-  @ApiPropertyOptional({ description: 'Destination center ID (if known)' })
+  @ApiPropertyOptional({ 
+    description: 'Destination center geozoneId (from Malambi API, not internal database ID)',
+    example: 3003
+  })
   @IsOptional()
   @IsNumber()
   destinationCenterId?: number;
