@@ -53,12 +53,11 @@ export class ExitsController {
   @Get()
   @ApiOperation({
     summary: 'List exits (with filters)',
-    description: 'Retrieves a paginated list of exits with optional filtering, searching, and sorting. Can filter by status (e.g., "in_transit"), destinationCenterId (internal center ID), or destinationId (geozoneId, e.g., 3003).',
+    description: 'Retrieves a paginated list of exits with optional filtering, searching, and sorting. Can filter by status (e.g., "in_transit") and destinationCenterId (internal center ID).',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
   @ApiQuery({ name: 'status', required: false, enum: ['arrival', 'arrived', 'in_processing', 'completed', 'cancelled', 'in_transit', 'exited'], description: 'Filter by status' })
-  @ApiQuery({ name: 'destinationId', required: false, type: Number, description: 'Filter by destination center geozoneId (third-party ID)' })
   @ApiQuery({ name: 'destinationCenterId', required: false, type: Number, description: 'Filter by destination center ID (internal database ID)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
@@ -84,7 +83,6 @@ export class ExitsController {
     const options = {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
       status: filterDto.status,
-      destinationId: filterDto.destinationId,
       destinationCenterId: filterDto.destinationCenterId,
     };
 

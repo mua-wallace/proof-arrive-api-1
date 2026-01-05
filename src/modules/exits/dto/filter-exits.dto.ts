@@ -29,18 +29,7 @@ export class FilterExitsDto {
   status?: ArrivalStatus;
 
   @ApiPropertyOptional({ 
-    description: 'Filter by destination center geozoneId (third-party ID)', 
-    example: 3003,
-    type: Number
-  })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  destinationId?: number;
-
-  @ApiPropertyOptional({ 
     description: 'Filter by destination center ID (internal database ID)', 
-    example: 1,
     type: Number
   })
   @IsOptional()
