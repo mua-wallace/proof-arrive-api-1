@@ -86,15 +86,15 @@ export const arrivalsRelations = relations(arrivals, ({ one, many }) => ({
 
 // Exits Relations
 export const exitsRelations = relations(exits, ({ one, many }) => ({
-  // One exit belongs to one vehicle
+  // One exit belongs to one vehicle (using thirdPartyId as FK)
   vehicle: one(vehicles, {
     fields: [exits.vehicleId],
-    references: [vehicles.id],
+    references: [vehicles.thirdPartyId],
   }),
-  // One exit belongs to one center
+  // One exit belongs to one center (using geozoneId as FK)
   center: one(centers, {
     fields: [exits.centerId],
-    references: [centers.id],
+    references: [centers.geozoneId],
   }),
   // One exit belongs to one agent (user)
   agent: one(users, {
@@ -107,10 +107,10 @@ export const exitsRelations = relations(exits, ({ one, many }) => ({
     references: [users.accid],
     relationName: 'createdBy',
   }),
-  // One exit can have an optional destination center
+  // One exit can have an optional destination center (using geozoneId as FK)
   destinationCenter: one(centers, {
     fields: [exits.destinationCenterId],
-    references: [centers.id],
+    references: [centers.geozoneId],
     relationName: 'destinationCenter',
   }),
   // One exit can have one incoming vehicle record

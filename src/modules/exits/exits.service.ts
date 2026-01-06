@@ -285,15 +285,15 @@ export class ExitsService extends BaseService<Exit> {
         if (!destCenter) {
           throw new NotFoundException(`Destination center with geozoneId ${createDto.destinationCenterId} not found`);
         }
-        destinationCenterId = destCenter.id;
+        destinationCenterId = destCenter.geozoneId;
       }
 
-      // Create exit using internal database IDs
+      // Create exit using third-party IDs (thirdPartyId and geozoneId) to match schema foreign keys
       const [exit] = await this.dbConnection
         .insert(schema.exits)
         .values({
-          vehicleId: vehicle.id, // Use internal vehicle ID
-          centerId: center.id, // Use internal center ID
+          vehicleId: vehicle.thirdPartyId, // Use thirdPartyId to match schema FK
+          centerId: center.geozoneId, // Use geozoneId to match schema FK
           agentId: agentId,
           createdBy: agentId, // The logged-in user who created the record
           exitType: createDto.exitType,
