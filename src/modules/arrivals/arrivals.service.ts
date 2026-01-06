@@ -427,8 +427,16 @@ export class ArrivalsService extends BaseService<Arrival> {
       // Build relations object for Drizzle query API
       const withRelations: any = {};
       if (options?.include) {
-        if (options.include.includes('arrival')) {
-          withRelations.arrival = true;
+        const includeCenter = options.include.includes('center');
+        const includeVehicle = options.include.includes('vehicle');
+        const includeArrival = options.include.includes('arrival');
+        
+        // If arrival, center, or vehicle is requested, include arrival with nested relations
+        if (includeArrival || includeCenter || includeVehicle) {
+          withRelations.arrival = {
+            center: includeCenter || includeArrival, // Include center if requested or if arrival is included
+            vehicle: includeVehicle || includeArrival, // Include vehicle if requested or if arrival is included
+          };
         }
       }
 
