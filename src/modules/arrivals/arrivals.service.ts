@@ -29,110 +29,21 @@ export class ArrivalsService extends BaseService<Arrival> {
   }
 
   /**
-   * Transform arrival response to show thirdPartyId and geozoneId instead of internal IDs
-   * This maintains API consistency while using internal IDs for database relationships
+   * Transform arrival response - no longer needed as we store thirdPartyId and geozoneId directly
+   * Kept for backward compatibility but returns data as-is
    */
   private async transformArrivalResponse(arrival: any): Promise<any> {
-    if (!arrival) return arrival;
-
-    const transformed = { ...arrival };
-
-    // If vehicleId exists (internal ID), look up the thirdPartyId
-    if (arrival.vehicleId && typeof arrival.vehicleId === 'number') {
-      try {
-        const [vehicle] = await this.dbConnection
-          .select({ thirdPartyId: schema.vehicles.thirdPartyId })
-          .from(schema.vehicles)
-          .where(eq(schema.vehicles.id, arrival.vehicleId))
-          .limit(1);
-        
-        if (vehicle) {
-          transformed.vehicleId = vehicle.thirdPartyId;
-        }
-      } catch (error) {
-        // Silently fail - vehicle might not exist
-      }
-    }
-
-    // If centerId exists (internal ID), look up the geozoneId
-    if (arrival.centerId && typeof arrival.centerId === 'number') {
-      try {
-        const [center] = await this.dbConnection
-          .select({ geozoneId: schema.centers.geozoneId })
-          .from(schema.centers)
-          .where(eq(schema.centers.id, arrival.centerId))
-          .limit(1);
-        
-        if (center) {
-          transformed.centerId = center.geozoneId;
-        }
-      } catch (error) {
-        // Silently fail - center might not exist
-      }
-    }
-
-    return transformed;
+    // Data is already stored as thirdPartyId and geozoneId, no transformation needed
+    return arrival;
   }
 
   /**
-   * Transform multiple arrival responses
+   * Transform multiple arrival responses - no longer needed as we store thirdPartyId and geozoneId directly
+   * Kept for backward compatibility but returns data as-is
    */
   private async transformArrivalResponses(arrivals: any[]): Promise<any[]> {
-    if (!arrivals || arrivals.length === 0) return arrivals;
-
-    // Batch lookup vehicles and centers for better performance
-    const vehicleIds = [...new Set(arrivals.map(a => a.vehicleId).filter(Boolean))];
-    const centerIds = [...new Set(arrivals.map(a => a.centerId).filter(Boolean))];
-
-    const vehicleMap = new Map<number, number>();
-    const centerMap = new Map<number, number>();
-
-    // Batch fetch vehicles
-    if (vehicleIds.length > 0) {
-      try {
-        const vehicles = await this.dbConnection
-          .select({ id: schema.vehicles.id, thirdPartyId: schema.vehicles.thirdPartyId })
-          .from(schema.vehicles)
-          .where(inArray(schema.vehicles.id, vehicleIds));
-        
-        vehicles.forEach((v: any) => {
-          vehicleMap.set(v.id, v.thirdPartyId);
-        });
-      } catch (error) {
-        // Silently fail - vehicles might not exist
-      }
-    }
-
-    // Batch fetch centers
-    if (centerIds.length > 0) {
-      try {
-        const centers = await this.dbConnection
-          .select({ id: schema.centers.id, geozoneId: schema.centers.geozoneId })
-          .from(schema.centers)
-          .where(inArray(schema.centers.id, centerIds));
-        
-        centers.forEach((c: any) => {
-          centerMap.set(c.id, c.geozoneId);
-        });
-      } catch (error) {
-        // Silently fail - centers might not exist
-      }
-    }
-
-    // Transform arrivals
-    return arrivals.map(arrival => {
-      const transformed = { ...arrival };
-      
-      if (arrival.vehicleId && vehicleMap.has(arrival.vehicleId)) {
-        transformed.vehicleId = vehicleMap.get(arrival.vehicleId);
-      }
-      
-      if (arrival.centerId && centerMap.has(arrival.centerId)) {
-        transformed.centerId = centerMap.get(arrival.centerId);
-      }
-      
-      return transformed;
-    });
+    // Data is already stored as thirdPartyId and geozoneId, no transformation needed
+    return arrivals;
   }
 
   async findAll(
@@ -397,13 +308,13 @@ export class ArrivalsService extends BaseService<Arrival> {
         throw new NotFoundException(`Center with geozoneId ${createDto.centerId} not found`);
       }
 
-      // Create arrival using internal database IDs
+      // Create arrival using third-party IDs (thirdPartyId and geozoneId) to match schema foreign keys
       const [arrival] = await this.dbConnection
         .insert(schema.arrivals)
         .values({
-          vehicleId: vehicle.id, // Use internal vehicle ID
-          centerId: center.id, // Use internal center ID
-          agentId: agentId, // Keep for backward compatibility with schema
+          vehicleId: vehicle.thirdPartyId, // Use thirdPartyId to match schema FK
+          centerId: center.geozoneId, // Use geozoneId to match schema FK
+          agentId: agentId,
           createdBy: agentId, // The logged-in user who created the record
           status: createDto.status || ArrivalStatus.ARRIVED,
           latitude: createDto.latitude || null,
@@ -413,12 +324,7 @@ export class ArrivalsService extends BaseService<Arrival> {
         })
         .returning();
 
-      // Transform response to show original thirdPartyId and geozoneId from payload
-      return {
-        ...arrival,
-        vehicleId: createDto.vehicleId, // Return original thirdPartyId from payload
-        centerId: createDto.centerId, // Return original geozoneId from payload
-      } as Arrival;
+      return arrival as Arrival;
     } catch (error: any) {
       this.logger.error(`Failed to create arrival: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;

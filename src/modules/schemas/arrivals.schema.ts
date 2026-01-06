@@ -8,8 +8,8 @@ import { ArrivalStatus } from '@modules/arrivals/dto';
 // Arrivals
 export const arrivals = pgTable('arrivals', {
   ...baseColumnsSerial,
-  vehicleId: integer('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
-  centerId: integer('center_id').notNull().references(() => centers.id, { onDelete: 'restrict' }),
+  vehicleId: integer('vehicle_id').notNull().references(() => vehicles.thirdPartyId, { onDelete: 'cascade' }),
+  centerId: integer('center_id').notNull().references(() => centers.geozoneId, { onDelete: 'restrict' }),
   agentId: text('agent_id').notNull().references(() => users.accid, { onDelete: 'restrict' }),
   createdBy: text('created_by').notNull(), // No FK constraint since accid is not unique
   // Status: arrival, arrived, in_processing, completed, cancelled, in_transit, exited

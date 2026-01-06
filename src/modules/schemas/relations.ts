@@ -59,15 +59,15 @@ export const usersRelations = relations(users, ({ many }) => ({
 
 // Arrivals Relations
 export const arrivalsRelations = relations(arrivals, ({ one, many }) => ({
-  // One arrival belongs to one vehicle
+  // One arrival belongs to one vehicle (using thirdPartyId as FK)
   vehicle: one(vehicles, {
     fields: [arrivals.vehicleId],
-    references: [vehicles.id],
+    references: [vehicles.thirdPartyId],
   }),
-  // One arrival belongs to one center
+  // One arrival belongs to one center (using geozoneId as FK)
   center: one(centers, {
     fields: [arrivals.centerId],
-    references: [centers.id],
+    references: [centers.geozoneId],
   }),
   // One arrival belongs to one agent (user)
   agent: one(users, {
