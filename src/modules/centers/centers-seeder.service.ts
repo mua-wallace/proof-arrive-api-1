@@ -23,6 +23,19 @@ export class CentersSeederService implements OnModuleInit {
    */
   async seedDefaultCenters(): Promise<void> {
     try {
+      // Verify database connection by checking if centers table is accessible
+      try {
+        await this.dbConnection
+          .select()
+          .from(schema.centers)
+          .limit(1);
+      } catch (dbError) {
+        this.logger.warn(
+          `⚠️  Database connection issue or centers table not ready: ${dbError instanceof Error ? dbError.message : 'Unknown error'}. Skipping seeding.`,
+        );
+        return;
+      }
+
       const defaultCenters = [
         {
           thirdPartyId: 1001,
@@ -96,25 +109,44 @@ export class CentersSeederService implements OnModuleInit {
       ];
 
       for (const centerData of defaultCenters) {
-        // Check if center already exists by thirdPartyId, siteid, or geozoneId
-        const existingCenter = await this.dbConnection
-          .select()
-          .from(schema.centers)
-          .where(
-            or(
-              eq(schema.centers.thirdPartyId, centerData.thirdPartyId),
-              eq(schema.centers.siteid, centerData.siteid),
-              eq(schema.centers.geozoneId, centerData.geozoneId),
-            ),
-          )
-          .limit(1);
+        try {
+          // Check if center already exists by thirdPartyId, siteid, or geozoneId
+          // Build conditions array, handling potential null values
+          const conditions = [
+            eq(schema.centers.thirdPartyId, centerData.thirdPartyId),
+            eq(schema.centers.siteid, centerData.siteid),
+          ];
+          
+          // Only add geozoneId condition if it's not null/undefined
+          if (centerData.geozoneId != null) {
+            conditions.push(eq(schema.centers.geozoneId, centerData.geozoneId));
+          }
 
-        if (existingCenter.length === 0) {
-          // Center doesn't exist, insert it
-          await this.dbConnection.insert(schema.centers).values(centerData).execute();
-          this.logger.log(`✅ Seeded default center: ${centerData.name} (ID: ${centerData.thirdPartyId})`);
-        } else {
-          this.logger.debug(`⏭️  Default center ${centerData.name} already exists, skipping`);
+          const existingCenter = await this.dbConnection
+            .select()
+            .from(schema.centers)
+            .where(or(...conditions))
+            .limit(1);
+
+          if (existingCenter.length === 0) {
+            // Center doesn't exist, insert it
+            await this.dbConnection.insert(schema.centers).values(centerData).execute();
+            this.logger.log(`✅ Seeded default center: ${centerData.name} (ID: ${centerData.thirdPartyId})`);
+          } else {
+            this.logger.debug(`⏭️  Default center ${centerData.name} already exists, skipping`);
+          }
+        } catch (centerError) {
+          const errorMessage = centerError instanceof Error ? centerError.message : 'Unknown error';
+          const errorStack = centerError instanceof Error ? centerError.stack : undefined;
+          this.logger.error(
+            `❌ Error seeding center ${centerData.name} (thirdPartyId: ${centerData.thirdPartyId}): ${errorMessage}`,
+            errorStack,
+          );
+          // Log the actual error details
+          if (centerError instanceof Error && 'cause' in centerError) {
+            this.logger.error(`Error cause: ${JSON.stringify(centerError.cause)}`);
+          }
+          // Continue with next center instead of failing completely
         }
       }
 
