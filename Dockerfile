@@ -26,8 +26,8 @@ RUN cp .env.example .env || echo ".env.example not found, skipping .env creation
 # Make migration scripts executable
 RUN chmod +x scripts/*.sh || true
 
-# Note: We use drizzle-kit push at runtime instead of generating migrations
-# This allows the schema to be synced directly to the database
+# Note: Migrations are run at container startup using SQL migration files
+# The startup script (scripts/start-with-migrations.sh) runs migrations before starting the app
 
 # Build the application
 RUN npm run build
@@ -40,19 +40,20 @@ ARG DATABASE_USERNAME
 ARG DATABASE_PASSWORD
 ARG DATABASE_NAME
 
-# Optional: Push schema at build time if database credentials are provided
-# This will sync the schema directly to the database without migration files
+# Optional: Run migrations at build time if database credentials are provided
+# This requires build args: --build-arg DATABASE_HOST=... DATABASE_PORT=... etc.
+# Note: Migrations will also run at container startup, so this is optional
 RUN if [ -n "$DATABASE_HOST" ] && [ -n "$DATABASE_NAME" ]; then \
-      echo "Pushing database schema at build time..." && \
+      echo "Running database migrations at build time..." && \
       export DATABASE_HOST="$DATABASE_HOST" && \
       export DATABASE_PORT="${DATABASE_PORT:-5432}" && \
       export DATABASE_USERNAME="${DATABASE_USERNAME:-postgres}" && \
       export DATABASE_PASSWORD="$DATABASE_PASSWORD" && \
       export DATABASE_NAME="$DATABASE_NAME" && \
-      npx drizzle-kit push --config=src/database/drizzle.config.ts || \
-      (echo "Warning: Schema could not be pushed at build time. It will be synced at runtime." && true); \
+      node scripts/run-migrations.js || \
+      (echo "Warning: Migrations could not be run at build time. They will run at container startup." && true); \
     else \
-      echo "Database credentials not provided at build time. Schema will be synced at runtime."; \
+      echo "Database credentials not provided at build time. Migrations will run at container startup."; \
     fi
 
 ENV NODE_ENV=production
@@ -61,20 +62,17 @@ FROM node:22.17.0 AS production
 
 WORKDIR /usr/src/app
 
-# Copy package files and install dependencies (including drizzle-kit and TypeScript for schema sync)
+# Copy package files and install production dependencies
 COPY package.json package-lock.json* ./
-RUN npm ci && npm cache clean --force
-# Note: We install all dependencies (including devDependencies) because:
-# - drizzle-kit needs TypeScript to read drizzle.config.ts
-# - TypeScript is needed for schema files
+RUN npm ci --only=production && npm cache clean --force
+# Note: We only install production dependencies since migrations use SQL files
+# The migration script (run-migrations.js) only needs 'pg' which is a production dependency
 
 # Copy built application from build stage
 COPY --from=build /usr/src/app/dist ./dist
 
-# Copy drizzle config and schema source files (needed for drizzle-kit push)
-COPY --from=build /usr/src/app/src/database/drizzle.config.ts ./src/database/drizzle.config.ts
-# Copy schema source files (needed for drizzle-kit push to work)
-COPY --from=build /usr/src/app/src/modules/schemas ./src/modules/schemas
+# Copy migration files and scripts needed for runtime migrations
+COPY --from=build /usr/src/app/src/database/migrations ./src/database/migrations
 COPY --from=build /usr/src/app/scripts ./scripts
 
 # Copy .env file created in build stage (environment variables source)
@@ -83,9 +81,7 @@ COPY --from=build /usr/src/app/.env ./.env
 # Make scripts executable
 RUN chmod +x scripts/*.sh || true
 
-# Note: drizzle-kit is already in dependencies, so it's available for runtime schema sync
-
 # Use the startup script as default command
-# This will sync schema if needed, then start the app
+# This will run migrations if needed, then start the app
 CMD [ "sh", "scripts/start-with-migrations.sh" ]
 

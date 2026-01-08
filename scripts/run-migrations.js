@@ -17,6 +17,7 @@ const dbConfig = {
   database: process.env.DATABASE_NAME || 'proof_arrive',
 };
 
+// Support both development (from scripts/) and production (from dist/scripts/) paths
 const migrationsDir = join(__dirname, '../src/database/migrations');
 
 async function runMigrations() {
@@ -145,21 +146,28 @@ async function runMigrations() {
     }
 
     console.log('\n✓ All migrations completed successfully!');
+    return true; // Success
   } catch (error) {
     console.error('\n✗ Migration failed:', error.message);
     console.error('Full error:', error);
     if (error.code) {
       console.error('Error code:', error.code);
     }
-    process.exit(1);
+    return false; // Failure - don't exit, let caller decide
   } finally {
     await client.end();
   }
 }
 
 // Run migrations
-runMigrations().catch(error => {
-  console.error('Fatal error:', error);
-  process.exit(1);
-});
+// Exit with code 0 on success, 1 on failure
+// This allows the startup script to handle retries
+runMigrations()
+  .then(success => {
+    process.exit(success ? 0 : 1);
+  })
+  .catch(error => {
+    console.error('Fatal error:', error);
+    process.exit(1);
+  });
 
