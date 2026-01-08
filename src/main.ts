@@ -24,6 +24,19 @@ async function bootstrap() {
   // Load config early
   const config = appConfig();
 
+  // Run database migrations before creating the app
+  // This ensures migrations are completed before any module initialization
+  try {
+    const { runMigrations } = await import('./database/run-migrations');
+    logger.log('🔄 Running database migrations...');
+    await runMigrations();
+    logger.log('✅ Migrations completed, starting application...');
+  } catch (error) {
+    logger.warn(
+      `⚠️  Failed to run migrations: ${error instanceof Error ? error.message : 'Unknown error'}. Continuing anyway...`,
+    );
+  }
+
   const app = await NestFactory.create(AppModule);
   const httpAdapter = app.get(HttpAdapterHost);
 

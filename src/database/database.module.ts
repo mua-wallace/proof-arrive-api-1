@@ -1,13 +1,16 @@
-import { Module } from '@nestjs/common';
+import { Module, Global } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '@modules/schemas';
 import { DATABASE_CONNECTION } from '@database/database-connection';
+import { MigrationService } from './migration.service';
 
+@Global()
 @Module({
   imports: [ConfigModule],
   providers: [
+    MigrationService,
     {
       provide: DATABASE_CONNECTION,
       useFactory: (configService: ConfigService) => {
@@ -28,7 +31,7 @@ import { DATABASE_CONNECTION } from '@database/database-connection';
       inject: [ConfigService],
     },
   ],
-  exports: [DATABASE_CONNECTION],
+  exports: [DATABASE_CONNECTION, MigrationService],
 })
 export class DatabaseModule {}
 
