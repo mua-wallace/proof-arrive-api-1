@@ -86,10 +86,13 @@ export class ExitsService extends BaseService<Exit> {
 
       // Get total count
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      const [{ count: total }] = await this.dbConnection
+      const countQuery = this.dbConnection
         .select({ count: count() })
-        .from(schema.exits)
-        .where(whereClause);
+        .from(schema.exits);
+      
+      const [{ count: total }] = whereClause 
+        ? await countQuery.where(whereClause)
+        : await countQuery;
 
       // Build relations object for Drizzle query API
       const withRelations: any = {};
@@ -121,13 +124,19 @@ export class ExitsService extends BaseService<Exit> {
       let data: any[];
       if (Object.keys(withRelations).length > 0) {
         // When relations are requested, first get the IDs that match the conditions
-        const matchingIds = await this.dbConnection
+        const matchingIdsQuery = this.dbConnection
           .select({ id: schema.exits.id })
-          .from(schema.exits)
-          .where(whereClause)
-          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-          .limit(limit)
-          .offset(offset);
+          .from(schema.exits);
+        
+        const matchingIds = whereClause
+          ? await matchingIdsQuery.where(whereClause)
+              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+              .limit(limit)
+              .offset(offset)
+          : await matchingIdsQuery
+              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+              .limit(limit)
+              .offset(offset);
 
         const ids = matchingIds.map((row: any) => row.id);
 
@@ -150,13 +159,19 @@ export class ExitsService extends BaseService<Exit> {
         }
       } else {
         // Use standard query when no relations
-        data = await this.dbConnection
+        const dataQuery = this.dbConnection
           .select()
-          .from(schema.exits)
-          .where(whereClause)
-          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-          .limit(limit)
-          .offset(offset);
+          .from(schema.exits);
+        
+        data = whereClause
+          ? await dataQuery.where(whereClause)
+              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+              .limit(limit)
+              .offset(offset)
+          : await dataQuery
+              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+              .limit(limit)
+              .offset(offset);
       }
 
       return {
@@ -179,7 +194,17 @@ export class ExitsService extends BaseService<Exit> {
         },
       };
     } catch (error: any) {
-      this.logger.error(`Failed to fetch exits: ${error?.message || 'Unknown error'}`, error?.stack);
+      // Log detailed error information for debugging
+      this.logger.error(
+        `Failed to fetch exits: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      if (error?.cause) {
+        this.logger.error(`Error cause: ${JSON.stringify(error.cause)}`);
+      }
+      if (error?.code) {
+        this.logger.error(`Error code: ${error.code}`);
+      }
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
         `Failed to fetch exits: ${error?.message || 'Unknown error occurred'}`,
