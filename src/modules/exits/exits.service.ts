@@ -86,13 +86,18 @@ export class ExitsService extends BaseService<Exit> {
 
       // Get total count
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      const countQuery = this.dbConnection
-        .select({ count: count() })
-        .from(schema.exits);
-      
-      const [{ count: total }] = whereClause 
-        ? await countQuery.where(whereClause)
-        : await countQuery;
+      let countResult;
+      if (whereClause) {
+        countResult = await this.dbConnection
+          .select({ count: count() })
+          .from(schema.exits)
+          .where(whereClause);
+      } else {
+        countResult = await this.dbConnection
+          .select({ count: count() })
+          .from(schema.exits);
+      }
+      const [{ count: total }] = countResult;
 
       // Build relations object for Drizzle query API
       const withRelations: any = {};
@@ -159,19 +164,22 @@ export class ExitsService extends BaseService<Exit> {
         }
       } else {
         // Use standard query when no relations
-        const dataQuery = this.dbConnection
-          .select()
-          .from(schema.exits);
-        
-        data = whereClause
-          ? await dataQuery.where(whereClause)
-              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-              .limit(limit)
-              .offset(offset)
-          : await dataQuery
-              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-              .limit(limit)
-              .offset(offset);
+        if (whereClause) {
+          data = await this.dbConnection
+            .select()
+            .from(schema.exits)
+            .where(whereClause)
+            .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+            .limit(limit)
+            .offset(offset);
+        } else {
+          data = await this.dbConnection
+            .select()
+            .from(schema.exits)
+            .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+            .limit(limit)
+            .offset(offset);
+        }
       }
 
       return {
@@ -199,12 +207,29 @@ export class ExitsService extends BaseService<Exit> {
         `Failed to fetch exits: ${error?.message || 'Unknown error'}`,
         error?.stack,
       );
+      
+      // Log additional error details for production debugging
       if (error?.cause) {
         this.logger.error(`Error cause: ${JSON.stringify(error.cause)}`);
       }
       if (error?.code) {
         this.logger.error(`Error code: ${error.code}`);
       }
+      if (error?.detail) {
+        this.logger.error(`Error detail: ${error.detail}`);
+      }
+      if (error?.hint) {
+        this.logger.error(`Error hint: ${error.hint}`);
+      }
+      
+      // Check if it's a table/column not found error
+      const errorMessage = error?.message?.toLowerCase() || '';
+      if (errorMessage.includes('does not exist') || errorMessage.includes('relation') || errorMessage.includes('column')) {
+        this.logger.error(
+          '⚠️  Database schema mismatch detected. Please ensure migrations have been run in production.',
+        );
+      }
+      
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
         `Failed to fetch exits: ${error?.message || 'Unknown error occurred'}`,
