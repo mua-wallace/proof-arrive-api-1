@@ -72,8 +72,14 @@ RUN npm ci --only=production && npm cache clean --force
 COPY --from=build /usr/src/app/dist ./dist
 
 # Copy migration files and scripts needed for runtime migrations
+# Ensure migrations directory structure is preserved
 COPY --from=build /usr/src/app/src/database/migrations ./src/database/migrations
 COPY --from=build /usr/src/app/scripts ./scripts
+
+# Verify migrations were copied (for debugging)
+RUN echo "Verifying migrations were copied..." && \
+    ls -la src/database/migrations/ 2>/dev/null || echo "WARNING: Migrations directory not found" && \
+    echo "Migration files: $(ls src/database/migrations/*.sql 2>/dev/null | wc -l) SQL files found"
 
 # Copy .env file created in build stage (environment variables source)
 COPY --from=build /usr/src/app/.env ./.env

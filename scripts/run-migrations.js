@@ -18,7 +18,18 @@ const dbConfig = {
 };
 
 // Support both development (from scripts/) and production (from dist/scripts/) paths
-const migrationsDir = join(__dirname, '../src/database/migrations');
+// In production, migrations are copied to src/database/migrations at the root
+let migrationsDir = join(__dirname, '../src/database/migrations');
+
+// If that doesn't exist, try the current working directory (production)
+if (!require('fs').existsSync(migrationsDir)) {
+  migrationsDir = join(process.cwd(), 'src/database/migrations');
+}
+
+// Final fallback - try absolute path from process.cwd
+if (!require('fs').existsSync(migrationsDir)) {
+  migrationsDir = join(process.cwd(), 'src', 'database', 'migrations');
+}
 
 async function runMigrations() {
   const client = new Client(dbConfig);
@@ -36,7 +47,31 @@ async function runMigrations() {
       if (!dirExists) {
         console.error(`✗ Migrations directory not found: ${migrationsDir}`);
         console.error('Current working directory:', process.cwd());
-        process.exit(1);
+        console.error('__dirname:', __dirname);
+        console.error('Trying to find migrations directory...');
+        
+        // Try to find migrations directory
+        const fs = require('fs');
+        const possiblePaths = [
+          join(process.cwd(), 'src/database/migrations'),
+          join(__dirname, '../src/database/migrations'),
+          join(process.cwd(), 'src', 'database', 'migrations'),
+          '/usr/src/app/src/database/migrations', // Docker default
+        ];
+        
+        for (const path of possiblePaths) {
+          if (fs.existsSync(path)) {
+            console.log(`✓ Found migrations directory at: ${path}`);
+            migrationsDir = path;
+            break;
+          }
+        }
+        
+        if (!fs.existsSync(migrationsDir)) {
+          console.error('✗ Could not find migrations directory in any of these locations:');
+          possiblePaths.forEach(p => console.error(`  - ${p}`));
+          process.exit(1);
+        }
       }
     } catch (err) {
       console.error(`✗ Error checking migrations directory: ${err.message}`);
@@ -87,10 +122,30 @@ async function runMigrations() {
         
         // Split SQL by statement-breakpoint and execute each statement separately
         // This handles drizzle-kit's statement-breakpoint format
-        const statements = sql
-          .split('--> statement-breakpoint')
-          .map(s => s.trim())
-          .filter(s => s.length > 0 && !s.startsWith('-- Migration:') && !s.startsWith('-- Generated'));
+        // If no statement-breakpoint exists, split by semicolons for plain SQL files
+        let statements;
+        if (sql.includes('--> statement-breakpoint')) {
+          // Drizzle-kit format: split by statement-breakpoint
+          statements = sql
+            .split('--> statement-breakpoint')
+            .map(s => s.trim())
+            .filter(s => s.length > 0 && !s.startsWith('-- Migration:') && !s.startsWith('-- Generated'));
+        } else {
+          // Plain SQL format: split by semicolons
+          // Remove lines that are only comments (starting with --)
+          const lines = sql.split('\n');
+          const sqlLines = lines.filter(line => {
+            const trimmed = line.trim();
+            // Keep empty lines and non-comment lines
+            return trimmed.length === 0 || !trimmed.startsWith('--');
+          });
+          const cleanedSql = sqlLines.join('\n');
+          // Split by semicolon and filter out empty statements
+          statements = cleanedSql
+            .split(';')
+            .map(s => s.trim())
+            .filter(s => s.length > 0 && !s.match(/^\s*$/));
+        }
 
         let executedCount = 0;
         let skippedCount = 0;
