@@ -69,6 +69,8 @@ export class MalambiApiService extends MalambiBaseApiService {
       MalambiBaseApiService.FORM_HEADERS,
     );
 
+    this.logger.debug('Login response:', data);
+
     if (data?.success !== true) {
       throw new UnauthorizedException('Invalid credentials');
     }

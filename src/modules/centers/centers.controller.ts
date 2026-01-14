@@ -31,6 +31,7 @@ export class CentersController {
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, arrivals, exits, incomingVehicles)' })
   async findAll(
     @Query() filterDto: FilterCentersDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<PaginateResult<Center>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -47,6 +48,7 @@ export class CentersController {
 
     const options = {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
+      accountId: credentials.accid, // Multi-tenant: filter by account ID
     };
 
     return this.centersService.findAll(query, options);
@@ -96,9 +98,11 @@ export class CentersController {
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,
+    @CurrentUserCredentials() credentials?: Credentials,
   ): Promise<Center> {
     const options = {
       include: include ? include.split(',') : undefined,
+      accountId: credentials?.accid, // Multi-tenant: filter by account ID
     };
     return this.centersService.findOneById(Number(id), options);
   }

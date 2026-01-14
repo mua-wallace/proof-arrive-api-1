@@ -48,7 +48,7 @@ export class ArrivalsService extends BaseService<Arrival> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[] },
+    options?: { include?: string[]; accountId?: number },
   ): Promise<PaginateResult<Arrival>> {
     
     try {
@@ -58,6 +58,11 @@ export class ArrivalsService extends BaseService<Arrival> {
 
       // Build where conditions (arrivals don't have deletedAt)
       const conditions: SQL[] = [];
+
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        conditions.push(eq(schema.arrivals.accountId, options.accountId));
+      }
 
       // Add search functionality
       if (query.search && query.searchBy && query.searchBy.length > 0) {
@@ -223,7 +228,7 @@ export class ArrivalsService extends BaseService<Arrival> {
   }
 
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
-  async findOneById(id: number | string, options?: { include?: string[] }): Promise<Arrival> {
+  async findOneById(id: number | string, options?: { include?: string[]; accountId?: number }): Promise<Arrival> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -231,6 +236,14 @@ export class ArrivalsService extends BaseService<Arrival> {
     }
 
     try {
+      // Build where conditions
+      const whereConditions: SQL[] = [eq(schema.arrivals.id, numericId)];
+      
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        whereConditions.push(eq(schema.arrivals.accountId, options.accountId));
+      }
+
       // Build relations object for Drizzle query API
       const withRelations: any = {};
       if (options?.include) {
@@ -252,7 +265,13 @@ export class ArrivalsService extends BaseService<Arrival> {
       if (Object.keys(withRelations).length > 0) {
         // Use relational query API when relations are requested
         arrival = await this.dbConnection.query.arrivals.findFirst({
-          where: (arrivals: any, { eq: eqFn }: any) => eqFn(arrivals.id, numericId),
+          where: (arrivals: any, { eq: eqFn, and: andFn }: any) => {
+            const conditions = [eqFn(arrivals.id, numericId)];
+            if (options?.accountId !== undefined) {
+              conditions.push(eqFn(arrivals.accountId, options.accountId));
+            }
+            return andFn(...conditions);
+          },
           with: withRelations,
         });
       } else {
@@ -260,7 +279,7 @@ export class ArrivalsService extends BaseService<Arrival> {
         [arrival] = await this.dbConnection
           .select()
           .from(schema.arrivals)
-          .where(eq(schema.arrivals.id, numericId))
+          .where(and(...whereConditions))
           .limit(1);
       }
 
@@ -280,14 +299,19 @@ export class ArrivalsService extends BaseService<Arrival> {
     }
   }
 
-  async createArrival(createDto: CreateArrivalDto, agentId: string): Promise<Arrival> {
+  async createArrival(createDto: CreateArrivalDto, agentId: string, accountId: number): Promise<Arrival> {
 
     try {
-      // Validate vehicle exists
+      // Validate vehicle exists and belongs to the account
       const [vehicle] = await this.dbConnection
         .select()
         .from(schema.vehicles)
-        .where(eq(schema.vehicles.thirdPartyId, createDto.vehicleId))
+        .where(
+          and(
+            eq(schema.vehicles.thirdPartyId, createDto.vehicleId),
+            eq(schema.vehicles.accountId, accountId),
+          ),
+        )
         .limit(1);
 
       if (!vehicle) {
@@ -297,11 +321,16 @@ export class ArrivalsService extends BaseService<Arrival> {
         );
       }
 
-      // Validate center exists
+      // Validate center exists and belongs to the account
       const [center] = await this.dbConnection
         .select()
         .from(schema.centers)
-        .where(eq(schema.centers.geozoneId, createDto.centerId))
+        .where(
+          and(
+            eq(schema.centers.geozoneId, createDto.centerId),
+            eq(schema.centers.accountId, accountId),
+          ),
+        )
         .limit(1);
 
       if (!center) {
@@ -312,6 +341,7 @@ export class ArrivalsService extends BaseService<Arrival> {
       const [arrival] = await this.dbConnection
         .insert(schema.arrivals)
         .values({
+          accountId: accountId, // Multi-tenant: account ID from logged-in user
           vehicleId: vehicle.thirdPartyId, // Use thirdPartyId to match schema FK
           centerId: center.geozoneId, // Use geozoneId to match schema FK
           agentId: agentId,
@@ -334,7 +364,7 @@ export class ArrivalsService extends BaseService<Arrival> {
     }
   }
 
-  async updateStatus(id: number | string, updateDto: UpdateArrivalStatusDto): Promise<Arrival> {
+  async updateStatus(id: number | string, updateDto: UpdateArrivalStatusDto, accountId?: number): Promise<Arrival> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -342,17 +372,22 @@ export class ArrivalsService extends BaseService<Arrival> {
     }
 
     try {
-      // Check if arrival exists
-      await this.findOneById(numericId);
+      // Check if arrival exists and belongs to the account
+      await this.findOneById(numericId, { accountId });
 
       // Update status
+      const whereConditions: SQL[] = [eq(schema.arrivals.id, numericId)];
+      if (accountId !== undefined) {
+        whereConditions.push(eq(schema.arrivals.accountId, accountId));
+      }
+
       const [updated] = await this.dbConnection
         .update(schema.arrivals)
         .set({
           status: updateDto.status,
           updatedAt: new Date(),
         })
-        .where(eq(schema.arrivals.id, numericId))
+        .where(and(...whereConditions))
         .returning();
 
       // Transform arrival to show thirdPartyId and geozoneId instead of internal IDs
@@ -369,7 +404,7 @@ export class ArrivalsService extends BaseService<Arrival> {
 
   async getAllProcessingStages(
     query: PaginateQuery = {},
-    options?: { include?: string[] },
+    options?: { include?: string[]; accountId?: number },
   ): Promise<PaginateResult<ProcessingStage>> {
     try {
       const page = query.page || 1;
@@ -378,6 +413,11 @@ export class ArrivalsService extends BaseService<Arrival> {
 
       // Build where conditions
       const conditions: SQL[] = [];
+
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        conditions.push(eq(schema.processingStages.accountId, options.accountId));
+      }
 
       // Add search functionality
       if (query.search && query.searchBy && query.searchBy.length > 0) {
@@ -534,6 +574,7 @@ export class ArrivalsService extends BaseService<Arrival> {
   async getProcessingStage(
     arrivalId: number | string,
     stageId: number | string,
+    accountId?: number,
   ): Promise<ProcessingStage> {
     const numericArrivalId = typeof arrivalId === 'string' ? Number(arrivalId) : arrivalId;
     const numericStageId = typeof stageId === 'string' ? Number(stageId) : stageId;
@@ -547,19 +588,23 @@ export class ArrivalsService extends BaseService<Arrival> {
     }
 
     try {
-      // Check if arrival exists
-      await this.findOneById(numericArrivalId);
+      // Check if arrival exists and belongs to the account
+      await this.findOneById(numericArrivalId, { accountId });
 
       // Get processing stage
+      const whereConditions: SQL[] = [
+        eq(schema.processingStages.id, numericStageId),
+        eq(schema.processingStages.arrivalId, numericArrivalId),
+      ];
+      
+      if (accountId !== undefined) {
+        whereConditions.push(eq(schema.processingStages.accountId, accountId));
+      }
+
       const [stage] = await this.dbConnection
         .select()
         .from(schema.processingStages)
-        .where(
-          and(
-            eq(schema.processingStages.id, numericStageId),
-            eq(schema.processingStages.arrivalId, numericArrivalId),
-          ),
-        )
+        .where(and(...whereConditions))
         .limit(1);
 
       if (!stage) {
@@ -581,6 +626,7 @@ export class ArrivalsService extends BaseService<Arrival> {
   async createProcessingStage(
     arrivalId: number | string,
     createDto: CreateProcessingStageDto,
+    accountId?: number,
   ): Promise<ProcessingStage> {
     const numericArrivalId = typeof arrivalId === 'string' ? Number(arrivalId) : arrivalId;
 
@@ -589,12 +635,13 @@ export class ArrivalsService extends BaseService<Arrival> {
     }
 
     try {
-      // Check if arrival exists
-      await this.findOneById(numericArrivalId);
+      // Check if arrival exists and belongs to the account
+      const arrival = await this.findOneById(numericArrivalId, { accountId });
 
       // Create processing stage
       // Note: startedAt must be explicitly set to null - it will only be set when status changes to in_processing via updateProcessingStage
       const insertValues: any = {
+        accountId: accountId || (arrival as any).accountId, // Use accountId from arrival if not provided
         arrivalId: numericArrivalId,
         stageType: createDto.stageType,
         startedAt: null, // Explicitly set to null to prevent any database defaults or triggers
@@ -626,6 +673,7 @@ export class ArrivalsService extends BaseService<Arrival> {
     arrivalId: number | string,
     stageId: number | string,
     updateDto: UpdateProcessingStageDto,
+    accountId?: number,
   ): Promise<ProcessingStage> {
     const numericArrivalId = typeof arrivalId === 'string' ? Number(arrivalId) : arrivalId;
     const numericStageId = typeof stageId === 'string' ? Number(stageId) : stageId;
@@ -639,19 +687,23 @@ export class ArrivalsService extends BaseService<Arrival> {
     }
 
     try {
-      // Check if arrival exists
-      await this.findOneById(numericArrivalId);
+      // Check if arrival exists and belongs to the account
+      await this.findOneById(numericArrivalId, { accountId });
 
       // Check if processing stage exists and belongs to this arrival
+      const whereConditions: SQL[] = [
+        eq(schema.processingStages.id, numericStageId),
+        eq(schema.processingStages.arrivalId, numericArrivalId),
+      ];
+      
+      if (accountId !== undefined) {
+        whereConditions.push(eq(schema.processingStages.accountId, accountId));
+      }
+
       const [stage] = await this.dbConnection
         .select()
         .from(schema.processingStages)
-        .where(
-          and(
-            eq(schema.processingStages.id, numericStageId),
-            eq(schema.processingStages.arrivalId, numericArrivalId),
-          ),
-        )
+        .where(and(...whereConditions))
         .limit(1);
 
       if (!stage) {
@@ -685,10 +737,15 @@ export class ArrivalsService extends BaseService<Arrival> {
         updateData.notes = updateDto.notes;
       }
 
+      const updateWhereConditions: SQL[] = [eq(schema.processingStages.id, numericStageId)];
+      if (accountId !== undefined) {
+        updateWhereConditions.push(eq(schema.processingStages.accountId, accountId));
+      }
+
       const [updated] = await this.dbConnection
         .update(schema.processingStages)
         .set(updateData)
-        .where(eq(schema.processingStages.id, numericStageId))
+        .where(and(...updateWhereConditions))
         .returning();
 
       return updated as ProcessingStage;
@@ -704,6 +761,7 @@ export class ArrivalsService extends BaseService<Arrival> {
   async removeProcessingStage(
     arrivalId: number | string,
     stageId: number | string,
+    accountId?: number,
   ): Promise<ProcessingStage> {
     const numericArrivalId = typeof arrivalId === 'string' ? Number(arrivalId) : arrivalId;
     const numericStageId = typeof stageId === 'string' ? Number(stageId) : stageId;
@@ -717,19 +775,23 @@ export class ArrivalsService extends BaseService<Arrival> {
     }
 
     try {
-      // Check if arrival exists
-      await this.findOneById(numericArrivalId);
+      // Check if arrival exists and belongs to the account
+      await this.findOneById(numericArrivalId, { accountId });
 
       // Check if processing stage exists and belongs to this arrival
+      const whereConditions: SQL[] = [
+        eq(schema.processingStages.id, numericStageId),
+        eq(schema.processingStages.arrivalId, numericArrivalId),
+      ];
+      
+      if (accountId !== undefined) {
+        whereConditions.push(eq(schema.processingStages.accountId, accountId));
+      }
+
       const [stage] = await this.dbConnection
         .select()
         .from(schema.processingStages)
-        .where(
-          and(
-            eq(schema.processingStages.id, numericStageId),
-            eq(schema.processingStages.arrivalId, numericArrivalId),
-          ),
-        )
+        .where(and(...whereConditions))
         .limit(1);
 
       if (!stage) {
@@ -741,7 +803,7 @@ export class ArrivalsService extends BaseService<Arrival> {
       // Delete the processing stage
       await this.dbConnection
         .delete(schema.processingStages)
-        .where(eq(schema.processingStages.id, numericStageId));
+        .where(and(...whereConditions));
 
       return stage as ProcessingStage;
     } catch (error: any) {

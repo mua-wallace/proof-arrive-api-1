@@ -111,11 +111,16 @@ export class QueueProcessorService implements OnModuleInit {
           tag2?: string;
           groupId?: number;
         };
+        accountId?: number;
         thirdPartyId?: number;
       };
       
       if (jobData.vehicleData) {
-        await this.vehiclesSyncService.syncVehicle(jobData.vehicleData);
+        if (!jobData.accountId) {
+          this.logger.error('Invalid vehicle sync job data: missing accountId');
+          return;
+        }
+        await this.vehiclesSyncService.syncVehicle(jobData.vehicleData, jobData.accountId);
       } else if (jobData.thirdPartyId) {
         // Legacy support: if only thirdPartyId is provided, we would need to fetch vehicle data from Malambi API
         // For now, log an error as we need full vehicle data
@@ -162,12 +167,17 @@ export class QueueProcessorService implements OnModuleInit {
           timeoutin_muros?: number;
           timeoutin_muros_str?: string;
         };
+        accountId?: number;
         thirdPartyId?: number;
         siteid?: number;
       };
       
       if (jobData.centerData) {
-        await this.centersSyncService.syncCenter(jobData.centerData);
+        if (!jobData.accountId) {
+          this.logger.error('Invalid center sync job data: missing accountId');
+          return;
+        }
+        await this.centersSyncService.syncCenter(jobData.centerData, jobData.accountId);
       } else if (jobData.thirdPartyId || jobData.siteid) {
         // If only IDs are provided, we would need to fetch center data from Malambi API
         // For now, log an error as we need full center data

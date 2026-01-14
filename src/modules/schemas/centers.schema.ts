@@ -4,8 +4,8 @@ import { baseColumnsSerial } from './base.schema';
 // Centers
 export const centers = pgTable('centers', {
   ...baseColumnsSerial,
-  thirdPartyId: integer('third_party_id').notNull().unique(), // id from Malambi API (e.g., 84)
-  siteid: integer('siteid').notNull().unique(), // siteid from Malambi API (e.g., 9164)
+  thirdPartyId: integer('third_party_id').notNull(), // id from Malambi API (e.g., 84)
+  siteid: integer('siteid').notNull(), // siteid from Malambi API (e.g., 9164)
   name: varchar('name', { length: 255 }).notNull(),
   fullname: varchar('fullname', { length: 255 }),
   geozone: varchar('geozone', { length: 255 }), // geozone name (e.g., "CC Y3")
@@ -26,8 +26,11 @@ export const centers = pgTable('centers', {
   timeoutin_muros: integer('timeoutin_muros'),
   timeoutin_muros_str: varchar('timeoutin_muros_str', { length: 50 }), // e.g., "01:00"
 }, (table) => ({
+  accountIdx: index('idx_centers_account').on(table.accountId),
   thirdPartyIdx: index('idx_centers_third_party').on(table.thirdPartyId),
   siteidIdx: index('idx_centers_siteid').on(table.siteid),
+  accountThirdPartyIdx: index('idx_centers_account_third_party').on(table.accountId, table.thirdPartyId), // Unique per account
+  accountSiteidIdx: index('idx_centers_account_siteid').on(table.accountId, table.siteid), // Unique per account
   nameIdx: index('idx_centers_name').on(table.name),
   geozoneIdx: index('idx_centers_geozone').on(table.geozoneId),
   groupidIdx: index('idx_centers_groupid').on(table.groupid),

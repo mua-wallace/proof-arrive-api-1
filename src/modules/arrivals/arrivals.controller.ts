@@ -52,7 +52,7 @@ export class ArrivalsController {
     @Body() createDto: CreateArrivalDto,
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<Arrival> {
-    return this.arrivalsService.createArrival(createDto, credentials.accid.toString());
+    return this.arrivalsService.createArrival(createDto, credentials.accid.toString(), credentials.accid);
   }
 
   @Get()
@@ -69,6 +69,7 @@ export class ArrivalsController {
   @ApiResponse({ status: 200, description: 'List of arrivals retrieved successfully' })
   async findAll(
     @Query() filterDto: FilterArrivalsDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<PaginateResult<Arrival>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -85,6 +86,7 @@ export class ArrivalsController {
 
     const options = {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
+      accountId: credentials.accid, // Multi-tenant: filter by account ID
     };
 
     return this.arrivalsService.findAll(query, options);
@@ -104,6 +106,7 @@ export class ArrivalsController {
   @ApiResponse({ status: 200, description: 'List of processing stages retrieved successfully' })
   async getAllProcessingStages(
     @Query() filterDto: FilterProcessingStagesDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<PaginateResult<ProcessingStage>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -120,6 +123,7 @@ export class ArrivalsController {
 
     const options = {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
+      accountId: credentials.accid, // Multi-tenant: filter by account ID
     };
 
     return this.arrivalsService.getAllProcessingStages(query, options);
@@ -136,9 +140,11 @@ export class ArrivalsController {
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,
+    @CurrentUserCredentials() credentials?: Credentials,
   ): Promise<Arrival> {
     const options = {
       include: include ? include.split(',') : undefined,
+      accountId: credentials?.accid, // Multi-tenant: filter by account ID
     };
     return this.arrivalsService.findOneById(Number(id), options);
   }
@@ -153,8 +159,9 @@ export class ArrivalsController {
   async updateStatus(
     @Param('id') id: string,
     @Body() updateDto: UpdateArrivalStatusDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<Arrival> {
-    return this.arrivalsService.updateStatus(Number(id), updateDto);
+    return this.arrivalsService.updateStatus(Number(id), updateDto, credentials.accid);
   }
 
   @Get(':id/process/:stageId')
@@ -167,8 +174,9 @@ export class ArrivalsController {
   async getProcessingStage(
     @Param('id') id: string,
     @Param('stageId') stageId: string,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<ProcessingStage> {
-    return this.arrivalsService.getProcessingStage(Number(id), Number(stageId));
+    return this.arrivalsService.getProcessingStage(Number(id), Number(stageId), credentials.accid);
   }
 
   @Post(':id/process')
@@ -182,8 +190,9 @@ export class ArrivalsController {
   async createProcessingStage(
     @Param('id') id: string,
     @Body() createDto: CreateProcessingStageDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<ProcessingStage> {
-    return this.arrivalsService.createProcessingStage(Number(id), createDto);
+    return this.arrivalsService.createProcessingStage(Number(id), createDto, credentials.accid);
   }
 
   @Put(':id/process/:stageId')
@@ -197,8 +206,9 @@ export class ArrivalsController {
     @Param('id') id: string,
     @Param('stageId') stageId: string,
     @Body() updateDto: UpdateProcessingStageDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<ProcessingStage> {
-    return this.arrivalsService.updateProcessingStage(Number(id), Number(stageId), updateDto);
+    return this.arrivalsService.updateProcessingStage(Number(id), Number(stageId), updateDto, credentials.accid);
   }
 
   @Delete(':id/process/:stageId')
@@ -211,7 +221,8 @@ export class ArrivalsController {
   async removeProcessingStage(
     @Param('id') id: string,
     @Param('stageId') stageId: string,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<ProcessingStage> {
-    return this.arrivalsService.removeProcessingStage(Number(id), Number(stageId));
+    return this.arrivalsService.removeProcessingStage(Number(id), Number(stageId), credentials.accid);
   }
 }

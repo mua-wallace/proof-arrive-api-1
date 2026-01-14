@@ -15,6 +15,7 @@ export const processingStages = pgTable('processing_stages', {
   completedAt: timestamp('completed_at'),
   notes: text('notes'),
 }, (table) => ({
+  accountIdx: index('idx_processing_account').on(table.accountId),
   arrivalIdx: index('idx_processing_arrival').on(table.arrivalId),
   statusIdx: index('idx_processing_status').on(table.status),
   typeIdx: index('idx_processing_type').on(table.stageType),

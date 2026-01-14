@@ -27,7 +27,7 @@ export class CentersService extends BaseService<Center> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[] },
+    options?: { include?: string[]; accountId?: number },
   ): Promise<PaginateResult<Center>> {
     try {
       const page = query.page || 1;
@@ -36,6 +36,11 @@ export class CentersService extends BaseService<Center> {
 
       // Build where conditions (centers don't have deletedAt)
       const conditions: SQL[] = [];
+
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        conditions.push(eq(schema.centers.accountId, options.accountId));
+      }
 
       // Add search functionality
       if (query.search && query.searchBy && query.searchBy.length > 0) {
@@ -172,7 +177,7 @@ export class CentersService extends BaseService<Center> {
   }
 
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
-  async findOneById(id: number | string, options?: { include?: string[] }): Promise<Center> {
+  async findOneById(id: number | string, options?: { include?: string[]; accountId?: number }): Promise<Center> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -180,6 +185,14 @@ export class CentersService extends BaseService<Center> {
     }
 
     try {
+      // Build where conditions
+      const whereConditions: SQL[] = [eq(schema.centers.id, numericId)];
+      
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        whereConditions.push(eq(schema.centers.accountId, options.accountId));
+      }
+
       // Build relations object for Drizzle query API
       const withRelations: any = {};
       if (options?.include) {
@@ -202,7 +215,13 @@ export class CentersService extends BaseService<Center> {
       if (Object.keys(withRelations).length > 0) {
         // Use relational query API when relations are requested
         center = await this.dbConnection.query.centers.findFirst({
-          where: (centers: any, { eq: eqFn }: any) => eqFn(centers.id, numericId),
+          where: (centers: any, { eq: eqFn, and: andFn }: any) => {
+            const conditions = [eqFn(centers.id, numericId)];
+            if (options?.accountId !== undefined) {
+              conditions.push(eqFn(centers.accountId, options.accountId));
+            }
+            return andFn(...conditions);
+          },
           with: withRelations,
         });
       } else {
@@ -210,7 +229,7 @@ export class CentersService extends BaseService<Center> {
         [center] = await this.dbConnection
           .select()
           .from(schema.centers)
-          .where(eq(schema.centers.id, numericId))
+          .where(and(...whereConditions))
           .limit(1);
       }
 
@@ -227,7 +246,11 @@ export class CentersService extends BaseService<Center> {
     }
   }
 
-  async findOneBy(requestData: any): Promise<Center> {
+  async findOneBy(
+    requestData: any,
+    options?: { accountId?: number; [key: string]: any },
+  ): Promise<Center> {
+    const accountId = options?.accountId;
 
     try {
       const conditions = Object.entries(requestData)
@@ -239,6 +262,11 @@ export class CentersService extends BaseService<Center> {
           return null;
         })
         .filter(Boolean) as any[];
+
+      // Automatically filter by accountId if provided
+      if (accountId !== undefined) {
+        conditions.push(eq(schema.centers.accountId, accountId));
+      }
 
       if (conditions.length === 0) {
         throw new NotFoundException('No search criteria provided');
@@ -264,7 +292,7 @@ export class CentersService extends BaseService<Center> {
   }
 
   // Override BaseService.remove to handle number IDs (serial) instead of string IDs (UUID)
-  async remove(id: number | string): Promise<Center> {
+  async remove(id: number | string, accountId?: number): Promise<Center> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -272,13 +300,18 @@ export class CentersService extends BaseService<Center> {
     }
 
     try {
-      // First check if center exists
-      const center = await this.findOneById(numericId);
+      // First check if center exists and belongs to the account
+      const center = await this.findOneById(numericId, { accountId });
       
       // Delete the center
+      const whereConditions: SQL[] = [eq(schema.centers.id, numericId)];
+      if (accountId !== undefined) {
+        whereConditions.push(eq(schema.centers.accountId, accountId));
+      }
+
       await this.dbConnection
         .delete(schema.centers)
-        .where(eq(schema.centers.id, numericId));
+        .where(and(...whereConditions));
 
       return center;
     } catch (error: any) {

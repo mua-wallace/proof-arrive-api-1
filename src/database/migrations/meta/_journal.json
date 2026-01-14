@@ -22,6 +22,13 @@
       "when": 1765810159839,
       "tag": "0002_next_venom",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1768380848691,
+      "tag": "0003_fine_alice",
+      "breakpoints": true
     }
   ]
 }

@@ -21,6 +21,7 @@ export class VehiclesSyncService {
   /**
    * Sync vehicle from Malambi API to database
    * @param vehicleData - Full vehicle data from Malambi API
+   * @param accountId - Account ID for multi-tenancy
    */
   async syncVehicle(vehicleData: {
     id: number;
@@ -30,7 +31,7 @@ export class VehiclesSyncService {
     year?: number;
     tag2?: string;
     groupId?: number;
-  }): Promise<void> {
+  }, accountId: number): Promise<void> {
     try {
       const thirdPartyId = vehicleData.id;
       
@@ -47,6 +48,7 @@ export class VehiclesSyncService {
 
       // Insert vehicle with data from Malambi API
       const vehicleRecord = {
+        accountId: accountId, // Multi-tenant: account ID
         thirdPartyId,
         plate: vehicleData.plate || `PLATE_${thirdPartyId}`,
         model: vehicleData.model || null,
@@ -136,6 +138,7 @@ export class VehiclesSyncService {
       const vehicleData = await this.malambiApi.getVehicleDetail(token, accId, subId, vehicleId);
 
       // Vehicle found in API, trigger background job to save it
+      const accountIdNum = Number(accId);
       await this.queueService.add('vehicle-sync', 'sync-vehicle', {
         vehicleData: {
           id: vehicleData.id,
@@ -146,6 +149,7 @@ export class VehiclesSyncService {
           tag2: vehicleData.tag2,
           groupId: vehicleData.groupId,
         },
+        accountId: accountIdNum, // Multi-tenant: account ID
       });
 
       return {

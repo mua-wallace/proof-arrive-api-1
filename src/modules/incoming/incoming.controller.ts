@@ -48,7 +48,7 @@ export class IncomingController {
     @Body() createDto: CreateIncomingVehicleDto,
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<IncomingVehicle> {
-    return this.incomingService.createIncomingVehicle(createDto, credentials.accid.toString());
+    return this.incomingService.createIncomingVehicle(createDto, credentials.accid.toString(), credentials.accid);
   }
 
   @Get()
@@ -65,6 +65,7 @@ export class IncomingController {
   @ApiResponse({ status: 200, description: 'List of incoming vehicles retrieved successfully' })
   async findAll(
     @Query() filterDto: FilterIncomingVehiclesDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<PaginateResult<IncomingVehicle>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -81,6 +82,7 @@ export class IncomingController {
 
     const options = {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
+      accountId: credentials.accid, // Multi-tenant: filter by account ID
     };
 
     return this.incomingService.findAll(query, options);
@@ -97,9 +99,11 @@ export class IncomingController {
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,
+    @CurrentUserCredentials() credentials?: Credentials,
   ): Promise<IncomingVehicle> {
     const options = {
       include: include ? include.split(',') : undefined,
+      accountId: credentials?.accid, // Multi-tenant: filter by account ID
     };
     return this.incomingService.findOneById(Number(id), options);
   }
@@ -114,8 +118,9 @@ export class IncomingController {
   async update(
     @Param('id') id: string,
     @Body() updateDto: UpdateIncomingVehicleDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<IncomingVehicle> {
-    return this.incomingService.update(Number(id), updateDto);
+    return this.incomingService.update(Number(id), updateDto, credentials.accid);
   }
 
   @Delete(':id')
@@ -125,7 +130,10 @@ export class IncomingController {
   })
   @ApiResponse({ status: 200, description: 'Incoming vehicle removed successfully' })
   @ApiResponse({ status: 404, description: 'Incoming vehicle not found' })
-  async remove(@Param('id') id: string): Promise<IncomingVehicle> {
-    return this.incomingService.remove(Number(id));
+  async remove(
+    @Param('id') id: string,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<IncomingVehicle> {
+    return this.incomingService.remove(Number(id), credentials.accid);
   }
 }

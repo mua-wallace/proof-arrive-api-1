@@ -18,6 +18,7 @@ export const incomingVehicles = pgTable('incoming_vehicles', {
   actualArrival: timestamp('actual_arrival'),
   distanceKm: decimal('distance_km', { precision: 10, scale: 2 }),
 }, (table) => ({
+  accountIdx: index('idx_incoming_account').on(table.accountId),
   exitIdx: index('idx_incoming_exit').on(table.exitId),
   vehicleIdx: index('idx_incoming_vehicle').on(table.vehicleId),
   createdByIdx: index('idx_incoming_created_by').on(table.createdBy),

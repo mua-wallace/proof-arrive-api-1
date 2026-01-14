@@ -47,7 +47,7 @@ export class ExitsController {
     @Body() createDto: CreateExitDto,
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<Exit> {
-    return this.exitsService.createExit(createDto, credentials.accid.toString());
+    return this.exitsService.createExit(createDto, credentials.accid.toString(), credentials.accid);
   }
 
   @Get()
@@ -66,6 +66,7 @@ export class ExitsController {
   @ApiResponse({ status: 200, description: 'List of exits retrieved successfully' })
   async findAll(
     @Query() filterDto: FilterExitsDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<PaginateResult<Exit>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -84,6 +85,7 @@ export class ExitsController {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
       status: filterDto.status,
       destinationCenterId: filterDto.destinationCenterId,
+      accountId: credentials.accid, // Multi-tenant: filter by account ID
     };
 
     return this.exitsService.findAll(query, options);
@@ -100,9 +102,11 @@ export class ExitsController {
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,
+    @CurrentUserCredentials() credentials?: Credentials,
   ): Promise<Exit> {
     const options = {
       include: include ? include.split(',') : undefined,
+      accountId: credentials?.accid, // Multi-tenant: filter by account ID
     };
     return this.exitsService.findOneById(Number(id), options);
   }
@@ -117,8 +121,9 @@ export class ExitsController {
   async update(
     @Param('id') id: string,
     @Body() updateDto: UpdateExitDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<Exit> {
-    return this.exitsService.update(Number(id), updateDto);
+    return this.exitsService.update(Number(id), updateDto, credentials.accid);
   }
 
   @Delete(':id')
@@ -128,7 +133,10 @@ export class ExitsController {
   })
   @ApiResponse({ status: 200, description: 'Exit removed successfully' })
   @ApiResponse({ status: 404, description: 'Exit not found' })
-  async remove(@Param('id') id: string): Promise<Exit> {
-    return this.exitsService.remove(Number(id));
+  async remove(
+    @Param('id') id: string,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<Exit> {
+    return this.exitsService.remove(Number(id), credentials.accid);
   }
 }

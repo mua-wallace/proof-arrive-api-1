@@ -27,6 +27,7 @@ export class VehiclesController {
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles)' })
   async findAll(
     @Query() filterDto: FilterVehiclesDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<PaginateResult<Vehicle>> {
     const query = {
       page: filterDto.page ?? 1,
@@ -43,6 +44,7 @@ export class VehiclesController {
 
     const options = {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
+      accountId: credentials.accid, // Multi-tenant: filter by account ID
     };
 
     return this.vehiclesService.findAll(query, options);
@@ -86,6 +88,7 @@ export class VehiclesController {
   @ApiQuery({ name: 'id', required: false, type: Number, description: 'Internal vehicle ID' })
   async findOneBy(
     @Query() query: Record<string, any>,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<Vehicle> {
     // Convert string numbers to numbers for numeric fields
     const requestData: Record<string, any> = {};
@@ -107,7 +110,7 @@ export class VehiclesController {
       throw new BadRequestException('At least one search criterion must be provided (e.g., plate, thirdPartyId, id, etc.)');
     }
     
-    return this.vehiclesService.findOneBy(requestData);
+    return this.vehiclesService.findOneBy(requestData, { accountId: credentials.accid });
   }
 
   @Get(':id')
@@ -119,9 +122,11 @@ export class VehiclesController {
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,
+    @CurrentUserCredentials() credentials?: Credentials,
   ): Promise<Vehicle> {
     const options = {
       include: include ? include.split(',') : undefined,
+      accountId: credentials?.accid, // Multi-tenant: filter by account ID
     };
     return this.vehiclesService.findOneById(Number(id), options);
   }
@@ -153,8 +158,11 @@ export class VehiclesController {
     summary: 'Remove a vehicle from the system by ID',
     description: 'Removes a vehicle from the database by its internal ID (serial integer).',
   })
-  async remove(@Param('id') id: string): Promise<Vehicle> {
-    return this.vehiclesService.remove(Number(id));
+  async remove(
+    @Param('id') id: string,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<Vehicle> {
+    return this.vehiclesService.remove(Number(id), credentials.accid);
   }
 }
 

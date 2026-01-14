@@ -22,6 +22,7 @@ export const exits = pgTable('exits', {
   longitude: decimal('longitude', { precision: 11, scale: 8 }),
   notes: text('notes'),
 }, (table) => ({
+  accountIdx: index('idx_exits_account').on(table.accountId),
   vehicleIdx: index('idx_exits_vehicle').on(table.vehicleId),
   centerIdx: index('idx_exits_center').on(table.centerId),
   agentIdx: index('idx_exits_agent').on(table.agentId),

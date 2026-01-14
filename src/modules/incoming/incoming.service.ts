@@ -26,7 +26,7 @@ export class IncomingService extends BaseService<IncomingVehicle> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[] },
+    options?: { include?: string[]; accountId?: number },
   ): Promise<PaginateResult<IncomingVehicle>> {
     
     try {
@@ -36,6 +36,11 @@ export class IncomingService extends BaseService<IncomingVehicle> {
 
       // Build where conditions (incoming_vehicles don't have deletedAt)
       const conditions: SQL[] = [];
+
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        conditions.push(eq(schema.incomingVehicles.accountId, options.accountId));
+      }
 
       // Add search functionality
       if (query.search && query.searchBy && query.searchBy.length > 0) {
@@ -170,7 +175,7 @@ export class IncomingService extends BaseService<IncomingVehicle> {
   }
 
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
-  async findOneById(id: number | string, options?: { include?: string[] }): Promise<IncomingVehicle> {
+  async findOneById(id: number | string, options?: { include?: string[]; accountId?: number }): Promise<IncomingVehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -178,6 +183,14 @@ export class IncomingService extends BaseService<IncomingVehicle> {
     }
 
     try {
+      // Build where conditions
+      const whereConditions: SQL[] = [eq(schema.incomingVehicles.id, numericId)];
+      
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        whereConditions.push(eq(schema.incomingVehicles.accountId, options.accountId));
+      }
+
       // Build relations object for Drizzle query API
       const withRelations: any = {};
       if (options?.include) {
@@ -199,7 +212,13 @@ export class IncomingService extends BaseService<IncomingVehicle> {
       if (Object.keys(withRelations).length > 0) {
         // Use relational query API when relations are requested
         incomingVehicle = await this.dbConnection.query.incomingVehicles.findFirst({
-          where: (incomingVehicles: any, { eq: eqFn }: any) => eqFn(incomingVehicles.id, numericId),
+          where: (incomingVehicles: any, { eq: eqFn, and: andFn }: any) => {
+            const conditions = [eqFn(incomingVehicles.id, numericId)];
+            if (options?.accountId !== undefined) {
+              conditions.push(eqFn(incomingVehicles.accountId, options.accountId));
+            }
+            return andFn(...conditions);
+          },
           with: withRelations,
         });
       } else {
@@ -207,7 +226,7 @@ export class IncomingService extends BaseService<IncomingVehicle> {
         [incomingVehicle] = await this.dbConnection
           .select()
           .from(schema.incomingVehicles)
-          .where(eq(schema.incomingVehicles.id, numericId))
+          .where(and(...whereConditions))
           .limit(1);
       }
 
@@ -224,50 +243,70 @@ export class IncomingService extends BaseService<IncomingVehicle> {
     }
   }
 
-  async createIncomingVehicle(createDto: CreateIncomingVehicleDto, createdBy: string): Promise<IncomingVehicle> {
+  async createIncomingVehicle(createDto: CreateIncomingVehicleDto, createdBy: string, accountId: number): Promise<IncomingVehicle> {
 
     try {
-      // Validate exit exists
-      const exit = await this.dbConnection
+      // Validate exit exists and belongs to the account
+      const [exit] = await this.dbConnection
         .select()
         .from(schema.exits)
-        .where(eq(schema.exits.id, createDto.exitId))
+        .where(
+          and(
+            eq(schema.exits.id, createDto.exitId),
+            eq(schema.exits.accountId, accountId),
+          ),
+        )
         .limit(1);
 
-      if (!exit || exit.length === 0) {
+      if (!exit) {
         throw new NotFoundException(`Exit with ID ${createDto.exitId} not found`);
       }
 
-      // Validate vehicle exists
-      const vehicle = await this.dbConnection
+      // Validate vehicle exists and belongs to the account
+      const [vehicle] = await this.dbConnection
         .select()
         .from(schema.vehicles)
-        .where(eq(schema.vehicles.id, createDto.vehicleId))
+        .where(
+          and(
+            eq(schema.vehicles.id, createDto.vehicleId),
+            eq(schema.vehicles.accountId, accountId),
+          ),
+        )
         .limit(1);
 
-      if (!vehicle || vehicle.length === 0) {
+      if (!vehicle) {
         throw new NotFoundException(`Vehicle with ID ${createDto.vehicleId} not found`);
       }
 
-      // Validate destination center exists
-      const destCenter = await this.dbConnection
+      // Validate destination center exists and belongs to the account
+      const [destCenter] = await this.dbConnection
         .select()
         .from(schema.centers)
-        .where(eq(schema.centers.id, createDto.destinationCenterId))
+        .where(
+          and(
+            eq(schema.centers.id, createDto.destinationCenterId),
+            eq(schema.centers.accountId, accountId),
+          ),
+        )
         .limit(1);
 
-      if (!destCenter || destCenter.length === 0) {
+      if (!destCenter) {
         throw new NotFoundException(`Destination center with ID ${createDto.destinationCenterId} not found`);
       }
 
-      // Validate source center exists
-      const sourceCenter = await this.dbConnection
+      // Validate source center exists and belongs to the account
+      const [sourceCenter] = await this.dbConnection
         .select()
         .from(schema.centers)
-        .where(eq(schema.centers.id, createDto.sourceCenterId))
+        .where(
+          and(
+            eq(schema.centers.id, createDto.sourceCenterId),
+            eq(schema.centers.accountId, accountId),
+          ),
+        )
         .limit(1);
 
-      if (!sourceCenter || sourceCenter.length === 0) {
+      if (!sourceCenter) {
         throw new NotFoundException(`Source center with ID ${createDto.sourceCenterId} not found`);
       }
 
@@ -275,7 +314,12 @@ export class IncomingService extends BaseService<IncomingVehicle> {
       const existing = await this.dbConnection
         .select()
         .from(schema.incomingVehicles)
-        .where(eq(schema.incomingVehicles.exitId, createDto.exitId))
+        .where(
+          and(
+            eq(schema.incomingVehicles.exitId, createDto.exitId),
+            eq(schema.incomingVehicles.accountId, accountId),
+          ),
+        )
         .limit(1);
 
       if (existing && existing.length > 0) {
@@ -286,6 +330,7 @@ export class IncomingService extends BaseService<IncomingVehicle> {
       const [incomingVehicle] = await this.dbConnection
         .insert(schema.incomingVehicles)
         .values({
+          accountId: accountId, // Multi-tenant: account ID from logged-in user
           exitId: createDto.exitId,
           vehicleId: createDto.vehicleId,
           destinationCenterId: createDto.destinationCenterId,
@@ -307,7 +352,7 @@ export class IncomingService extends BaseService<IncomingVehicle> {
     }
   }
 
-  async update(id: number | string, updateDto: UpdateIncomingVehicleDto): Promise<IncomingVehicle> {
+  async update(id: number | string, updateDto: UpdateIncomingVehicleDto, accountId?: number): Promise<IncomingVehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -315,8 +360,8 @@ export class IncomingService extends BaseService<IncomingVehicle> {
     }
 
     try {
-      // Check if incoming vehicle exists
-      await this.findOneById(numericId);
+      // Check if incoming vehicle exists and belongs to the account
+      await this.findOneById(numericId, { accountId });
 
       // Build update data
       const updateData: any = {
@@ -337,10 +382,15 @@ export class IncomingService extends BaseService<IncomingVehicle> {
       }
 
       // Update incoming vehicle
+      const whereConditions: SQL[] = [eq(schema.incomingVehicles.id, numericId)];
+      if (accountId !== undefined) {
+        whereConditions.push(eq(schema.incomingVehicles.accountId, accountId));
+      }
+
       const [updated] = await this.dbConnection
         .update(schema.incomingVehicles)
         .set(updateData)
-        .where(eq(schema.incomingVehicles.id, numericId))
+        .where(and(...whereConditions))
         .returning();
 
       return updated as IncomingVehicle;
@@ -354,7 +404,7 @@ export class IncomingService extends BaseService<IncomingVehicle> {
   }
 
   // Override BaseService.remove to handle number IDs (serial) instead of string IDs (UUID)
-  async remove(id: number | string): Promise<IncomingVehicle> {
+  async remove(id: number | string, accountId?: number): Promise<IncomingVehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -362,13 +412,18 @@ export class IncomingService extends BaseService<IncomingVehicle> {
     }
 
     try {
-      // First check if incoming vehicle exists
-      const incomingVehicle = await this.findOneById(numericId);
+      // First check if incoming vehicle exists and belongs to the account
+      const incomingVehicle = await this.findOneById(numericId, { accountId });
       
       // Delete the incoming vehicle
+      const whereConditions: SQL[] = [eq(schema.incomingVehicles.id, numericId)];
+      if (accountId !== undefined) {
+        whereConditions.push(eq(schema.incomingVehicles.accountId, accountId));
+      }
+
       await this.dbConnection
         .delete(schema.incomingVehicles)
-        .where(eq(schema.incomingVehicles.id, numericId));
+        .where(and(...whereConditions));
 
       return incomingVehicle;
     } catch (error: any) {

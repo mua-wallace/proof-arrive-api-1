@@ -18,25 +18,57 @@ export class BaseService<T extends BaseEntity> {
     private readonly table: TableWithBaseColumns,
   ) {}
 
-  async create(data: Partial<Omit<T, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>>): Promise<T> {
+  /**
+   * Check if the table has an accountId column
+   */
+  private hasAccountIdColumn(): boolean {
+    return (this.table as any).accountId !== undefined;
+  }
+
+  /**
+   * Get the accountId column from the table
+   */
+  private getAccountIdColumn(): any {
+    return (this.table as any).accountId;
+  }
+
+  async create(
+    data: Partial<Omit<T, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>>,
+    accountId?: number,
+  ): Promise<T> {
+    const insertData: any = {
+      ...data,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    // Automatically add accountId if the table has the column and accountId is provided
+    if (this.hasAccountIdColumn() && accountId !== undefined) {
+      insertData.accountId = accountId;
+    }
+
     const [entity] = await this.db
       .insert(this.table)
-      .values({
-        ...data,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any)
+      .values(insertData)
       .returning();
     return entity as unknown as T;
   }
 
-  async findAll(query: PaginateQuery = {}, options?: any): Promise<PaginateResult<T>> {
+  async findAll(
+    query: PaginateQuery = {},
+    options?: { accountId?: number; [key: string]: any },
+  ): Promise<PaginateResult<T>> {
     const page = query.page || 1;
     const limit = query.limit || 10;
     const offset = (page - 1) * limit;
 
     // Build where conditions
     const conditions: SQL[] = [isNull(this.table.deletedAt)];
+
+    // Automatically filter by accountId if the table has the column and accountId is provided
+    if (this.hasAccountIdColumn() && options?.accountId !== undefined) {
+      conditions.push(eq(this.getAccountIdColumn(), options.accountId));
+    }
 
     // Add search functionality
     if (query.search && query.searchBy && query.searchBy.length > 0) {
@@ -108,15 +140,36 @@ export class BaseService<T extends BaseEntity> {
     };
   }
 
-  async findOneById(id: string): Promise<T> {
+  async findOneById(
+    id: string | number,
+    accountIdOrOptions?: number | { accountId?: number; [key: string]: any },
+  ): Promise<T> {
     if (!id) {
       throw new NotFoundException('Missing id!');
+    }
+
+    // Extract accountId from options object or use it directly
+    let accountId: number | undefined;
+    if (typeof accountIdOrOptions === 'number') {
+      accountId = accountIdOrOptions;
+    } else if (accountIdOrOptions && typeof accountIdOrOptions === 'object' && 'accountId' in accountIdOrOptions) {
+      accountId = accountIdOrOptions.accountId;
+    }
+
+    const conditions: SQL[] = [
+      eq(this.table.id, id as any),
+      isNull(this.table.deletedAt),
+    ];
+
+    // Automatically filter by accountId if the table has the column and accountId is provided
+    if (this.hasAccountIdColumn() && accountId !== undefined) {
+      conditions.push(eq(this.getAccountIdColumn(), accountId));
     }
 
     const [entity] = await this.db
       .select()
       .from(this.table)
-      .where(and(eq(this.table.id, id), isNull(this.table.deletedAt)))
+      .where(and(...conditions))
       .limit(1);
 
     if (!entity) {
@@ -128,9 +181,14 @@ export class BaseService<T extends BaseEntity> {
 
   async findOneBy(
     conditions: Partial<T>,
-    relations?: string[],
+    options?: { accountId?: number; relations?: string[] },
   ): Promise<T | null> {
     const whereConditions: SQL[] = [isNull(this.table.deletedAt)];
+
+    // Automatically filter by accountId if the table has the column and accountId is provided
+    if (this.hasAccountIdColumn() && options?.accountId !== undefined) {
+      whereConditions.push(eq(this.getAccountIdColumn(), options.accountId));
+    }
 
     // Known text columns that should always be converted to strings
     const textColumns = ['accid', 'subid', 'username', 'company', 'token', 'session', 'k_u', 'pid', 'partner', 'k_k', 'expire', 'k_p', 'createdBy'];
@@ -160,8 +218,19 @@ export class BaseService<T extends BaseEntity> {
     return (entity as unknown as T) || null;
   }
 
-  async update(id: string, data: Partial<Omit<T, 'id' | 'createdAt' | 'deletedAt'>>): Promise<T> {
-    await this.findOneById(id); // Throws if not found
+  async update(
+    id: string,
+    data: Partial<Omit<T, 'id' | 'createdAt' | 'deletedAt'>>,
+    accountId?: number,
+  ): Promise<T> {
+    await this.findOneById(id, accountId); // Throws if not found and validates accountId
+
+    const conditions: SQL[] = [eq(this.table.id, id)];
+
+    // Automatically filter by accountId if the table has the column and accountId is provided
+    if (this.hasAccountIdColumn() && accountId !== undefined) {
+      conditions.push(eq(this.getAccountIdColumn(), accountId));
+    }
 
     const [updated] = await this.db
       .update(this.table)
@@ -169,18 +238,25 @@ export class BaseService<T extends BaseEntity> {
         ...data,
         updatedAt: new Date(),
       } as any)
-      .where(eq(this.table.id, id))
+      .where(and(...conditions))
       .returning();
 
     return updated as unknown as T;
   }
 
-  async remove(id: string): Promise<T> {
-    const entity = await this.findOneById(id); // Throws if not found
+  async remove(id: string, accountId?: number): Promise<T> {
+    const entity = await this.findOneById(id, accountId); // Throws if not found and validates accountId
+
+    const conditions: SQL[] = [eq(this.table.id, id)];
+
+    // Automatically filter by accountId if the table has the column and accountId is provided
+    if (this.hasAccountIdColumn() && accountId !== undefined) {
+      conditions.push(eq(this.getAccountIdColumn(), accountId));
+    }
 
     const [deleted] = await this.db
       .delete(this.table)
-      .where(eq(this.table.id, id))
+      .where(and(...conditions))
       .returning();
 
     return deleted as unknown as T;
@@ -188,16 +264,24 @@ export class BaseService<T extends BaseEntity> {
 
   async bulkInsert(
     data: Partial<Omit<T, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>>[],
+    accountId?: number,
   ): Promise<T[]> {
     const now = new Date();
     const entities = await this.db
       .insert(this.table)
       .values(
-        data.map((item) => ({
-          ...item,
-          createdAt: now,
-          updatedAt: now,
-        })) as any[],
+        data.map((item) => {
+          const insertItem: any = {
+            ...item,
+            createdAt: now,
+            updatedAt: now,
+          };
+          // Automatically add accountId if the table has the column and accountId is provided
+          if (this.hasAccountIdColumn() && accountId !== undefined) {
+            insertItem.accountId = accountId;
+          }
+          return insertItem;
+        }) as any[],
       )
       .returning();
 
@@ -216,8 +300,13 @@ export class BaseService<T extends BaseEntity> {
       .where(eq(this.table.id, id));
   }
 
-  async count(conditions?: Partial<T>): Promise<number> {
+  async count(conditions?: Partial<T>, accountId?: number): Promise<number> {
     const whereConditions: SQL[] = [isNull(this.table.deletedAt)];
+
+    // Automatically filter by accountId if the table has the column and accountId is provided
+    if (this.hasAccountIdColumn() && accountId !== undefined) {
+      whereConditions.push(eq(this.getAccountIdColumn(), accountId));
+    }
 
     // Known text columns that should always be converted to strings
     const textColumns = ['accid', 'subid', 'username', 'company', 'token', 'session', 'k_u', 'pid', 'partner', 'k_k', 'expire', 'k_p', 'createdBy'];

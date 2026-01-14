@@ -130,7 +130,12 @@ export class CentersSeederService implements OnModuleInit {
 
           if (existingCenter.length === 0) {
             // Center doesn't exist, insert it
-            await this.dbConnection.insert(schema.centers).values(centerData).execute();
+            // Note: Default centers use accountId: 0 as a special value for testing/shared centers
+            // In production, you may want to make these account-specific
+            await this.dbConnection.insert(schema.centers).values({
+              ...centerData,
+              accountId: 0, // Multi-tenant: default account ID for testing centers
+            }).execute();
             this.logger.log(`✅ Seeded default center: ${centerData.name} (ID: ${centerData.thirdPartyId})`);
           } else {
             this.logger.debug(`⏭️  Default center ${centerData.name} already exists, skipping`);

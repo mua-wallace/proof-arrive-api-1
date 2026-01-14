@@ -51,7 +51,10 @@ export class UsersSyncService {
       }
 
       // Insert user with data from Malambi API login response
+      // Convert accid (string) to accountId (number) for multi-tenancy
+      const accountIdNum = Number(accidStr);
       const userRecord = {
+        accountId: accountIdNum, // Multi-tenant: account ID (derived from accid)
         accid: accidStr,
         subid: subidStr,
         token: userData.token || '',

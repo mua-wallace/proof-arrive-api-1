@@ -25,7 +25,7 @@ export class ExitsService extends BaseService<Exit> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[]; status?: string; destinationCenterId?: number },
+    options?: { include?: string[]; status?: string; destinationCenterId?: number; accountId?: number },
   ): Promise<PaginateResult<Exit>> {
     
     try {
@@ -35,6 +35,11 @@ export class ExitsService extends BaseService<Exit> {
 
       // Build where conditions (exits don't have deletedAt)
       const conditions: SQL[] = [];
+
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        conditions.push(eq(schema.exits.accountId, options.accountId));
+      }
 
       // Filter by status if provided
       if (options?.status) {
@@ -238,7 +243,7 @@ export class ExitsService extends BaseService<Exit> {
   }
 
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
-  async findOneById(id: number | string, options?: { include?: string[] }): Promise<Exit> {
+  async findOneById(id: number | string, options?: { include?: string[]; accountId?: number }): Promise<Exit> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -246,6 +251,14 @@ export class ExitsService extends BaseService<Exit> {
     }
 
     try {
+      // Build where conditions
+      const whereConditions: SQL[] = [eq(schema.exits.id, numericId)];
+      
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        whereConditions.push(eq(schema.exits.accountId, options.accountId));
+      }
+
       // Build relations object for Drizzle query API
       const withRelations: any = {};
       if (options?.include) {
@@ -270,7 +283,13 @@ export class ExitsService extends BaseService<Exit> {
       if (Object.keys(withRelations).length > 0) {
         // Use relational query API when relations are requested
         exit = await this.dbConnection.query.exits.findFirst({
-          where: (exits: any, { eq: eqFn }: any) => eqFn(exits.id, numericId),
+          where: (exits: any, { eq: eqFn, and: andFn }: any) => {
+            const conditions = [eqFn(exits.id, numericId)];
+            if (options?.accountId !== undefined) {
+              conditions.push(eqFn(exits.accountId, options.accountId));
+            }
+            return andFn(...conditions);
+          },
           with: withRelations,
         });
       } else {
@@ -278,7 +297,7 @@ export class ExitsService extends BaseService<Exit> {
         [exit] = await this.dbConnection
           .select()
           .from(schema.exits)
-          .where(eq(schema.exits.id, numericId))
+          .where(and(...whereConditions))
           .limit(1);
       }
 
@@ -295,14 +314,19 @@ export class ExitsService extends BaseService<Exit> {
     }
   }
 
-  async createExit(createDto: CreateExitDto, agentId: string): Promise<Exit> {
+  async createExit(createDto: CreateExitDto, agentId: string, accountId: number): Promise<Exit> {
 
     try {
-      // Validate vehicle exists
+      // Validate vehicle exists and belongs to the account
       const [vehicle] = await this.dbConnection
         .select()
         .from(schema.vehicles)
-        .where(eq(schema.vehicles.thirdPartyId, createDto.vehicleId))
+        .where(
+          and(
+            eq(schema.vehicles.thirdPartyId, createDto.vehicleId),
+            eq(schema.vehicles.accountId, accountId),
+          ),
+        )
         .limit(1);
 
       if (!vehicle) {
@@ -312,24 +336,34 @@ export class ExitsService extends BaseService<Exit> {
         );
       }
 
-      // Validate center exists
+      // Validate center exists and belongs to the account
       const [center] = await this.dbConnection
         .select()
         .from(schema.centers)
-        .where(eq(schema.centers.geozoneId, createDto.centerId))
+        .where(
+          and(
+            eq(schema.centers.geozoneId, createDto.centerId),
+            eq(schema.centers.accountId, accountId),
+          ),
+        )
         .limit(1);
 
       if (!center) {
         throw new NotFoundException(`Center with geozoneId ${createDto.centerId} not found`);
       }
 
-      // Validate destination center exists (if provided)
+      // Validate destination center exists (if provided) and belongs to the account
       let destinationCenterId: number | null = null;
       if (createDto.destinationCenterId) {
         const [destCenter] = await this.dbConnection
           .select()
           .from(schema.centers)
-          .where(eq(schema.centers.geozoneId, createDto.destinationCenterId))
+          .where(
+            and(
+              eq(schema.centers.geozoneId, createDto.destinationCenterId),
+              eq(schema.centers.accountId, accountId),
+            ),
+          )
           .limit(1);
 
         if (!destCenter) {
@@ -342,6 +376,7 @@ export class ExitsService extends BaseService<Exit> {
       const [exit] = await this.dbConnection
         .insert(schema.exits)
         .values({
+          accountId: accountId, // Multi-tenant: account ID from logged-in user
           vehicleId: vehicle.thirdPartyId, // Use thirdPartyId to match schema FK
           centerId: center.geozoneId, // Use geozoneId to match schema FK
           agentId: agentId,
@@ -367,7 +402,7 @@ export class ExitsService extends BaseService<Exit> {
     }
   }
 
-  async update(id: number | string, updateDto: UpdateExitDto): Promise<Exit> {
+  async update(id: number | string, updateDto: UpdateExitDto, accountId?: number): Promise<Exit> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -375,8 +410,8 @@ export class ExitsService extends BaseService<Exit> {
     }
 
     try {
-      // Check if exit exists
-      await this.findOneById(numericId);
+      // Check if exit exists and belongs to the account
+      await this.findOneById(numericId, { accountId });
 
       // Build update data
       const updateData: any = {
@@ -390,12 +425,16 @@ export class ExitsService extends BaseService<Exit> {
         updateData.status = updateDto.status;
       }
       if (updateDto.destinationCenterId !== undefined) {
-        // Validate destination center exists if provided
+        // Validate destination center exists if provided and belongs to the account
         if (updateDto.destinationCenterId !== null) {
+          const whereConditions: SQL[] = [eq(schema.centers.id, updateDto.destinationCenterId)];
+          if (accountId !== undefined) {
+            whereConditions.push(eq(schema.centers.accountId, accountId));
+          }
           const destCenter = await this.dbConnection
             .select()
             .from(schema.centers)
-            .where(eq(schema.centers.id, updateDto.destinationCenterId))
+            .where(and(...whereConditions))
             .limit(1);
 
           if (!destCenter || destCenter.length === 0) {
@@ -418,10 +457,15 @@ export class ExitsService extends BaseService<Exit> {
       }
 
       // Update exit
+      const whereConditions: SQL[] = [eq(schema.exits.id, numericId)];
+      if (accountId !== undefined) {
+        whereConditions.push(eq(schema.exits.accountId, accountId));
+      }
+
       const [updated] = await this.dbConnection
         .update(schema.exits)
         .set(updateData)
-        .where(eq(schema.exits.id, numericId))
+        .where(and(...whereConditions))
         .returning();
 
       return updated as Exit;
@@ -435,7 +479,7 @@ export class ExitsService extends BaseService<Exit> {
   }
 
   // Override BaseService.remove to handle number IDs (serial) instead of string IDs (UUID)
-  async remove(id: number | string): Promise<Exit> {
+  async remove(id: number | string, accountId?: number): Promise<Exit> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -443,13 +487,18 @@ export class ExitsService extends BaseService<Exit> {
     }
 
     try {
-      // First check if exit exists
-      const exit = await this.findOneById(numericId);
-      
+      // First check if exit exists and belongs to the account
+      const exit = await this.findOneById(numericId, { accountId });
+
       // Delete the exit
+      const whereConditions: SQL[] = [eq(schema.exits.id, numericId)];
+      if (accountId !== undefined) {
+        whereConditions.push(eq(schema.exits.accountId, accountId));
+      }
+
       await this.dbConnection
         .delete(schema.exits)
-        .where(eq(schema.exits.id, numericId));
+        .where(and(...whereConditions));
 
       return exit;
     } catch (error: any) {

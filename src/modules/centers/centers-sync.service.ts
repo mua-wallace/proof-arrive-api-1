@@ -21,6 +21,7 @@ export class CentersSyncService {
   /**
    * Sync center from Malambi API to database
    * @param centerData - Full center data from Malambi API
+   * @param accountId - Account ID for multi-tenancy
    */
   async syncCenter(centerData: {
     id: number;
@@ -44,7 +45,7 @@ export class CentersSyncService {
     timeoutin_str?: string;
     timeoutin_muros?: number;
     timeoutin_muros_str?: string;
-  }): Promise<void> {
+  }, accountId: number): Promise<void> {
     try {
       const thirdPartyId = centerData.id;
       const siteid = centerData.siteid;
@@ -72,6 +73,7 @@ export class CentersSyncService {
 
       // Insert center with data from Malambi API
       const centerRecord = {
+        accountId: accountId, // Multi-tenant: account ID
         thirdPartyId,
         siteid,
         name: centerData.name || `Center_${thirdPartyId}`,
@@ -216,6 +218,7 @@ export class CentersSyncService {
       }
 
       // Center found in API, trigger background job to save it
+      const accountIdNum = Number(accId);
       await this.queueService.add('center-sync', 'sync-center', {
         centerData: {
           id: centerData.id,
@@ -240,6 +243,7 @@ export class CentersSyncService {
           timeoutin_muros: centerData.timeoutin_muros,
           timeoutin_muros_str: centerData.timeoutin_muros_str,
         },
+        accountId: accountIdNum, // Multi-tenant: account ID
       });
 
       return {

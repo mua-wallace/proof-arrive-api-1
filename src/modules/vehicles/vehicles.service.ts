@@ -27,7 +27,7 @@ export class VehiclesService extends BaseService<Vehicle> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[] },
+    options?: { include?: string[]; accountId?: number },
   ): Promise<PaginateResult<Vehicle>> {
     try {
       const page = query.page || 1;
@@ -36,6 +36,11 @@ export class VehiclesService extends BaseService<Vehicle> {
 
       // Build where conditions (vehicles don't have deletedAt)
       const conditions: SQL[] = [];
+
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        conditions.push(eq(schema.vehicles.accountId, options.accountId));
+      }
 
       // Add search functionality
       if (query.search && query.searchBy && query.searchBy.length > 0) {
@@ -167,7 +172,7 @@ export class VehiclesService extends BaseService<Vehicle> {
   }
 
   // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
-  async findOneById(id: number | string, options?: { include?: string[] }): Promise<Vehicle> {
+  async findOneById(id: number | string, options?: { include?: string[]; accountId?: number }): Promise<Vehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -175,6 +180,14 @@ export class VehiclesService extends BaseService<Vehicle> {
     }
 
     try {
+      // Build where conditions
+      const whereConditions: SQL[] = [eq(schema.vehicles.id, numericId)];
+      
+      // Automatically filter by accountId if provided
+      if (options?.accountId !== undefined) {
+        whereConditions.push(eq(schema.vehicles.accountId, options.accountId));
+      }
+
       // Build relations object for Drizzle query API
       const withRelations: any = {};
       if (options?.include) {
@@ -193,7 +206,13 @@ export class VehiclesService extends BaseService<Vehicle> {
       if (Object.keys(withRelations).length > 0) {
         // Use relational query API when relations are requested
         vehicle = await this.dbConnection.query.vehicles.findFirst({
-          where: (vehicles: any, { eq: eqFn }: any) => eqFn(vehicles.id, numericId),
+          where: (vehicles: any, { eq: eqFn, and: andFn }: any) => {
+            const conditions = [eqFn(vehicles.id, numericId)];
+            if (options?.accountId !== undefined) {
+              conditions.push(eqFn(vehicles.accountId, options.accountId));
+            }
+            return andFn(...conditions);
+          },
           with: withRelations,
         });
       } else {
@@ -201,7 +220,7 @@ export class VehiclesService extends BaseService<Vehicle> {
         [vehicle] = await this.dbConnection
           .select()
           .from(schema.vehicles)
-          .where(eq(schema.vehicles.id, numericId))
+          .where(and(...whereConditions))
           .limit(1);
       }
 
@@ -218,7 +237,11 @@ export class VehiclesService extends BaseService<Vehicle> {
     }
   }
 
-  async findOneBy(requestData: any): Promise<Vehicle> {
+  async findOneBy(
+    requestData: any,
+    options?: { accountId?: number; [key: string]: any },
+  ): Promise<Vehicle> {
+    const accountId = options?.accountId;
 
     try {
       const conditions = Object.entries(requestData)
@@ -230,6 +253,11 @@ export class VehiclesService extends BaseService<Vehicle> {
           return null;
         })
         .filter(Boolean) as any[];
+
+      // Automatically filter by accountId if provided
+      if (accountId !== undefined) {
+        conditions.push(eq(schema.vehicles.accountId, accountId));
+      }
 
       if (conditions.length === 0) {
         throw new NotFoundException('No search criteria provided');
@@ -324,7 +352,7 @@ export class VehiclesService extends BaseService<Vehicle> {
   /**
    * Override BaseService.remove to handle number IDs (serial) instead of string IDs (UUID)
    */
-  async remove(id: number | string): Promise<Vehicle> {
+  async remove(id: number | string, accountId?: number): Promise<Vehicle> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
     if (!numericId || isNaN(numericId)) {
@@ -332,13 +360,18 @@ export class VehiclesService extends BaseService<Vehicle> {
     }
 
     try {
-      // First check if vehicle exists
-      const vehicle = await this.findOneById(numericId);
+      // First check if vehicle exists and belongs to the account
+      const vehicle = await this.findOneById(numericId, { accountId });
       
       // Delete the vehicle
+      const whereConditions: SQL[] = [eq(schema.vehicles.id, numericId)];
+      if (accountId !== undefined) {
+        whereConditions.push(eq(schema.vehicles.accountId, accountId));
+      }
+
       await this.dbConnection
         .delete(schema.vehicles)
-        .where(eq(schema.vehicles.id, numericId));
+        .where(and(...whereConditions));
 
       return vehicle;
     } catch (error: any) {
