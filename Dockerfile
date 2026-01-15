@@ -7,7 +7,11 @@ RUN npm install
 
 COPY . .
 
-CMD [ "npm", "run", "start:dev" ]
+# Make migration scripts executable
+RUN chmod +x scripts/*.sh || true
+
+# Use the startup script that runs migrations before starting in dev mode
+CMD [ "sh", "scripts/start-with-migrations-dev.sh" ]
 
 FROM node:22.17.0 AS build
 
