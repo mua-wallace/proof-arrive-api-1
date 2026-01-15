@@ -35,3 +35,4 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"status": "success", "message": "Image successfully built and pushed"}' \
             "${{ secrets.PORTAINER_WEBHOOK_URL }}"
+            
