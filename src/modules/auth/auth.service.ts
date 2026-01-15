@@ -17,6 +17,7 @@ import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service
 import { Credentials } from '@common/interfaces';
 import { QueueService } from '@common/queue/queue.service';
 import { UsersSyncService } from '@modules/users/users-sync.service';
+import { CentersSeederService } from '@modules/centers/centers-seeder.service';
 
 // Temporary user type from Malambi API login response
 interface MalambiUser {
@@ -40,6 +41,7 @@ export class AuthService {
     private readonly malambiApi: MalambiApiService,
     private readonly queueService: QueueService,
     private readonly usersSyncService: UsersSyncService,
+    private readonly centersSeederService: CentersSeederService,
     @Inject(DATABASE_CONNECTION)
     private readonly dbConnection: PostgresJsDatabase<typeof schema>,
   ) {}
@@ -65,6 +67,7 @@ export class AuthService {
     
     if (!userExists) {
       // User doesn't exist, trigger background sync job with full user data
+      // Center seeding will happen automatically in the queue processor after user sync
       await this.queueService.add('user-sync', 'sync-user', { 
         userData: {
           accid: accidStr,
@@ -84,6 +87,15 @@ export class AuthService {
     } else {
       // User exists, update lastLoginAt
       await this.usersSyncService.updateLastLogin(accidStr);
+      
+      // Ensure default centers exist for this account (non-blocking, runs in background)
+      // This handles cases where centers weren't seeded before (e.g., existing users)
+      this.centersSeederService.seedDefaultCentersForAccount(accid).catch((error) => {
+        this.logger.error(
+          `Error seeding default centers for accountId ${accid} during login:`,
+          error instanceof Error ? error.stack : error,
+        );
+      });
     }
     
     const { accessToken, refreshToken } = await this.generateUserTokens(

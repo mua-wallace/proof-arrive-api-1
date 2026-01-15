@@ -83,10 +83,13 @@ export class CentersController {
   @Get('default')
   @ApiOperation({
     summary: 'Get default testing centers',
-    description: 'Retrieves the 3 default testing centers (Center 001, Center 002, Center 003) that users can choose from when their center cannot be located. These centers are automatically seeded on application startup.',
+    description: 'Retrieves the 3 default testing centers (Center 001, Center 002, Center 003) for the logged-in user\'s account. These centers are automatically seeded when a user logs in for the first time.',
   })
-  async getDefaultCenters(): Promise<Center[]> {
-    return this.centersSeederService.getDefaultCenters();
+  async getDefaultCenters(
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<Center[]> {
+    const accountId = Number(credentials.accid);
+    return this.centersSeederService.getDefaultCenters(accountId);
   }
 
   @Get(':id')

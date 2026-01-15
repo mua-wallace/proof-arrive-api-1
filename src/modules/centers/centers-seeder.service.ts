@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger, OnModuleInit } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '@modules/schemas';
-import { eq, or } from 'drizzle-orm';
+import { eq, or, and } from 'drizzle-orm';
 
 @Injectable()
 export class CentersSeederService implements OnModuleInit {
@@ -14,25 +14,84 @@ export class CentersSeederService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    await this.seedDefaultCenters();
+    // Add a small delay to ensure database migrations have completed
+    // This helps avoid race conditions when migrations run via startup scripts
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Note: We no longer seed default centers on module init
+    // Centers are now seeded per-account when users log in
+    // This method is kept for backward compatibility but does nothing
   }
 
   /**
-   * Seeds the database with 3 default centers for testing purposes
+   * Seeds the database with 3 default centers for a specific accountId
    * These centers can be used when a user's center cannot be located
+   * @param accountId - The account ID to seed centers for
+   * @returns Promise that resolves when seeding is complete
    */
-  async seedDefaultCenters(): Promise<void> {
+  async seedDefaultCentersForAccount(accountId: number): Promise<void> {
+    if (!accountId || accountId <= 0) {
+      this.logger.warn(`⚠️  Invalid accountId (${accountId}), skipping center seeding`);
+      return;
+    }
+
     try {
       // Verify database connection by checking if centers table is accessible
-      try {
-        await this.dbConnection
-          .select()
-          .from(schema.centers)
-          .limit(1);
-      } catch (dbError) {
-        this.logger.warn(
-          `⚠️  Database connection issue or centers table not ready: ${dbError instanceof Error ? dbError.message : 'Unknown error'}. Skipping seeding.`,
+      // Use retry logic with exponential backoff to handle timing issues
+      const maxRetries = 5;
+      const initialDelay = 500; // Start with 500ms
+      let lastError: Error | null = null;
+
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          // Try a simple query to check if table exists and is accessible
+          await this.dbConnection
+            .select()
+            .from(schema.centers)
+            .limit(1);
+          
+          // Success - table is ready
+          break;
+        } catch (dbError) {
+          lastError = dbError instanceof Error ? dbError : new Error(String(dbError));
+          
+          // If this is the last attempt, log and return
+          if (attempt === maxRetries - 1) {
+            // Extract a cleaner error message
+            const errorMessage = this.extractCleanErrorMessage(lastError);
+            this.logger.warn(
+              `⚠️  Database connection issue or centers table not ready after ${maxRetries} attempts for accountId ${accountId}: ${errorMessage}. Skipping seeding.`,
+            );
+            return;
+          }
+          
+          // Wait before retrying with exponential backoff
+          const delay = initialDelay * Math.pow(2, attempt);
+          this.logger.debug(
+            `⏳ Centers table not ready (attempt ${attempt + 1}/${maxRetries}) for accountId ${accountId}, retrying in ${delay}ms...`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+
+      // Check if default centers already exist for this accountId
+      const defaultCenterGeozoneIds = [3001, 3002, 3003];
+      const existingCenters = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(
+          and(
+            eq(schema.centers.accountId, accountId),
+            or(
+              eq(schema.centers.geozoneId, defaultCenterGeozoneIds[0]),
+              eq(schema.centers.geozoneId, defaultCenterGeozoneIds[1]),
+              eq(schema.centers.geozoneId, defaultCenterGeozoneIds[2]),
+            ),
+          ),
         );
+
+      // If all 3 default centers exist for this account, skip seeding
+      if (existingCenters.length >= 3) {
+        this.logger.debug(`⏭️  Default centers already exist for accountId ${accountId}, skipping seeding`);
         return;
       }
 
@@ -110,41 +169,33 @@ export class CentersSeederService implements OnModuleInit {
 
       for (const centerData of defaultCenters) {
         try {
-          // Check if center already exists by thirdPartyId, siteid, or geozoneId
-          // Build conditions array, handling potential null values
-          const conditions = [
-            eq(schema.centers.thirdPartyId, centerData.thirdPartyId),
-            eq(schema.centers.siteid, centerData.siteid),
-          ];
-          
-          // Only add geozoneId condition if it's not null/undefined
-          if (centerData.geozoneId != null) {
-            conditions.push(eq(schema.centers.geozoneId, centerData.geozoneId));
-          }
-
+          // Check if center already exists for this accountId by geozoneId (most reliable identifier)
           const existingCenter = await this.dbConnection
             .select()
             .from(schema.centers)
-            .where(or(...conditions))
+            .where(
+              and(
+                eq(schema.centers.accountId, accountId),
+                eq(schema.centers.geozoneId, centerData.geozoneId),
+              ),
+            )
             .limit(1);
 
           if (existingCenter.length === 0) {
-            // Center doesn't exist, insert it
-            // Note: Default centers use accountId: 0 as a special value for testing/shared centers
-            // In production, you may want to make these account-specific
+            // Center doesn't exist for this account, insert it
             await this.dbConnection.insert(schema.centers).values({
               ...centerData,
-              accountId: 0, // Multi-tenant: default account ID for testing centers
+              accountId: accountId, // Multi-tenant: use the provided accountId
             }).execute();
-            this.logger.log(`✅ Seeded default center: ${centerData.name} (ID: ${centerData.thirdPartyId})`);
+            this.logger.log(`✅ Seeded default center: ${centerData.name} (geozoneId: ${centerData.geozoneId}) for accountId ${accountId}`);
           } else {
-            this.logger.debug(`⏭️  Default center ${centerData.name} already exists, skipping`);
+            this.logger.debug(`⏭️  Default center ${centerData.name} (geozoneId: ${centerData.geozoneId}) already exists for accountId ${accountId}, skipping`);
           }
         } catch (centerError) {
           const errorMessage = centerError instanceof Error ? centerError.message : 'Unknown error';
           const errorStack = centerError instanceof Error ? centerError.stack : undefined;
           this.logger.error(
-            `❌ Error seeding center ${centerData.name} (thirdPartyId: ${centerData.thirdPartyId}): ${errorMessage}`,
+            `❌ Error seeding center ${centerData.name} (geozoneId: ${centerData.geozoneId}) for accountId ${accountId}: ${errorMessage}`,
             errorStack,
           );
           // Log the actual error details
@@ -155,10 +206,10 @@ export class CentersSeederService implements OnModuleInit {
         }
       }
 
-      this.logger.log('✅ Default centers seeding completed');
+      this.logger.log(`✅ Default centers seeding completed for accountId ${accountId}`);
     } catch (error) {
       this.logger.error(
-        `❌ Error seeding default centers: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `❌ Error seeding default centers for accountId ${accountId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
         error instanceof Error ? error.stack : undefined,
       );
       // Don't throw - allow app to continue even if seeding fails
@@ -166,9 +217,25 @@ export class CentersSeederService implements OnModuleInit {
   }
 
   /**
-   * Get the 3 default centers that users can choose from
+   * Legacy method: Seeds the database with 3 default centers for accountId 0 (backward compatibility)
+   * @deprecated Use seedDefaultCentersForAccount(accountId) instead
    */
-  async getDefaultCenters(): Promise<typeof schema.centers.$inferSelect[]> {
+  async seedDefaultCenters(): Promise<void> {
+    // Delegate to the new account-aware method with accountId 0 for backward compatibility
+    await this.seedDefaultCentersForAccount(0);
+  }
+
+  /**
+   * Get the 3 default centers that users can choose from for a specific accountId
+   * @param accountId - The account ID to get default centers for
+   * @returns Promise that resolves to an array of default centers
+   */
+  async getDefaultCenters(accountId: number): Promise<typeof schema.centers.$inferSelect[]> {
+    if (!accountId || accountId <= 0) {
+      this.logger.warn(`⚠️  Invalid accountId (${accountId}), returning empty array`);
+      return [];
+    }
+
     try {
       const defaultCenterIds = [3001, 3002, 3003]; // geozoneIds of default centers
 
@@ -176,21 +243,69 @@ export class CentersSeederService implements OnModuleInit {
         .select()
         .from(schema.centers)
         .where(
-          or(
-            eq(schema.centers.geozoneId, defaultCenterIds[0]),
-            eq(schema.centers.geozoneId, defaultCenterIds[1]),
-            eq(schema.centers.geozoneId, defaultCenterIds[2]),
+          and(
+            eq(schema.centers.accountId, accountId),
+            or(
+              eq(schema.centers.geozoneId, defaultCenterIds[0]),
+              eq(schema.centers.geozoneId, defaultCenterIds[1]),
+              eq(schema.centers.geozoneId, defaultCenterIds[2]),
+            ),
           ),
         );
 
       return centers;
     } catch (error) {
       this.logger.error(
-        `Failed to get default centers: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `Failed to get default centers for accountId ${accountId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
         error instanceof Error ? error.stack : undefined,
       );
       throw error;
     }
+  }
+
+  /**
+   * Extracts a clean, user-friendly error message from database errors
+   * Removes verbose SQL queries and focuses on the actual issue
+   */
+  private extractCleanErrorMessage(error: Error): string {
+    let message = error.message || 'Unknown error';
+    
+    // Remove verbose SQL query details from drizzle errors
+    if (message.includes('Failed query:')) {
+      // Extract just the error type, not the full query
+      const match = message.match(/^([^:]+):/);
+      if (match) {
+        message = match[1];
+      } else {
+        // If it's a table doesn't exist error, make it clearer
+        if (message.toLowerCase().includes('does not exist') || 
+            message.toLowerCase().includes('relation') && message.toLowerCase().includes('not exist')) {
+          message = 'Table "centers" does not exist (migrations may not have completed)';
+        } else {
+          message = 'Database query failed';
+        }
+      }
+    }
+    
+    // Handle common PostgreSQL errors
+    if (message.includes('relation') && message.includes('does not exist')) {
+      return 'Table "centers" does not exist (migrations may not have completed)';
+    }
+    
+    if (message.includes('connection') || message.includes('ECONNREFUSED')) {
+      return 'Database connection refused (database may not be ready)';
+    }
+    
+    if (message.includes('timeout')) {
+      return 'Database connection timeout';
+    }
+    
+    // Return a truncated message if it's too long
+    if (message.length > 200) {
+      return message.substring(0, 197) + '...';
+    }
+    
+    return message;
   }
 }
 

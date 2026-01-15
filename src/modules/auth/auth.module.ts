@@ -10,6 +10,7 @@ import { DatabaseModule } from '@database/database.module';
 import { MalambiApiModule } from '@integrations/malambi-api/malambi-api.module';
 import { QueueModule } from '@common/queue/queue.module';
 import { UsersModule } from '@modules/users/users.module';
+import { CentersModule } from '@modules/centers/centers.module';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Module({
@@ -20,6 +21,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
     DatabaseModule,
     QueueModule,
     UsersModule,
+    CentersModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, LocalStrategy, JwtStrategy, JwtRefreshStrategy, JwtAuthGuard],

@@ -3,6 +3,7 @@ import { QueueService } from './queue.service';
 import { UsersSyncService } from '@modules/users/users-sync.service';
 import { VehiclesSyncService } from '@modules/vehicles/vehicles-sync.service';
 import { CentersSyncService } from '@modules/centers/centers-sync.service';
+import { CentersSeederService } from '@modules/centers/centers-seeder.service';
 
 @Injectable()
 export class QueueProcessorService implements OnModuleInit {
@@ -14,6 +15,7 @@ export class QueueProcessorService implements OnModuleInit {
     private readonly usersSyncService: UsersSyncService,
     private readonly vehiclesSyncService: VehiclesSyncService,
     private readonly centersSyncService: CentersSyncService,
+    private readonly centersSeederService: CentersSeederService,
   ) {}
 
   onModuleInit() {
@@ -85,7 +87,25 @@ export class QueueProcessorService implements OnModuleInit {
         return;
       }
 
+      // Check if user already exists before syncing
+      const userExists = await this.usersSyncService.userExists(jobData.userData.accid);
+      
+      // Sync user (this will only create if user doesn't exist)
       await this.usersSyncService.syncUser(jobData.userData);
+      
+      // If user was newly created, seed default centers for their accountId
+      if (!userExists) {
+        const accountId = Number(jobData.userData.accid);
+        if (accountId > 0) {
+          // Seed default centers for this account in the background (non-blocking)
+          this.centersSeederService.seedDefaultCentersForAccount(accountId).catch((error) => {
+            this.logger.error(
+              `Error seeding default centers for accountId ${accountId} after user sync:`,
+              error instanceof Error ? error.stack : error,
+            );
+          });
+        }
+      }
     } catch (error) {
       this.logger.error(`Error processing user sync job:`, error instanceof Error ? error.stack : error);
     }
