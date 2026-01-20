@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import * as schema from '@modules/schemas';
 import { BaseService } from '@common/services/base.service';
@@ -336,6 +336,48 @@ export class UsersService extends BaseService<User> {
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
         `Failed to find user by accid and subid: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  async update(
+    id: string,
+    updateData: { email?: string; role?: string; fullname?: string },
+    accountId?: number,
+  ): Promise<User> {
+    if (!id) {
+      throw new NotFoundException(`Invalid user ID: ${id}`);
+    }
+
+    try {
+      // Validate role if provided
+      if (updateData.role && !['agent', 'admin', 'manager'].includes(updateData.role)) {
+        throw new BadRequestException(`Invalid role: ${updateData.role}. Must be one of: agent, admin, manager`);
+      }
+
+      // Build update data object, only including provided fields
+      const updateFields: any = {
+        updatedAt: new Date(),
+      };
+
+      if (updateData.email !== undefined) {
+        updateFields.email = updateData.email || null;
+      }
+      if (updateData.role !== undefined) {
+        updateFields.role = updateData.role;
+      }
+      if (updateData.fullname !== undefined) {
+        updateFields.fullname = updateData.fullname || null;
+      }
+
+      // Use base service update method which handles accountId filtering
+      const updatedUser = await super.update(id, updateFields, accountId);
+      return updatedUser;
+    } catch (error: any) {
+      this.logger.error(`Failed to update user with id=${id}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to update user: ${error?.message || 'Unknown error occurred'}`,
       );
     }
   }
