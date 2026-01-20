@@ -3,7 +3,7 @@ import { Inject } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '@modules/schemas';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, and } from 'drizzle-orm';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
 
 @Injectable()
@@ -33,17 +33,26 @@ export class UsersSyncService {
     k_k: string;
     expire: string;
     k_p: string;
+    email?: string; // Optional email field
   }): Promise<void> {
     try {
       const accidStr = String(userData.accid);
       const subidStr = String(userData.subid);
       
-      // Check if user already exists
-      // Use sql template to explicitly cast the parameter as text
+      // Convert accid (string) to accountId (number) for multi-tenancy
+      const accountIdNum = Number(accidStr);
+      
+      // Check if user already exists for this accountId
+      // Use sql template to explicitly cast the parameter as text for accid
       const existingUser = await this.dbConnection
         .select()
         .from(schema.users)
-        .where(sql`${schema.users.accid} = ${accidStr}::text`)
+        .where(
+          and(
+            sql`${schema.users.accid} = ${accidStr}::text`,
+            eq(schema.users.accountId, accountIdNum),
+          ),
+        )
         .limit(1);
 
       if (existingUser.length > 0) {
@@ -51,8 +60,6 @@ export class UsersSyncService {
       }
 
       // Insert user with data from Malambi API login response
-      // Convert accid (string) to accountId (number) for multi-tenancy
-      const accountIdNum = Number(accidStr);
       const userRecord = {
         accountId: accountIdNum, // Multi-tenant: account ID (derived from accid)
         accid: accidStr,
@@ -67,6 +74,9 @@ export class UsersSyncService {
         k_k: userData.k_k || '',
         expire: userData.expire || '0',
         k_p: userData.k_p || '',
+        fullname: userData.username || null, // Set fullname from username
+        role: 'agent' as const, // Default role is 'agent'
+        email: userData.email || null, // Email is optional
         lastLoginAt: new Date(),
       };
 
@@ -83,6 +93,7 @@ export class UsersSyncService {
   async updateLastLogin(accid: string | number): Promise<void> {
     try {
       const accidStr = String(accid);
+      const accountIdNum = Number(accidStr);
       
       await this.dbConnection
         .update(schema.users)
@@ -90,7 +101,12 @@ export class UsersSyncService {
           lastLoginAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(sql`${schema.users.accid} = ${accidStr}::text`)
+        .where(
+          and(
+            sql`${schema.users.accid} = ${accidStr}::text`,
+            eq(schema.users.accountId, accountIdNum),
+          ),
+        )
         .execute();
     } catch (error) {
       this.logger.error(`Error updating lastLoginAt for user ${accid}:`, error instanceof Error ? error.stack : error);
@@ -99,20 +115,27 @@ export class UsersSyncService {
   }
 
   /**
-   * Check if user exists in database
+   * Check if user exists in database for the given accountId
    */
   async userExists(accid: number | string): Promise<boolean> {
     // Explicitly convert to string and ensure it's treated as a string type
     // This is critical because accid is a text column in the database
     const accidStr: string = typeof accid === 'number' ? accid.toString() : String(accid);
+    const accountIdNum = Number(accidStr);
     
     try {
       // Use sql template to explicitly cast the parameter as text
       // This ensures PostgreSQL receives it as a string, not a number
+      // Also check by accountId for multi-tenant isolation
       const user = await this.dbConnection
         .select()
         .from(schema.users)
-        .where(sql`${schema.users.accid} = ${accidStr}::text`)
+        .where(
+          and(
+            sql`${schema.users.accid} = ${accidStr}::text`,
+            eq(schema.users.accountId, accountIdNum),
+          ),
+        )
         .limit(1);
 
       return user.length > 0;

@@ -22,7 +22,7 @@ export class UsersService extends BaseService<User> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[] },
+    options?: { include?: string[]; accountId?: number },
   ): Promise<PaginateResult<User>> {
     try {
       // If relations are requested, use custom implementation
@@ -41,7 +41,7 @@ export class UsersService extends BaseService<User> {
 
   private async findAllWithRelations(
     query: PaginateQuery = {},
-    options?: { include?: string[] },
+    options?: { include?: string[]; accountId?: number },
   ): Promise<PaginateResult<User>> {
     const page = query.page || 1;
     const limit = query.limit || 100;
@@ -49,6 +49,11 @@ export class UsersService extends BaseService<User> {
 
     // Build where conditions
     const conditions: any[] = [sql`${schema.users.deletedAt} IS NULL`];
+
+    // Automatically filter by accountId if provided
+    if (options?.accountId !== undefined) {
+      conditions.push(eq(schema.users.accountId, options.accountId));
+    }
 
     // Add search functionality
     if (query.search && query.searchBy && query.searchBy.length > 0) {
@@ -169,7 +174,7 @@ export class UsersService extends BaseService<User> {
     };
   }
 
-  async findOneById(id: string, options?: { include?: string[] }): Promise<User> {
+  async findOneById(id: string, options?: { include?: string[]; accountId?: number }): Promise<User> {
     if (!id) {
       throw new NotFoundException(`Invalid user ID: ${id}`);
     }
@@ -186,16 +191,43 @@ export class UsersService extends BaseService<User> {
         }
       }
 
+      // Build where conditions
+      const whereConditions: any[] = [];
+      if (options?.accountId !== undefined) {
+        whereConditions.push((users: any, { eq: eqFn }: any) => eqFn(users.accountId, options.accountId));
+      }
+
       let user: any;
       if (Object.keys(withRelations).length > 0) {
         // Use relational query API when relations are requested
         user = await this.dbConnection.query.users.findFirst({
-          where: (users: any, { eq: eqFn }: any) => eqFn(users.id, id),
+          where: (users: any, { eq: eqFn, and: andFn }: any) => {
+            const conditions = [eqFn(users.id, id)];
+            if (options?.accountId !== undefined) {
+              conditions.push(eqFn(users.accountId, options.accountId));
+            }
+            return conditions.length > 1 ? andFn(...conditions) : conditions[0];
+          },
           with: withRelations,
         });
       } else {
         // Use standard query when no relations
-        user = await super.findOneById(id);
+        if (options?.accountId !== undefined) {
+          // Custom query with accountId filter
+          const conditions = [
+            eq(schema.users.id, id),
+            eq(schema.users.accountId, options.accountId),
+            sql`${schema.users.deletedAt} IS NULL`,
+          ];
+          const [foundUser] = await this.dbConnection
+            .select()
+            .from(schema.users)
+            .where(and(...conditions))
+            .limit(1);
+          user = foundUser;
+        } else {
+          user = await super.findOneById(id);
+        }
       }
 
       if (!user) {
@@ -247,16 +279,23 @@ export class UsersService extends BaseService<User> {
     }
   }
 
-  async findByAccid(accid: string | number): Promise<User> {
+  async findByAccid(accid: string | number, accountId?: number): Promise<User> {
     // Ensure accid is always a string for text column
     const accidStr = String(accid);
+    const accountIdNum = accountId !== undefined ? accountId : Number(accidStr);
 
     if (!accidStr || accidStr.trim() === '') {
       throw new NotFoundException('Accid is required');
     }
 
     try {
-      const user = await this.findOneBy({ accid: accidStr } as any);
+      // Build search criteria with accountId filter
+      const searchCriteria: any = { accid: accidStr };
+      if (accountIdNum !== undefined) {
+        searchCriteria.accountId = accountIdNum;
+      }
+      
+      const user = await this.findOneBy(searchCriteria);
       if (!user) {
         throw new NotFoundException(`User with accid ${accidStr} not found`);
       }
@@ -270,17 +309,24 @@ export class UsersService extends BaseService<User> {
     }
   }
 
-  async findByAccidAndSubid(accid: string | number, subid: string | number): Promise<User> {
+  async findByAccidAndSubid(accid: string | number, subid: string | number, accountId?: number): Promise<User> {
     // Ensure accid and subid are always strings for text columns
     const accidStr = String(accid);
     const subidStr = String(subid);
+    const accountIdNum = accountId !== undefined ? accountId : Number(accidStr);
 
     if (!accidStr || !subidStr || accidStr.trim() === '' || subidStr.trim() === '') {
       throw new NotFoundException('Accid and subid are required');
     }
 
     try {
-      const user = await this.findOneBy({ accid: accidStr, subid: subidStr } as any);
+      // Build search criteria with accountId filter
+      const searchCriteria: any = { accid: accidStr, subid: subidStr };
+      if (accountIdNum !== undefined) {
+        searchCriteria.accountId = accountIdNum;
+      }
+      
+      const user = await this.findOneBy(searchCriteria);
       if (!user) {
         throw new NotFoundException(`User with accid ${accidStr} and subid ${subidStr} not found`);
       }

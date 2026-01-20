@@ -82,6 +82,7 @@ export class AuthService {
           k_k: user.k_k || '',
           expire: user.expire || '0',
           k_p: user.k_p || '',
+          email: user.email, // Optional email from Malambi API
         }
       });
     } else {

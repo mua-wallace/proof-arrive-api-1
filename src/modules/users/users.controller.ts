@@ -24,7 +24,7 @@ export class UsersController {
   @Get()
   @ApiOperation({
     summary: 'List all users in the system with filtering and pagination',
-    description: 'Retrieves a paginated list of users synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (arrivals, exits).',
+    description: 'Retrieves a paginated list of users synced from the Malambi API for the logged-in user\'s account. Supports filtering, searching, sorting, and optional relation loading (arrivals, exits).',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
@@ -34,6 +34,7 @@ export class UsersController {
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits)' })
   async findAllWithFilter(
     @Query() filterDto: FilterUsersDto,
+    @CurrentUserCredentials() credentials: Credentials,
   ): Promise<PaginateResult<User>> {
     const query: PaginateQuery = {
       page: filterDto.page ?? 1,
@@ -50,6 +51,7 @@ export class UsersController {
 
     const options = {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
+      accountId: Number(credentials.accid), // Multi-tenant: filter by account ID
     };
 
     return this.usersService.findAll(query, options);
@@ -66,21 +68,24 @@ export class UsersController {
     return this.usersService.findByAccidAndSubid(
       String(credentials.accid),
       String(credentials.subid),
+      Number(credentials.accid), // Multi-tenant: filter by account ID
     );
   }
 
   @Get('details/:id')
   @ApiOperation({
     summary: 'Get user details by ID (UUID)',
-    description: 'Retrieves detailed information about a specific user by their internal UUID. Supports optional relation loading (arrivals, exits).',
+    description: 'Retrieves detailed information about a specific user by their internal UUID for the logged-in user\'s account. Supports optional relation loading (arrivals, exits).',
   })
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits)' })
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,
+    @CurrentUserCredentials() credentials?: Credentials,
   ): Promise<User> {
     const options = {
       include: include ? include.split(',') : undefined,
+      accountId: credentials ? Number(credentials.accid) : undefined, // Multi-tenant: filter by account ID
     };
     return this.usersService.findOneById(id, options);
   }

@@ -79,6 +79,7 @@ export class QueueProcessorService implements OnModuleInit {
           k_k: string;
           expire: string;
           k_p: string;
+          email?: string; // Optional email field
         };
       };
       
