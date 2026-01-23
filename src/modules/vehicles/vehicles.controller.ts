@@ -1,7 +1,10 @@
-import { Controller, Post, Get, Delete, Query, Param, BadRequestException } from '@nestjs/common';
-import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { Controller, Post, Get, Delete, Query, Param, BadRequestException, NotFoundException, UseGuards } from '@nestjs/common';
+import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { VehiclesService } from './vehicles.service';
+import { QrCodeService } from './qr-code.service';
 import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-credentials.decorator';
+import { Roles } from '@modules/auth/decorators/roles.decorator';
+import { RolesGuard } from '@modules/auth/guards/roles.guard';
 import { Credentials, PaginateResult } from '@common/interfaces';
 import { FilterVehiclesDto } from './dto';
 import * as schema from '@modules/schemas';
@@ -11,8 +14,12 @@ type Vehicle = typeof schema.vehicles.$inferSelect;
 @Controller('vehicles')
 @ApiTags('Vehicles')
 @ApiBearerAuth()
+@UseGuards(RolesGuard)
 export class VehiclesController {
-  constructor(private readonly vehiclesService: VehiclesService) {}
+  constructor(
+    private readonly vehiclesService: VehiclesService,
+    private readonly qrCodeService: QrCodeService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -113,6 +120,30 @@ export class VehiclesController {
     return this.vehiclesService.findOneBy(requestData, { accountId: credentials.accid });
   }
 
+  @Get('qr-code/:qrCode')
+  @ApiOperation({
+    summary: 'Validate QR code and get vehicle information',
+    description: 'Validates a scanned QR code and returns the associated vehicle information. Used by agents when scanning QR codes to get the vehicleId.',
+  })
+  @ApiResponse({ status: 200, description: 'QR code validated successfully' })
+  @ApiResponse({ status: 404, description: 'Vehicle not found for this QR code' })
+  @ApiResponse({ status: 400, description: 'Invalid QR code format' })
+  async validateQrCode(
+    @Param('qrCode') qrCode: string,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<{
+    vehicle: Vehicle;
+    vehicleId: number;
+    qrCode: string;
+  }> {
+    const result = await this.qrCodeService.validateQrCode(qrCode, credentials.accid);
+    return {
+      vehicle: result.vehicle as Vehicle,
+      vehicleId: result.vehicleId,
+      qrCode: qrCode,
+    };
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get vehicle details by ID',
@@ -151,6 +182,142 @@ export class VehiclesController {
       credentials.subid.toString(),
       vehicleId,
     );
+  }
+
+  @Post(':id/qr-code')
+  @Roles('admin', 'manager')
+  @ApiOperation({
+    summary: 'Generate QR code for a vehicle',
+    description: 'Generates a downloadable QR code for a vehicle. The QR code contains the vehicleId (thirdPartyId) as a string. Only users with admin or manager role can generate QR codes. A vehicle can have only one unique QR code. If a QR code already exists, it will be returned instead of generating a new one. The :id parameter can be either the internal database ID or the thirdPartyId (vehicleId from Malambi API).',
+  })
+  @ApiResponse({ status: 200, description: 'QR code generated successfully' })
+  @ApiResponse({ status: 403, description: 'Access denied. Admin or manager role required.' })
+  @ApiResponse({ status: 404, description: 'Vehicle not found' })
+  async generateQrCode(
+    @Param('id') id: string,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<{
+    qrCodeDataUrl: string;
+    qrCodeString: string;
+    vehicleId: number;
+    vehicle: Vehicle;
+  }> {
+    // Try to find vehicle by internal ID first, then by thirdPartyId
+    let vehicle: Vehicle;
+    const numericId = Number(id);
+    
+    if (isNaN(numericId)) {
+      throw new BadRequestException(`Invalid vehicle ID: ${id}`);
+    }
+
+    try {
+      // First, try to find by internal database ID
+      vehicle = await this.vehiclesService.findOneById(numericId, {
+        accountId: credentials.accid,
+      });
+    } catch (error) {
+      // If not found by ID, try to find by thirdPartyId
+      if (error instanceof NotFoundException) {
+        try {
+          vehicle = await this.vehiclesService.findOneBy(
+            { thirdPartyId: numericId },
+            { accountId: credentials.accid },
+          );
+        } catch (secondError) {
+          throw new NotFoundException(
+            `Vehicle not found with ID ${id} (tried both internal ID and thirdPartyId)`,
+          );
+        }
+      } else {
+        throw error;
+      }
+    }
+
+    // Generate QR code
+    const qrCodeResult = await this.qrCodeService.generateQrCode(
+      vehicle.thirdPartyId,
+      credentials.accid,
+    );
+
+    return {
+      ...qrCodeResult,
+      vehicle,
+    };
+  }
+
+  @Post(':id/qr-code/regenerate')
+  @Roles('admin', 'manager')
+  @ApiOperation({
+    summary: 'Regenerate QR code for a vehicle',
+    description: 'Regenerates (replaces) the QR code for a vehicle. Only users with admin or manager role can regenerate QR codes. The :id parameter can be either the internal database ID or the thirdPartyId (vehicleId from Malambi API).',
+  })
+  @ApiResponse({ status: 200, description: 'QR code regenerated successfully' })
+  @ApiResponse({ status: 403, description: 'Access denied. Admin or manager role required.' })
+  @ApiResponse({ status: 404, description: 'Vehicle not found' })
+  async regenerateQrCode(
+    @Param('id') id: string,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<{
+    qrCodeDataUrl: string;
+    qrCodeString: string;
+    vehicleId: number;
+    vehicle: Vehicle;
+  }> {
+    // Try to find vehicle by internal ID first, then by thirdPartyId
+    let vehicle: Vehicle;
+    const numericId = Number(id);
+    
+    if (isNaN(numericId)) {
+      throw new BadRequestException(`Invalid vehicle ID: ${id}`);
+    }
+
+    try {
+      // First, try to find by internal database ID
+      vehicle = await this.vehiclesService.findOneById(numericId, {
+        accountId: credentials.accid,
+      });
+    } catch (error) {
+      // If not found by ID, try to find by thirdPartyId
+      if (error instanceof NotFoundException) {
+        try {
+          vehicle = await this.vehiclesService.findOneBy(
+            { thirdPartyId: numericId },
+            { accountId: credentials.accid },
+          );
+        } catch (secondError) {
+          throw new NotFoundException(
+            `Vehicle not found with ID ${id} (tried both internal ID and thirdPartyId)`,
+          );
+        }
+      } else {
+        throw error;
+      }
+    }
+
+    // Regenerate QR code
+    const qrCodeResult = await this.qrCodeService.regenerateQrCode(
+      vehicle.thirdPartyId,
+      credentials.accid,
+    );
+
+    // Get updated vehicle (use the same lookup method)
+    let updatedVehicle: Vehicle;
+    try {
+      updatedVehicle = await this.vehiclesService.findOneById(vehicle.id, {
+        accountId: credentials.accid,
+      });
+    } catch {
+      // Fallback to thirdPartyId if needed
+      updatedVehicle = await this.vehiclesService.findOneBy(
+        { thirdPartyId: vehicle.thirdPartyId },
+        { accountId: credentials.accid },
+      );
+    }
+
+    return {
+      ...qrCodeResult,
+      vehicle: updatedVehicle,
+    };
   }
 
   @Delete(':id')

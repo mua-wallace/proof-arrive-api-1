@@ -2,15 +2,18 @@ import { Module, forwardRef } from '@nestjs/common';
 import { DatabaseModule } from '@database/database.module';
 import { MalambiApiModule } from '@integrations/malambi-api/malambi-api.module';
 import { QueueModule } from '@common/queue/queue.module';
+import { UsersModule } from '@modules/users/users.module';
+import { AuthModule } from '@modules/auth/auth.module';
 import { VehiclesController } from './vehicles.controller';
 import { VehiclesService } from './vehicles.service';
 import { VehiclesSyncService } from './vehicles-sync.service';
+import { QrCodeService } from './qr-code.service';
 
 @Module({
-  imports: [DatabaseModule, MalambiApiModule, forwardRef(() => QueueModule)],
+  imports: [DatabaseModule, MalambiApiModule, forwardRef(() => QueueModule), UsersModule, AuthModule],
   controllers: [VehiclesController],
-  providers: [VehiclesService, VehiclesSyncService],
-  exports: [VehiclesService, VehiclesSyncService],
+  providers: [VehiclesService, VehiclesSyncService, QrCodeService],
+  exports: [VehiclesService, VehiclesSyncService, QrCodeService],
 })
 export class VehiclesModule {}
 

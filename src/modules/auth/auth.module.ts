@@ -12,6 +12,7 @@ import { QueueModule } from '@common/queue/queue.module';
 import { UsersModule } from '@modules/users/users.module';
 import { CentersModule } from '@modules/centers/centers.module';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
     CentersModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, LocalStrategy, JwtStrategy, JwtRefreshStrategy, JwtAuthGuard],
-  exports: [AuthService, JwtAuthGuard, JwtModule],
+  providers: [AuthService, LocalStrategy, JwtStrategy, JwtRefreshStrategy, JwtAuthGuard, RolesGuard],
+  exports: [AuthService, JwtAuthGuard, JwtModule, JwtStrategy, RolesGuard],
 })
 export class AuthModule {}
