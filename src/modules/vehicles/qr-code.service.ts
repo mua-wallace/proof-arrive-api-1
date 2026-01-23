@@ -2,8 +2,9 @@ import { Injectable, Inject, Logger, NotFoundException, BadRequestException } fr
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '@modules/schemas';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import * as QRCode from 'qrcode';
+import { EncryptionService } from '@common/services/encryption.service';
 
 @Injectable()
 export class QrCodeService {
@@ -12,6 +13,7 @@ export class QrCodeService {
   constructor(
     @Inject(DATABASE_CONNECTION)
     private readonly dbConnection: PostgresJsDatabase<typeof schema>,
+    private readonly encryptionService: EncryptionService,
   ) {}
 
   /**
@@ -45,34 +47,66 @@ export class QrCodeService {
 
       // Check if vehicle already has a QR code
       if (vehicle.qrCode) {
-        // Return existing QR code
-        const qrCodeDataUrl = await QRCode.toDataURL(vehicle.qrCode, {
+        // Decrypt existing QR code to generate image
+        let decryptedQrCode: string;
+        try {
+          if (this.encryptionService.isEncrypted(vehicle.qrCode)) {
+            decryptedQrCode = this.encryptionService.decrypt(vehicle.qrCode);
+          } else {
+            // Legacy: if QR code is not encrypted, use it as-is (backward compatibility)
+            decryptedQrCode = vehicle.qrCode;
+            // Re-encrypt and update for security
+            const encryptedQrCode = this.encryptionService.encrypt(decryptedQrCode);
+            await this.dbConnection
+              .update(schema.vehicles)
+              .set({
+                qrCode: encryptedQrCode,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(schema.vehicles.id, vehicle.id),
+                  eq(schema.vehicles.accountId, accountId),
+                ),
+              )
+              .execute();
+          }
+        } catch (error) {
+          this.logger.warn(`Failed to decrypt existing QR code for vehicle ${vehicleId}, regenerating...`);
+          decryptedQrCode = String(vehicleId);
+        }
+
+        // Generate QR code image from decrypted value
+        const qrCodeDataUrl = await QRCode.toDataURL(decryptedQrCode, {
           errorCorrectionLevel: 'M',
           width: 300,
           margin: 1,
         });
         return {
           qrCodeDataUrl,
-          qrCodeString: vehicle.qrCode,
+          qrCodeString: decryptedQrCode, // Return decrypted value for API response
           vehicleId: vehicle.thirdPartyId,
         };
       }
 
       // Generate QR code string (contains vehicleId as string)
       const qrCodeString = String(vehicleId);
+      
+      // Encrypt the QR code string before storing
+      const encryptedQrCode = this.encryptionService.encrypt(qrCodeString);
 
-      // Generate QR code image as data URL
+      // Generate QR code image as data URL (using plain text for QR code image)
       const qrCodeDataUrl = await QRCode.toDataURL(qrCodeString, {
         errorCorrectionLevel: 'M',
         width: 300,
         margin: 1,
       });
 
-      // Update vehicle with QR code
+      // Update vehicle with encrypted QR code
       await this.dbConnection
         .update(schema.vehicles)
         .set({
-          qrCode: qrCodeString,
+          qrCode: encryptedQrCode, // Store encrypted version
           updatedAt: new Date(),
         })
         .where(
@@ -114,22 +148,30 @@ export class QrCodeService {
     vehicleId: number;
   }> {
     try {
-      // Extract vehicleId from QR code string
+      // Extract vehicleId from QR code string (scanned QR code contains plain text)
       const vehicleId = Number(qrCodeString);
 
       if (isNaN(vehicleId) || vehicleId <= 0) {
         throw new BadRequestException('Invalid QR code: vehicle ID is not valid');
       }
 
-      // Find vehicle by QR code and accountId
+      // Encrypt the scanned QR code string to match against stored encrypted values
+      const encryptedQrCode = this.encryptionService.encrypt(qrCodeString);
+
+      // Find vehicle by encrypted QR code and accountId
+      // Also check for legacy unencrypted QR codes (backward compatibility)
       const [vehicle] = await this.dbConnection
         .select()
         .from(schema.vehicles)
         .where(
           and(
-            eq(schema.vehicles.qrCode, qrCodeString),
             eq(schema.vehicles.accountId, accountId),
-            eq(schema.vehicles.thirdPartyId, vehicleId), // Double-check vehicleId matches
+            eq(schema.vehicles.thirdPartyId, vehicleId),
+            // Match either encrypted or legacy unencrypted QR code
+            or(
+              eq(schema.vehicles.qrCode, encryptedQrCode),
+              eq(schema.vehicles.qrCode, qrCodeString), // Legacy support
+            ),
           ),
         )
         .limit(1);
@@ -138,6 +180,23 @@ export class QrCodeService {
         throw new NotFoundException(
           `Vehicle not found for QR code. The QR code may be invalid or belong to a different account.`,
         );
+      }
+
+      // If vehicle has legacy unencrypted QR code, upgrade it to encrypted
+      if (vehicle.qrCode === qrCodeString && !this.encryptionService.isEncrypted(vehicle.qrCode)) {
+        await this.dbConnection
+          .update(schema.vehicles)
+          .set({
+            qrCode: encryptedQrCode,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(schema.vehicles.id, vehicle.id),
+              eq(schema.vehicles.accountId, accountId),
+            ),
+          )
+          .execute();
       }
 
       return {
@@ -187,19 +246,22 @@ export class QrCodeService {
 
       // Generate new QR code string (contains vehicleId as string)
       const qrCodeString = String(vehicleId);
+      
+      // Encrypt the QR code string before storing
+      const encryptedQrCode = this.encryptionService.encrypt(qrCodeString);
 
-      // Generate QR code image as data URL
+      // Generate QR code image as data URL (using plain text for QR code image)
       const qrCodeDataUrl = await QRCode.toDataURL(qrCodeString, {
         errorCorrectionLevel: 'M',
         width: 300,
         margin: 1,
       });
 
-      // Update vehicle with new QR code
+      // Update vehicle with encrypted QR code
       await this.dbConnection
         .update(schema.vehicles)
         .set({
-          qrCode: qrCodeString,
+          qrCode: encryptedQrCode, // Store encrypted version
           updatedAt: new Date(),
         })
         .where(

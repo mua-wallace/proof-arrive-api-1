@@ -39,5 +39,8 @@ export default () => ({
     malambiBaseUrlGeo:
       process.env.MALAMBI_API_BASE_URL_GEOZONE,
   },
+  qrCode: {
+    encryptionKey: process.env.QR_CODE_ENCRYPTION_KEY,
+  },
 });
 

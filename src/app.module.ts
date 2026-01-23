@@ -48,6 +48,7 @@ import { MalambiAuthMiddleware } from '@common/middleware/malambi-auth.middlewar
         JWT_REFRESH_TOKEN_EXPIRATION_DAYS: Joi.number().default(3),
         MALAMBI_API_BASE_URL: Joi.string().uri().optional(),
         MALAMBI_API_BASE_URL_GEOZONE: Joi.string().uri().optional(),
+        QR_CODE_ENCRYPTION_KEY: Joi.string().min(32).optional(),
       }),
     }),
     DatabaseModule,

@@ -8,11 +8,12 @@ import { VehiclesController } from './vehicles.controller';
 import { VehiclesService } from './vehicles.service';
 import { VehiclesSyncService } from './vehicles-sync.service';
 import { QrCodeService } from './qr-code.service';
+import { EncryptionService } from '@common/services/encryption.service';
 
 @Module({
   imports: [DatabaseModule, MalambiApiModule, forwardRef(() => QueueModule), UsersModule, AuthModule],
   controllers: [VehiclesController],
-  providers: [VehiclesService, VehiclesSyncService, QrCodeService],
+  providers: [VehiclesService, VehiclesSyncService, QrCodeService, EncryptionService],
   exports: [VehiclesService, VehiclesSyncService, QrCodeService],
 })
 export class VehiclesModule {}
