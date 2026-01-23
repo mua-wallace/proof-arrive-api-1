@@ -2,9 +2,16 @@
 # Startup script that automatically runs database migrations before starting the application
 # Uses SQL migration files to ensure database schema is up-to-date on container startup
 
+# Check if migrations were already run at build time
+if [ -f "/tmp/.migrations-run-at-build" ]; then
+  echo "✅ Migrations were already run at build time. Skipping runtime migrations."
+  exec node dist/main
+fi
+
 # Check if database connection is available
 if [ -z "$DATABASE_HOST" ] || [ -z "$DATABASE_NAME" ]; then
   echo "⚠️  Database environment variables not set. Skipping migrations and starting application..."
+  echo "⚠️  WARNING: Migrations were not run at build time and cannot run at startup."
   exec node dist/main
 fi
 
