@@ -18,8 +18,8 @@ services:
     image: proof-arrive-api:latest
     container_name: proof-arrive-api
     restart: unless-stopped
-    env_file:
-      - .env
+    # Note: env_file is not needed for build/push operations
+    # Environment variables are passed via build args above
     ports:
       - "${PORT:-5000}:${PORT:-5000}"
     depends_on:
