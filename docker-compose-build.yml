@@ -15,7 +15,7 @@ services:
         DATABASE_NAME: ${DATABASE_NAME:-proof_arrive}
         SKIP_BUILD_MIGRATIONS: ${SKIP_BUILD_MIGRATIONS:-true}
         REQUIRE_BUILD_MIGRATIONS: ${REQUIRE_BUILD_MIGRATIONS:-false}
-    image: proof-arrive-api:latest
+    image: ghcr.io/mua-wallace/proof-arrive-api:latest
     container_name: proof-arrive-api
     restart: unless-stopped
     # Note: env_file is not needed for build/push operations
