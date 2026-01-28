@@ -37,7 +37,7 @@ export class VehiclesService extends BaseService<Vehicle> {
       // Build where conditions (vehicles don't have deletedAt)
       const conditions: SQL[] = [];
 
-      // Automatically filter by accountId if provided
+      // Automatically filter by accountId if provided (mandatory for multi-tenant isolation)
       if (options?.accountId !== undefined) {
         conditions.push(eq(schema.vehicles.accountId, options.accountId));
       }
@@ -82,58 +82,11 @@ export class VehiclesService extends BaseService<Vehicle> {
 
       // Get total count
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      let total: number | undefined;
-      let data: any[];
-      let useAccountIdFilter = options?.accountId !== undefined;
-      
-      try {
-        // Try count query first
-        try {
-          const [{ count: totalItems }] = await this.dbConnection
-            .select({ count: count() })
-            .from(schema.vehicles)
-            .where(whereClause);
-          total = totalItems;
-        } catch (countError: any) {
-          // Check if count error is due to missing account_id column
-          const errorCode = countError?.code;
-          const errorMessage = countError instanceof Error ? countError.message : String(countError);
-          const errorString = String(errorMessage).toLowerCase();
-          
-          const isAccountIdError = 
-            (errorCode === '42703') ||
-            errorMessage?.toLowerCase().includes('account_id') ||
-            errorString.includes('account_id') ||
-            (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
-          
-          if (isAccountIdError && useAccountIdFilter) {
-            // Retry count without accountId filter
-            const fallbackConditions: SQL[] = [];
-            if (query.search && query.searchBy && query.searchBy.length > 0) {
-              const searchConditions = query.searchBy
-                .map((field) => {
-                  const column = (schema.vehicles as any)[field];
-                  if (column) {
-                    return sql`${column}::text ILIKE ${`%${query.search}%`}`;
-                  }
-                  return null;
-                })
-                .filter(Boolean) as SQL[];
-              if (searchConditions.length > 0) {
-                fallbackConditions.push(sql`(${sql.join(searchConditions, sql` OR `)})`);
-              }
-            }
-            const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
-            const [{ count: totalItems }] = await this.dbConnection
-              .select({ count: count() })
-              .from(schema.vehicles)
-              .where(fallbackWhereClause);
-            total = totalItems;
-            useAccountIdFilter = false; // Don't use accountId filter for data query either
-          } else {
-            throw countError;
-          }
-        }
+      const [{ count: totalItems }] = await this.dbConnection
+        .select({ count: count() })
+        .from(schema.vehicles)
+        .where(whereClause);
+      const total = totalItems;
 
         // Build relations object for Drizzle query API
         const withRelations: any = {};
@@ -189,99 +142,6 @@ export class VehiclesService extends BaseService<Vehicle> {
             .limit(limit)
             .offset(offset);
         }
-      } catch (error: any) {
-        // Check if error is due to missing account_id column
-        const errorCode = error?.code;
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const errorString = String(error).toLowerCase();
-        
-        const isAccountIdError = 
-          (errorCode === '42703') ||
-          errorMessage?.toLowerCase().includes('account_id') ||
-          errorString.includes('account_id') ||
-          (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
-        
-        // If account_id column doesn't exist, use raw SQL to exclude it from SELECT
-        if (isAccountIdError) {
-          // Rebuild conditions without accountId filter
-          const fallbackConditions: SQL[] = [];
-          
-          // Add search functionality
-          if (query.search && query.searchBy && query.searchBy.length > 0) {
-            const searchConditions = query.searchBy
-              .map((field) => {
-                const column = (schema.vehicles as any)[field];
-                if (column) {
-                  return sql`${column}::text ILIKE ${`%${query.search}%`}`;
-                }
-                return null;
-              })
-              .filter(Boolean) as SQL[];
-
-            if (searchConditions.length > 0) {
-              fallbackConditions.push(sql`(${sql.join(searchConditions, sql` OR `)})`);
-            }
-          }
-          
-          const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
-          
-          // Get total count without accountId filter (only if not already set)
-          if (total === undefined) {
-            try {
-              const [{ count: totalItems }] = await this.dbConnection
-                .select({ count: count() })
-                .from(schema.vehicles)
-                .where(fallbackWhereClause);
-              total = totalItems;
-            } catch (countError: any) {
-              // If count also fails, use raw SQL
-              const postgresClient = (this.dbConnection as any).client || (this.dbConnection as any).session?.client;
-              if (postgresClient) {
-                const countQuery = `SELECT COUNT(*) as count FROM "vehicles"`;
-                const countResult = await postgresClient.unsafe(countQuery);
-                total = parseInt(countResult[0]?.count || '0', 10);
-              } else {
-                total = 0;
-              }
-            }
-          }
-          
-          // Use raw SQL via postgres client to exclude account_id from SELECT
-          const postgresClient = (this.dbConnection as any).client || (this.dbConnection as any).session?.client;
-          
-          if (postgresClient) {
-            // Get column names excluding account_id
-            const columnsResult = await postgresClient`
-              SELECT column_name 
-              FROM information_schema.columns 
-              WHERE table_schema = 'public' 
-              AND table_name = 'vehicles'
-              AND column_name != 'account_id'
-              ORDER BY ordinal_position
-            `;
-            
-            const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
-            // Simplified WHERE clause - just use empty for now since vehicles don't have deletedAt
-            const whereClauseSql = '';
-            const orderBySql = (orderByClause !== undefined) ? ' ORDER BY "created_at" DESC' : '';
-            
-            // Execute raw SQL query
-            const rawQuery = `SELECT ${columnNames} FROM "vehicles" ${whereClauseSql}${orderBySql} LIMIT ${limit} OFFSET ${offset}`;
-            data = await postgresClient.unsafe(rawQuery);
-          } else {
-            // Fallback: retry without accountId filter (will still fail if account_id is in SELECT)
-            data = await this.dbConnection
-              .select()
-              .from(schema.vehicles)
-              .where(fallbackWhereClause)
-              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-              .limit(limit)
-              .offset(offset);
-          }
-        } else {
-          throw error;
-        }
-      }
 
       return {
         data: data as Vehicle[],

@@ -63,37 +63,8 @@ export class AuthService {
     }
     
     // Check if user exists in database
-    // Wrap in try-catch to handle database schema issues gracefully
-    let userExists = false;
-    try {
-      userExists = await this.usersSyncService.userExists(accidStr);
-    } catch (error: any) {
-      // If userExists fails due to missing account_id column, assume user doesn't exist
-      // This allows the login flow to continue and create the user
-      const errorCode = error?.code;
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorString = String(error).toLowerCase();
-      
-      // Check multiple patterns for "column does not exist" error
-      const isAccountIdError = 
-        (errorCode === '42703') || // PostgreSQL error code for undefined column
-        errorMessage?.toLowerCase().includes('account_id') ||
-        errorString.includes('account_id') ||
-        (errorMessage?.includes('column') && errorMessage?.includes('account_id')) ||
-        (errorString.includes('column') && errorString.includes('account_id'));
-      
-      if (isAccountIdError) {
-        this.logger.warn(
-          `account_id column missing during userExists check (accid=${accidStr}). ` +
-          `Assuming user doesn't exist and will be created. Run migrations to add account_id column.`
-        );
-        userExists = false; // Assume user doesn't exist, will be created
-      } else {
-        // For other errors, log and rethrow
-        this.logger.error(`Error checking if user exists (accid=${accidStr}):`, error);
-        throw error;
-      }
-    }
+    // accountId is mandatory for multi-tenant isolation
+    const userExists = await this.usersSyncService.userExists(accidStr);
     
     if (!userExists) {
       // User doesn't exist, trigger background sync job with full user data

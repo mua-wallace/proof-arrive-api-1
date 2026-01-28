@@ -44,42 +44,25 @@ export class UsersSyncService {
       
       // Check if user already exists for this accountId
       // Use sql template to explicitly cast the parameter as text for accid
-      let existingUser;
-      try {
-        existingUser = await this.dbConnection
-          .select()
-          .from(schema.users)
-          .where(
-            and(
-              sql`${schema.users.accid} = ${accidStr}::text`,
-              eq(schema.users.accountId, accountIdNum),
-            ),
-          )
-          .limit(1);
-      } catch (error: any) {
-        // Fallback if account_id column doesn't exist
-        if (error?.code === '42703' && error?.message?.includes('account_id')) {
-          this.logger.warn(
-            `account_id column not found, falling back to accid-only check (accid=${accidStr}). ` +
-            `Run migrations to add account_id column for multi-tenant support.`
-          );
-          existingUser = await this.dbConnection
-            .select()
-            .from(schema.users)
-            .where(sql`${schema.users.accid} = ${accidStr}::text`)
-            .limit(1);
-        } else {
-          throw error;
-        }
-      }
+      const existingUser = await this.dbConnection
+        .select()
+        .from(schema.users)
+        .where(
+          and(
+            sql`${schema.users.accid} = ${accidStr}::text`,
+            eq(schema.users.accountId, accountIdNum),
+          ),
+        )
+        .limit(1);
 
       if (existingUser.length > 0) {
         return;
       }
 
       // Insert user with data from Malambi API login response
-      // Try with accountId first, fallback without it if column doesn't exist
-      const userRecord: any = {
+      // accountId is mandatory - derived from accid for multi-tenancy
+      const userRecord = {
+        accountId: accountIdNum, // Multi-tenant: account ID (derived from accid)
         accid: accidStr,
         subid: subidStr,
         token: userData.token || '',
@@ -98,33 +81,7 @@ export class UsersSyncService {
         lastLoginAt: new Date(),
       };
 
-      // Try inserting with accountId first
-      try {
-        userRecord.accountId = accountIdNum; // Multi-tenant: account ID (derived from accid)
-        await this.dbConnection.insert(schema.users).values(userRecord).execute();
-      } catch (insertError: any) {
-        // If account_id column doesn't exist, try without it
-        const insertErrorCode = insertError?.code;
-        const insertErrorMessage = insertError instanceof Error ? insertError.message : String(insertError);
-        const insertErrorString = String(insertError).toLowerCase();
-        
-        const isAccountIdInsertError = 
-          (insertErrorCode === '42703') ||
-          insertErrorMessage?.toLowerCase().includes('account_id') ||
-          insertErrorString.includes('account_id') ||
-          (insertErrorMessage?.includes('column') && insertErrorMessage?.includes('account_id'));
-        
-        if (isAccountIdInsertError) {
-          this.logger.warn(
-            `account_id column not found, inserting user without accountId (accid=${accidStr}). ` +
-            `Run migrations to add account_id column for multi-tenant support.`
-          );
-          delete userRecord.accountId;
-          await this.dbConnection.insert(schema.users).values(userRecord).execute();
-        } else {
-          throw insertError;
-        }
-      }
+      await this.dbConnection.insert(schema.users).values(userRecord).execute();
     } catch (error) {
       this.logger.error(`Error syncing user:`, error instanceof Error ? error.stack : error);
       throw error;
@@ -133,68 +90,30 @@ export class UsersSyncService {
 
   /**
    * Update lastLoginAt timestamp for existing user
-   * Falls back to accid-only query if account_id column doesn't exist
+   * accountId is mandatory for multi-tenant isolation
    */
   async updateLastLogin(accid: string | number): Promise<void> {
     const accidStr = String(accid);
     const accountIdNum = Number(accidStr);
     
-    try {
-      await this.dbConnection
-        .update(schema.users)
-        .set({ 
-          lastLoginAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            sql`${schema.users.accid} = ${accidStr}::text`,
-            eq(schema.users.accountId, accountIdNum),
-          ),
-        )
-        .execute();
-    } catch (error: any) {
-      // Check if error is due to missing account_id column
-      const errorCode = error?.code;
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorString = String(error).toLowerCase();
-      
-      // Check multiple patterns for "column does not exist" error
-      const isAccountIdError = 
-        (errorCode === '42703') || // PostgreSQL error code for undefined column
-        errorMessage?.toLowerCase().includes('account_id') ||
-        errorString.includes('account_id') ||
-        (errorMessage?.includes('column') && errorMessage?.includes('account_id')) ||
-        (errorString.includes('column') && errorString.includes('account_id'));
-      
-      if (isAccountIdError) {
-        this.logger.warn(
-          `account_id column not found, falling back to accid-only update (accid=${accidStr}). ` +
-          `Run migrations to add account_id column for multi-tenant support.`
-        );
-        
-        // Fallback: update by accid only (backward compatibility)
-        await this.dbConnection
-          .update(schema.users)
-          .set({ 
-            lastLoginAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(sql`${schema.users.accid} = ${accidStr}::text`)
-          .execute();
-        
-        return;
-      }
-      
-      // For other errors, log and rethrow
-      this.logger.error(`Error updating lastLoginAt for user ${accid}:`, error instanceof Error ? error.stack : error);
-      throw error;
-    }
+    await this.dbConnection
+      .update(schema.users)
+      .set({ 
+        lastLoginAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          sql`${schema.users.accid} = ${accidStr}::text`,
+          eq(schema.users.accountId, accountIdNum),
+        ),
+      )
+      .execute();
   }
 
   /**
    * Check if user exists in database for the given accountId
-   * Falls back to accid-only query if account_id column doesn't exist (for backward compatibility)
+   * accountId is mandatory for multi-tenant isolation
    */
   async userExists(accid: number | string): Promise<boolean> {
     // Explicitly convert to string and ensure it's treated as a string type
@@ -202,67 +121,19 @@ export class UsersSyncService {
     const accidStr: string = typeof accid === 'number' ? accid.toString() : String(accid);
     const accountIdNum = Number(accidStr);
     
-    try {
-      // Try query with account_id first (for multi-tenant isolation)
-      const user = await this.dbConnection
-        .select()
-        .from(schema.users)
-        .where(
-          and(
-            sql`${schema.users.accid} = ${accidStr}::text`,
-            eq(schema.users.accountId, accountIdNum),
-          ),
-        )
-        .limit(1);
+    // Query with account_id for multi-tenant isolation
+    const user = await this.dbConnection
+      .select()
+      .from(schema.users)
+      .where(
+        and(
+          sql`${schema.users.accid} = ${accidStr}::text`,
+          eq(schema.users.accountId, accountIdNum),
+        ),
+      )
+      .limit(1);
 
-      return user.length > 0;
-    } catch (error: any) {
-      // Check if error is due to missing account_id column
-      const errorCode = error?.code;
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorString = String(error).toLowerCase();
-      
-      // Check multiple patterns for "column does not exist" error
-      const isAccountIdError = 
-        (errorCode === '42703') || // PostgreSQL error code for undefined column
-        errorMessage?.toLowerCase().includes('account_id') ||
-        errorString.includes('account_id') ||
-        (errorMessage?.includes('column') && errorMessage?.includes('account_id')) ||
-        (errorString.includes('column') && errorString.includes('account_id'));
-      
-      if (isAccountIdError) {
-        this.logger.warn(
-          `account_id column not found, falling back to accid-only query (accid=${accidStr}). ` +
-          `Run migrations to add account_id column for multi-tenant support.`
-        );
-        
-        // Fallback: query by accid only (backward compatibility)
-        try {
-          const user = await this.dbConnection
-            .select()
-            .from(schema.users)
-            .where(sql`${schema.users.accid} = ${accidStr}::text`)
-            .limit(1);
-          
-          return user.length > 0;
-        } catch (fallbackError: any) {
-          this.logger.error(`Fallback query also failed (accid=${accidStr}):`, fallbackError?.message);
-          throw fallbackError;
-        }
-      }
-      
-      // For other errors, log details and rethrow
-      const errorStack = error instanceof Error ? error.stack : undefined;
-      const errorDetail = error?.detail;
-      
-      this.logger.error(`Error checking if user exists (accid=${accidStr}):`);
-      this.logger.error(`  Message: ${errorMessage}`);
-      if (errorCode) this.logger.error(`  Code: ${errorCode}`);
-      if (errorDetail) this.logger.error(`  Detail: ${errorDetail}`);
-      if (errorStack) this.logger.error(`  Stack: ${errorStack}`);
-      
-      throw error;
-    }
+    return user.length > 0;
   }
 }
 

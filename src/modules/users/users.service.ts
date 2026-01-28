@@ -24,43 +24,12 @@ export class UsersService extends BaseService<User> {
     query: PaginateQuery = {},
     options?: { include?: string[]; accountId?: number },
   ): Promise<PaginateResult<User>> {
-    try {
-      // If relations are requested, use custom implementation
-      if (options?.include && options.include.length > 0) {
-        return await this.findAllWithRelations(query, options);
-      }
-      // BaseService.findAll() already has fallback logic for missing account_id column
-      return await super.findAll(query, options);
-    } catch (error: any) {
-      // Check if error is due to missing account_id column (in case BaseService fallback didn't catch it)
-      const errorCode = error?.code;
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorString = String(error).toLowerCase();
-      
-      const isAccountIdError = 
-        (errorCode === '42703') ||
-        errorMessage?.toLowerCase().includes('account_id') ||
-        errorString.includes('account_id') ||
-        (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
-      
-      // If accountId filter was used and column doesn't exist, retry without it
-      if (isAccountIdError && options?.accountId !== undefined) {
-        this.logger.warn(
-          `account_id column missing during findAll (accountId=${options.accountId}). ` +
-          `Falling back to query without accountId filter. Run migrations to add account_id column.`
-        );
-        // Retry without accountId
-        const fallbackOptions = { ...options };
-        delete fallbackOptions.accountId;
-        return await super.findAll(query, fallbackOptions);
-      }
-      
-      this.logger.error(`Failed to fetch users: ${error?.message || 'Unknown error'}`, error?.stack);
-      if (error instanceof NotFoundException) throw error;
-      throw new InternalServerErrorException(
-        `Failed to fetch users: ${error?.message || 'Unknown error occurred'}`,
-      );
+    // If relations are requested, use custom implementation
+    if (options?.include && options.include.length > 0) {
+      return await this.findAllWithRelations(query, options);
     }
+    // BaseService.findAll() handles accountId filtering
+    return await super.findAll(query, options);
   }
 
   private async findAllWithRelations(
@@ -73,12 +42,10 @@ export class UsersService extends BaseService<User> {
 
     // Build where conditions
     const conditions: any[] = [sql`${schema.users.deletedAt} IS NULL`];
-    let useAccountIdFilter = false;
 
-    // Automatically filter by accountId if provided
+    // Automatically filter by accountId if provided (mandatory for multi-tenant isolation)
     if (options?.accountId !== undefined) {
       conditions.push(eq(schema.users.accountId, options.accountId));
-      useAccountIdFilter = true;
     }
 
     // Add search functionality
@@ -120,62 +87,12 @@ export class UsersService extends BaseService<User> {
     }
 
     // Get total count
-    let whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-    let total: number;
-    
-    try {
-      const [{ count: countResult }] = await this.dbConnection
-        .select({ count: count() })
-        .from(schema.users)
-        .where(whereClause);
-      total = countResult;
-    } catch (error: any) {
-      // Check if error is due to missing account_id column
-      const errorCode = error?.code;
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorString = String(error).toLowerCase();
-      
-      const isAccountIdError = 
-        (errorCode === '42703') ||
-        errorMessage?.toLowerCase().includes('account_id') ||
-        errorString.includes('account_id') ||
-        (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
-      
-      // If accountId filter was used and column doesn't exist, retry without it
-      if (isAccountIdError && useAccountIdFilter) {
-        const fallbackConditions: any[] = [sql`${schema.users.deletedAt} IS NULL`];
-        
-        // Add search functionality
-        if (query.search && query.searchBy && query.searchBy.length > 0) {
-          const searchConditions = query.searchBy
-            .map((field) => {
-              const column = (schema.users as any)[field];
-              if (column) {
-                return sql`${column}::text ILIKE ${`%${query.search}%`}`;
-              }
-              return null;
-            })
-            .filter(Boolean);
-
-          if (searchConditions.length > 0) {
-            fallbackConditions.push(sql`(${sql.join(searchConditions.filter(Boolean) as any[], sql` OR `)})`);
-          }
-        }
-        
-        const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
-        const [{ count: countResult }] = await this.dbConnection
-          .select({ count: count() })
-          .from(schema.users)
-          .where(fallbackWhereClause);
-        total = countResult;
-        // Update conditions and whereClause for data query
-        conditions.length = 0;
-        conditions.push(...fallbackConditions);
-        whereClause = fallbackWhereClause;
-      } else {
-        throw error;
-      }
-    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const [{ count: countResult }] = await this.dbConnection
+      .select({ count: count() })
+      .from(schema.users)
+      .where(whereClause);
+    const total = countResult;
 
     // Build relations object for Drizzle query API
     const withRelations: any = {};
@@ -192,60 +109,13 @@ export class UsersService extends BaseService<User> {
     let data: any[] = [];
     if (Object.keys(withRelations).length > 0) {
       // When relations are requested, first get the IDs that match the conditions
-      let matchingIds: any[] = [];
-      try {
-        matchingIds = await this.dbConnection
-          .select({ id: schema.users.id })
-          .from(schema.users)
-          .where(whereClause)
-          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-          .limit(limit)
-          .offset(offset);
-      } catch (error: any) {
-        // Check if error is due to missing account_id column
-        const errorCode = error?.code;
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const errorString = String(error).toLowerCase();
-        
-        const isAccountIdError = 
-          (errorCode === '42703') ||
-          errorMessage?.toLowerCase().includes('account_id') ||
-          errorString.includes('account_id') ||
-          (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
-        
-        // If accountId filter was used and column doesn't exist, retry without it
-        if (isAccountIdError && useAccountIdFilter) {
-          const fallbackConditions: any[] = [sql`${schema.users.deletedAt} IS NULL`];
-          
-          // Add search functionality
-          if (query.search && query.searchBy && query.searchBy.length > 0) {
-            const searchConditions = query.searchBy
-              .map((field) => {
-                const column = (schema.users as any)[field];
-                if (column) {
-                  return sql`${column}::text ILIKE ${`%${query.search}%`}`;
-                }
-                return null;
-              })
-              .filter(Boolean);
-
-            if (searchConditions.length > 0) {
-              fallbackConditions.push(sql`(${sql.join(searchConditions.filter(Boolean) as any[], sql` OR `)})`);
-            }
-          }
-          
-          const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
-          matchingIds = await this.dbConnection
-            .select({ id: schema.users.id })
-            .from(schema.users)
-            .where(fallbackWhereClause)
-            .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-            .limit(limit)
-            .offset(offset);
-        } else {
-          throw error;
-        }
-      }
+      const matchingIds = await this.dbConnection
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(whereClause)
+        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+        .limit(limit)
+        .offset(offset);
 
       const ids = matchingIds.map((row: any) => row.id);
 
@@ -268,86 +138,14 @@ export class UsersService extends BaseService<User> {
       }
     } else {
       // Use standard query when no relations
-      try {
-        const finalWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
-        data = await this.dbConnection
-          .select()
-          .from(schema.users)
-          .where(finalWhereClause)
-          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-          .limit(limit)
-          .offset(offset);
-      } catch (error: any) {
-        // Check if error is due to missing account_id column
-        const errorCode = error?.code;
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const errorString = String(error).toLowerCase();
-        
-        const isAccountIdError = 
-          (errorCode === '42703') ||
-          errorMessage?.toLowerCase().includes('account_id') ||
-          errorString.includes('account_id') ||
-          (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
-        
-        // If account_id column doesn't exist, use raw SQL to exclude it from SELECT
-        // Drizzle's .select() includes all schema columns, so account_id is selected even if not filtered
-        if (isAccountIdError) {
-          // Rebuild conditions without accountId filter (if it was used)
-          const fallbackConditions: any[] = [sql`${schema.users.deletedAt} IS NULL`];
-          
-          // Add search functionality
-          if (query.search && query.searchBy && query.searchBy.length > 0) {
-            const searchConditions = query.searchBy
-              .map((field) => {
-                const column = (schema.users as any)[field];
-                if (column) {
-                  return sql`${column}::text ILIKE ${`%${query.search}%`}`;
-                }
-                return null;
-              })
-              .filter(Boolean);
-
-            if (searchConditions.length > 0) {
-              fallbackConditions.push(sql`(${sql.join(searchConditions.filter(Boolean) as any[], sql` OR `)})`);
-            }
-          }
-          
-          // Use raw SQL via postgres client to exclude account_id from SELECT
-          const postgresClient = (this.dbConnection as any).client || (this.dbConnection as any).session?.client;
-          
-          if (postgresClient) {
-            // Get column names excluding account_id
-            const columnsResult = await postgresClient`
-              SELECT column_name 
-              FROM information_schema.columns 
-              WHERE table_schema = 'public' 
-              AND table_name = 'users'
-              AND column_name != 'account_id'
-              ORDER BY ordinal_position
-            `;
-            
-            const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
-            const whereClause = 'WHERE "deleted_at" IS NULL';
-            const orderBySql = (orderByClause !== undefined) ? ' ORDER BY "created_at" DESC' : '';
-            
-            // Execute raw SQL query
-            const rawQuery = `SELECT ${columnNames} FROM "users" ${whereClause}${orderBySql} LIMIT ${limit} OFFSET ${offset}`;
-            data = await postgresClient.unsafe(rawQuery);
-          } else {
-            // Fallback: try without accountId filter (will still fail if account_id is in SELECT)
-            const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
-            data = await this.dbConnection
-              .select()
-              .from(schema.users)
-              .where(fallbackWhereClause)
-              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-              .limit(limit)
-              .offset(offset);
-          }
-        } else {
-          throw error;
-        }
-      }
+      const finalWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      data = await this.dbConnection
+        .select()
+        .from(schema.users)
+        .where(finalWhereClause)
+        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+        .limit(limit)
+        .offset(offset);
     }
     
     // Ensure data is defined
