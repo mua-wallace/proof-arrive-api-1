@@ -126,10 +126,10 @@ export class UsersSyncService {
    * Falls back to accid-only query if account_id column doesn't exist
    */
   async updateLastLogin(accid: string | number): Promise<void> {
+    const accidStr = String(accid);
+    const accountIdNum = Number(accidStr);
+    
     try {
-      const accidStr = String(accid);
-      const accountIdNum = Number(accidStr);
-      
       await this.dbConnection
         .update(schema.users)
         .set({ 
