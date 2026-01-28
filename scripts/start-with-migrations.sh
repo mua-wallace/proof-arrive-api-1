@@ -8,9 +8,12 @@ echo "Working directory: $(pwd)"
 echo ""
 
 # Check if migrations were already run at build time
+# Note: We still run migrations at startup to ensure they're up-to-date
+# This is safer than skipping, especially if new migrations were added
 if [ -f "/tmp/.migrations-run-at-build" ]; then
-  echo "✅ Migrations were already run at build time. Skipping runtime migrations."
-  exec node dist/main
+  echo "✅ Migrations were run at build time."
+  echo "⚠️  However, we'll still check for pending migrations at startup to ensure schema is up-to-date."
+  echo ""
 fi
 
 # Log environment variables (without exposing passwords)
@@ -66,13 +69,59 @@ if [ "$MIGRATION_COUNT" -eq "0" ]; then
 fi
 echo ""
 
-MIGRATION_RETRIES=5
+MIGRATION_RETRIES=10
 MIGRATION_COUNT=0
 MIGRATION_SUCCESS=false
 
-# Wait a bit for database to be ready (if starting together)
+# Wait for database to be ready (with exponential backoff)
 echo "⏳ Waiting for database to be ready..."
-sleep 2
+DB_READY=false
+DB_WAIT_COUNT=0
+DB_MAX_WAIT=30
+
+while [ "$DB_READY" = false ] && [ $DB_WAIT_COUNT -lt $DB_MAX_WAIT ]; do
+  # Try to connect to database using pg_isready or simple connection test
+  if command -v pg_isready >/dev/null 2>&1; then
+    if pg_isready -h "$DATABASE_HOST" -p "${DATABASE_PORT:-5432}" -U "${DATABASE_USERNAME:-postgres}" >/dev/null 2>&1; then
+      DB_READY=true
+      echo "✓ Database is ready!"
+    else
+      DB_WAIT_COUNT=$((DB_WAIT_COUNT + 1))
+      if [ $DB_WAIT_COUNT -lt $DB_MAX_WAIT ]; then
+        sleep 1
+      fi
+    fi
+  else
+    # Fallback: try a simple connection test using node
+    if node -e "
+      const { Client } = require('pg');
+      const client = new Client({
+        host: process.env.DATABASE_HOST,
+        port: parseInt(process.env.DATABASE_PORT || '5432'),
+        user: process.env.DATABASE_USERNAME || 'postgres',
+        password: process.env.DATABASE_PASSWORD,
+        database: process.env.DATABASE_NAME,
+        connectionTimeoutMillis: 2000
+      });
+      client.connect()
+        .then(() => { client.end(); process.exit(0); })
+        .catch(() => process.exit(1));
+    " 2>/dev/null; then
+      DB_READY=true
+      echo "✓ Database is ready!"
+    else
+      DB_WAIT_COUNT=$((DB_WAIT_COUNT + 1))
+      if [ $DB_WAIT_COUNT -lt $DB_MAX_WAIT ]; then
+        sleep 1
+      fi
+    fi
+  fi
+done
+
+if [ "$DB_READY" = false ]; then
+  echo "⚠️  WARNING: Could not verify database readiness after ${DB_MAX_WAIT}s"
+  echo "⚠️  Will attempt migrations anyway..."
+fi
 
 echo "🔄 Running database migrations..."
 
@@ -89,14 +138,18 @@ while [ $MIGRATION_COUNT -lt $MIGRATION_RETRIES ] && [ "$MIGRATION_SUCCESS" = fa
   if node scripts/run-migrations.js 2>&1; then
     MIGRATION_SUCCESS=true
     echo "✅ Migrations completed successfully!"
+    break
   else
     MIGRATION_EXIT_CODE=$?
     echo "⚠️  Migration attempt $MIGRATION_COUNT failed with exit code: $MIGRATION_EXIT_CODE"
-    echo "⚠️  Will retry..."
+    if [ $MIGRATION_COUNT -lt $MIGRATION_RETRIES ]; then
+      echo "⚠️  Will retry in 3 seconds..."
+    fi
   fi
 done
 
 if [ "$MIGRATION_SUCCESS" = false ]; then
+  echo ""
   echo "❌ ERROR: Migrations failed after $MIGRATION_RETRIES attempts!"
   echo "⚠️  The application will start, but database errors may occur."
   echo "⚠️  Please check the migration logs above and run migrations manually if needed."
@@ -104,9 +157,13 @@ if [ "$MIGRATION_SUCCESS" = false ]; then
   echo "To run migrations manually, use:"
   echo "  node scripts/run-migrations.js"
   echo ""
+  echo "Or connect to the container and run:"
+  echo "  docker exec -it <container-name> node scripts/run-migrations.js"
+  echo ""
 fi
 
 # Always start the application, even if migrations failed
+# This allows the app to start and show proper error messages
 echo "🚀 Starting application..."
 exec node dist/main
 

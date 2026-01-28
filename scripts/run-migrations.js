@@ -165,7 +165,8 @@ async function runMigrations() {
                   errorMsg.includes('duplicate key') ||
                   errorMsg.includes('relation already exists') ||
                   (errorMsg.includes('column') && errorMsg.includes('already exists')) ||
-                  (errorMsg.includes('constraint') && errorMsg.includes('already exists'))) {
+                  (errorMsg.includes('constraint') && errorMsg.includes('already exists')) ||
+                  (errorMsg.includes('index') && errorMsg.includes('already exists'))) {
                 skippedCount++;
                 // Only log first few skipped statements to avoid spam
                 if (skippedCount <= 3) {
