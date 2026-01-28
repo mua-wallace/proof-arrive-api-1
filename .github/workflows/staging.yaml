@@ -29,8 +29,10 @@ jobs:
         run: |
           # Create empty .env file to satisfy docker-compose's default behavior
           # docker-compose-build.yml doesn't use .env, but docker-compose looks for it by default
-          # The warning about DATABASE_PASSWORD is harmless since docker-compose-build.yml doesn't use it
-          echo "# Empty .env file for CI/CD - docker-compose-build.yml doesn't use variables" > .env
+          # This prevents "env file not found" errors that cause build failures
+          touch .env
+          # Build and push images
+          # Note: Warnings about DATABASE_PASSWORD are harmless (docker-compose-build.yml doesn't use variables)
           docker compose -f docker-compose-build.yml build
           docker compose -f docker-compose-build.yml push
       - name: Notify Portainer
