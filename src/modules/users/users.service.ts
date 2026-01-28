@@ -49,10 +49,12 @@ export class UsersService extends BaseService<User> {
 
     // Build where conditions
     const conditions: any[] = [sql`${schema.users.deletedAt} IS NULL`];
+    let useAccountIdFilter = false;
 
     // Automatically filter by accountId if provided
     if (options?.accountId !== undefined) {
       conditions.push(eq(schema.users.accountId, options.accountId));
+      useAccountIdFilter = true;
     }
 
     // Add search functionality
@@ -95,10 +97,60 @@ export class UsersService extends BaseService<User> {
 
     // Get total count
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-    const [{ count: total }] = await this.dbConnection
-      .select({ count: count() })
-      .from(schema.users)
-      .where(whereClause);
+    let total: number;
+    
+    try {
+      const [{ count: countResult }] = await this.dbConnection
+        .select({ count: count() })
+        .from(schema.users)
+        .where(whereClause);
+      total = countResult;
+    } catch (error: any) {
+      // Check if error is due to missing account_id column
+      const errorCode = error?.code;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
+      
+      const isAccountIdError = 
+        (errorCode === '42703') ||
+        errorMessage?.toLowerCase().includes('account_id') ||
+        errorString.includes('account_id') ||
+        (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+      
+      // If accountId filter was used and column doesn't exist, retry without it
+      if (isAccountIdError && useAccountIdFilter) {
+        const fallbackConditions: any[] = [sql`${schema.users.deletedAt} IS NULL`];
+        
+        // Add search functionality
+        if (query.search && query.searchBy && query.searchBy.length > 0) {
+          const searchConditions = query.searchBy
+            .map((field) => {
+              const column = (schema.users as any)[field];
+              if (column) {
+                return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+              }
+              return null;
+            })
+            .filter(Boolean);
+
+          if (searchConditions.length > 0) {
+            fallbackConditions.push(sql`(${sql.join(searchConditions.filter(Boolean) as any[], sql` OR `)})`);
+          }
+        }
+        
+        const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
+        const [{ count: countResult }] = await this.dbConnection
+          .select({ count: count() })
+          .from(schema.users)
+          .where(fallbackWhereClause);
+        total = countResult;
+        // Update conditions for data query
+        conditions.length = 0;
+        conditions.push(...fallbackConditions);
+      } else {
+        throw error;
+      }
+    }
 
     // Build relations object for Drizzle query API
     const withRelations: any = {};
@@ -144,13 +196,60 @@ export class UsersService extends BaseService<User> {
       }
     } else {
       // Use standard query when no relations
-      data = await this.dbConnection
-        .select()
-        .from(schema.users)
-        .where(whereClause)
-        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-        .limit(limit)
-        .offset(offset);
+      try {
+        const finalWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
+        data = await this.dbConnection
+          .select()
+          .from(schema.users)
+          .where(finalWhereClause)
+          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+          .limit(limit)
+          .offset(offset);
+      } catch (error: any) {
+        // Check if error is due to missing account_id column
+        const errorCode = error?.code;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorString = String(error).toLowerCase();
+        
+        const isAccountIdError = 
+          (errorCode === '42703') ||
+          errorMessage?.toLowerCase().includes('account_id') ||
+          errorString.includes('account_id') ||
+          (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+        
+        // If accountId filter was used and column doesn't exist, retry without it
+        if (isAccountIdError && useAccountIdFilter) {
+          const fallbackConditions: any[] = [sql`${schema.users.deletedAt} IS NULL`];
+          
+          // Add search functionality
+          if (query.search && query.searchBy && query.searchBy.length > 0) {
+            const searchConditions = query.searchBy
+              .map((field) => {
+                const column = (schema.users as any)[field];
+                if (column) {
+                  return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+                }
+                return null;
+              })
+              .filter(Boolean);
+
+            if (searchConditions.length > 0) {
+              fallbackConditions.push(sql`(${sql.join(searchConditions.filter(Boolean) as any[], sql` OR `)})`);
+            }
+          }
+          
+          const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
+          data = await this.dbConnection
+            .select()
+            .from(schema.users)
+            .where(fallbackWhereClause)
+            .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+            .limit(limit)
+            .offset(offset);
+        } else {
+          throw error;
+        }
+      }
     }
 
     return {

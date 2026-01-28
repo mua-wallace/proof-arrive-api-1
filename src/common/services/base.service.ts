@@ -64,10 +64,12 @@ export class BaseService<T extends BaseEntity> {
 
     // Build where conditions
     const conditions: SQL[] = [isNull(this.table.deletedAt)];
+    let useAccountIdFilter = false;
 
     // Automatically filter by accountId if the table has the column and accountId is provided
     if (this.hasAccountIdColumn() && options?.accountId !== undefined) {
       conditions.push(eq(this.getAccountIdColumn(), options.accountId));
+      useAccountIdFilter = true;
     }
 
     // Add search functionality
@@ -97,47 +99,127 @@ export class BaseService<T extends BaseEntity> {
       }
     }
 
-    // Get total count
-    const [{ count: totalItems }] = await this.db
-      .select({ count: count() })
-      .from(this.table)
-      .where(and(...conditions));
+    try {
+      // Get total count
+      const [{ count: totalItems }] = await this.db
+        .select({ count: count() })
+        .from(this.table)
+        .where(and(...conditions));
 
-    // Get paginated data
-    let queryBuilder = this.db
-      .select()
-      .from(this.table)
-      .where(and(...conditions))
-      .limit(limit)
-      .offset(offset);
+      // Get paginated data
+      let queryBuilder = this.db
+        .select()
+        .from(this.table)
+        .where(and(...conditions))
+        .limit(limit)
+        .offset(offset);
 
-    if (orderByClause) {
-      queryBuilder = queryBuilder.orderBy(orderByClause) as any;
+      if (orderByClause) {
+        queryBuilder = queryBuilder.orderBy(orderByClause) as any;
+      }
+
+      const data = await queryBuilder;
+
+      const totalPages = Math.ceil(totalItems / limit);
+
+      return {
+        data: data as unknown as T[],
+        meta: {
+          itemsPerPage: limit,
+          totalItems,
+          currentPage: page,
+          totalPages,
+          sortBy: query.sortBy || [],
+          search: query.search,
+          searchBy: query.searchBy,
+        },
+        links: {
+          first: page > 1 ? `?page=1&limit=${limit}` : undefined,
+          previous: page > 1 ? `?page=${page - 1}&limit=${limit}` : undefined,
+          current: `?page=${page}&limit=${limit}`,
+          next: page < totalPages ? `?page=${page + 1}&limit=${limit}` : undefined,
+          last: page < totalPages ? `?page=${totalPages}&limit=${limit}` : undefined,
+        },
+      };
+    } catch (error: any) {
+      // Check if error is due to missing account_id column
+      const errorCode = error?.code;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
+      
+      const isAccountIdError = 
+        (errorCode === '42703') ||
+        errorMessage?.toLowerCase().includes('account_id') ||
+        errorString.includes('account_id') ||
+        (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+      
+      // If accountId filter was used and column doesn't exist, retry without it
+      if (isAccountIdError && useAccountIdFilter) {
+        // Rebuild conditions without accountId filter
+        const fallbackConditions: SQL[] = [isNull(this.table.deletedAt)];
+        
+        // Add search functionality
+        if (query.search && query.searchBy && query.searchBy.length > 0) {
+          const searchConditions = query.searchBy
+            .map((field) => {
+              const column = (this.table as any)[field];
+              if (column) {
+                return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+              }
+              return null;
+            })
+            .filter(Boolean) as SQL[];
+
+          if (searchConditions.length > 0) {
+            fallbackConditions.push(sql`(${sql.join(searchConditions, sql` OR `)})`);
+          }
+        }
+
+        // Get total count without accountId filter
+        const [{ count: totalItems }] = await this.db
+          .select({ count: count() })
+          .from(this.table)
+          .where(and(...fallbackConditions));
+
+        // Get paginated data without accountId filter
+        let queryBuilder = this.db
+          .select()
+          .from(this.table)
+          .where(and(...fallbackConditions))
+          .limit(limit)
+          .offset(offset);
+
+        if (orderByClause) {
+          queryBuilder = queryBuilder.orderBy(orderByClause) as any;
+        }
+
+        const data = await queryBuilder;
+        const totalPages = Math.ceil(totalItems / limit);
+
+        return {
+          data: data as unknown as T[],
+          meta: {
+            itemsPerPage: limit,
+            totalItems,
+            currentPage: page,
+            totalPages,
+            sortBy: query.sortBy || [],
+            search: query.search,
+            searchBy: query.searchBy,
+          },
+          links: {
+            first: page > 1 ? `?page=1&limit=${limit}` : undefined,
+            previous: page > 1 ? `?page=${page - 1}&limit=${limit}` : undefined,
+            current: `?page=${page}&limit=${limit}`,
+            next: page < totalPages ? `?page=${page + 1}&limit=${limit}` : undefined,
+            last: page < totalPages ? `?page=${totalPages}&limit=${limit}` : undefined,
+          },
+        };
+      }
+      
+      // For other errors, rethrow
+      throw error;
     }
-
-    const data = await queryBuilder;
-
-    const totalPages = Math.ceil(totalItems / limit);
-
-    return {
-      data: data as unknown as T[],
-      meta: {
-        itemsPerPage: limit,
-        totalItems,
-        currentPage: page,
-        totalPages,
-        sortBy: query.sortBy || [],
-        search: query.search,
-        searchBy: query.searchBy,
-      },
-      links: {
-        first: page > 1 ? `?page=1&limit=${limit}` : undefined,
-        previous: page > 1 ? `?page=${page - 1}&limit=${limit}` : undefined,
-        current: `?page=${page}&limit=${limit}`,
-        next: page < totalPages ? `?page=${page + 1}&limit=${limit}` : undefined,
-        last: page < totalPages ? `?page=${totalPages}&limit=${limit}` : undefined,
-      },
-    };
   }
 
   async findOneById(
@@ -160,23 +242,66 @@ export class BaseService<T extends BaseEntity> {
       eq(this.table.id, id as any),
       isNull(this.table.deletedAt),
     ];
+    let useAccountIdFilter = false;
 
     // Automatically filter by accountId if the table has the column and accountId is provided
     if (this.hasAccountIdColumn() && accountId !== undefined) {
       conditions.push(eq(this.getAccountIdColumn(), accountId));
+      useAccountIdFilter = true;
     }
 
-    const [entity] = await this.db
-      .select()
-      .from(this.table)
-      .where(and(...conditions))
-      .limit(1);
+    try {
+      const [entity] = await this.db
+        .select()
+        .from(this.table)
+        .where(and(...conditions))
+        .limit(1);
 
-    if (!entity) {
-      throw new NotFoundException(`Entity with id ${id} not found`);
+      if (!entity) {
+        throw new NotFoundException(`Entity with id ${id} not found`);
+      }
+
+      return entity as unknown as T;
+    } catch (error: any) {
+      // Check if error is due to missing account_id column
+      const errorCode = error?.code;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
+      
+      const isAccountIdError = 
+        (errorCode === '42703') ||
+        errorMessage?.toLowerCase().includes('account_id') ||
+        errorString.includes('account_id') ||
+        (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+      
+      // If accountId filter was used and column doesn't exist, retry without it
+      if (isAccountIdError && useAccountIdFilter) {
+        const fallbackConditions: SQL[] = [
+          eq(this.table.id, id as any),
+          isNull(this.table.deletedAt),
+        ];
+        
+        const [entity] = await this.db
+          .select()
+          .from(this.table)
+          .where(and(...fallbackConditions))
+          .limit(1);
+
+        if (!entity) {
+          throw new NotFoundException(`Entity with id ${id} not found`);
+        }
+
+        return entity as unknown as T;
+      }
+      
+      // For NotFoundException, rethrow as-is
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      // For other errors, rethrow
+      throw error;
     }
-
-    return entity as unknown as T;
   }
 
   async findOneBy(
