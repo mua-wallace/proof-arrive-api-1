@@ -172,8 +172,10 @@ async function bootstrap() {
 
   // Start server
   await app.listen(config.app.port);
-  // logger.log(`🚀 Server running on port ${config.app.port}`);
-  logger.log(`📚 Swagger docs available at: http://localhost:${config.app.port}/${config.app.docs}`);
+  logger.log(`🚀 Server running on port ${config.app.port}`);
+  if (config.app.mode === MODE.DEVELOPMENT) {
+    logger.log(`📚 Swagger docs available at: http://localhost:${config.app.port}/${config.app.docs}`);
+  }
 }
 
 bootstrap().catch((error) => {
