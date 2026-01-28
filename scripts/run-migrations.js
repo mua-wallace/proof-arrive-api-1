@@ -158,21 +158,49 @@ async function runMigrations() {
             } catch (stmtError) {
               // Check if error is because table/column already exists (safe to ignore)
               const errorMsg = stmtError.message.toLowerCase();
+              const errorCode = stmtError.code;
+              
+              // Safe to skip: already exists errors
               if (errorMsg.includes('already exists') || 
                   errorMsg.includes('duplicate key') ||
                   errorMsg.includes('relation already exists') ||
                   (errorMsg.includes('column') && errorMsg.includes('already exists')) ||
-                  errorMsg.includes('constraint') && errorMsg.includes('already exists')) {
+                  (errorMsg.includes('constraint') && errorMsg.includes('already exists'))) {
                 skippedCount++;
                 // Only log first few skipped statements to avoid spam
                 if (skippedCount <= 3) {
                   console.log(`  ⚠ Statement ${i + 1} skipped (already exists)`);
                 }
-              } else {
+              }
+              // Safe to skip: column doesn't exist (might be dropped in later migration)
+              else if (errorMsg.includes('does not exist') && errorMsg.includes('column')) {
+                skippedCount++;
+                if (skippedCount <= 3) {
+                  console.log(`  ⚠ Statement ${i + 1} skipped (column doesn't exist - may be dropped in later migration)`);
+                }
+              }
+              // Safe to skip: foreign key constraint errors (accid is not unique, handled in later migrations)
+              else if ((errorMsg.includes('no unique constraint') || errorMsg.includes('unique constraint matching')) &&
+                       errorMsg.includes('users') && errorMsg.includes('accid')) {
+                skippedCount++;
+                if (skippedCount <= 3) {
+                  console.log(`  ⚠ Statement ${i + 1} skipped (foreign key will be recreated in later migration)`);
+                }
+              }
+              // Safe to skip: index on non-existent column
+              else if (errorCode === '42703' && (errorMsg.includes('qr_code') || errorMsg.includes('column'))) {
+                skippedCount++;
+                if (skippedCount <= 3) {
+                  console.log(`  ⚠ Statement ${i + 1} skipped (column doesn't exist)`);
+                }
+              }
+              else {
                 // Log the error but continue
                 console.log(`  ⚠ Statement ${i + 1} error: ${stmtError.message.split('\n')[0]}`);
-                // Don't fail the entire migration for constraint errors
-                if (!errorMsg.includes('constraint') && !errorMsg.includes('foreign key')) {
+                // Don't fail the entire migration for constraint/foreign key errors
+                if (errorMsg.includes('constraint') || errorMsg.includes('foreign key')) {
+                  skippedCount++;
+                } else {
                   console.log(`  Continuing with next statement...`);
                 }
               }
