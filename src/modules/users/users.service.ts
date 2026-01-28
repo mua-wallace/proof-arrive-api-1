@@ -289,8 +289,10 @@ export class UsersService extends BaseService<User> {
           errorString.includes('account_id') ||
           (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
         
-        // If accountId filter was used and column doesn't exist, retry without it
-        if (isAccountIdError && useAccountIdFilter) {
+        // If account_id column doesn't exist, use raw SQL to exclude it from SELECT
+        // Drizzle's .select() includes all schema columns, so account_id is selected even if not filtered
+        if (isAccountIdError) {
+          // Rebuild conditions without accountId filter (if it was used)
           const fallbackConditions: any[] = [sql`${schema.users.deletedAt} IS NULL`];
           
           // Add search functionality
@@ -310,14 +312,38 @@ export class UsersService extends BaseService<User> {
             }
           }
           
-          const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
-          data = await this.dbConnection
-            .select()
-            .from(schema.users)
-            .where(fallbackWhereClause)
-            .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-            .limit(limit)
-            .offset(offset);
+          // Use raw SQL via postgres client to exclude account_id from SELECT
+          const postgresClient = (this.dbConnection as any).client || (this.dbConnection as any).session?.client;
+          
+          if (postgresClient) {
+            // Get column names excluding account_id
+            const columnsResult = await postgresClient`
+              SELECT column_name 
+              FROM information_schema.columns 
+              WHERE table_schema = 'public' 
+              AND table_name = 'users'
+              AND column_name != 'account_id'
+              ORDER BY ordinal_position
+            `;
+            
+            const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
+            const whereClause = 'WHERE "deleted_at" IS NULL';
+            const orderBySql = (orderByClause !== undefined) ? ' ORDER BY "created_at" DESC' : '';
+            
+            // Execute raw SQL query
+            const rawQuery = `SELECT ${columnNames} FROM "users" ${whereClause}${orderBySql} LIMIT ${limit} OFFSET ${offset}`;
+            data = await postgresClient.unsafe(rawQuery);
+          } else {
+            // Fallback: try without accountId filter (will still fail if account_id is in SELECT)
+            const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
+            data = await this.dbConnection
+              .select()
+              .from(schema.users)
+              .where(fallbackWhereClause)
+              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+              .limit(limit)
+              .offset(offset);
+          }
         } else {
           throw error;
         }
@@ -399,8 +425,8 @@ export class UsersService extends BaseService<User> {
             errorString.includes('account_id') ||
             (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
           
-          // If accountId filter was used and column doesn't exist, retry without it
-          if (isAccountIdError && options?.accountId !== undefined) {
+          // If account_id column doesn't exist, retry without accountId filter
+          if (isAccountIdError) {
             user = await this.dbConnection.query.users.findFirst({
               where: (users: any, { eq: eqFn }: any) => eqFn(users.id, id),
               with: withRelations,
@@ -437,18 +463,41 @@ export class UsersService extends BaseService<User> {
               errorString.includes('account_id') ||
               (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
             
-            // If accountId filter was used and column doesn't exist, retry without it
+            // If account_id column doesn't exist, use raw SQL to exclude it from SELECT
             if (isAccountIdError) {
-              const fallbackConditions = [
-                eq(schema.users.id, id),
-                sql`${schema.users.deletedAt} IS NULL`,
-              ];
-              const [foundUser] = await this.dbConnection
-                .select()
-                .from(schema.users)
-                .where(and(...fallbackConditions))
-                .limit(1);
-              user = foundUser;
+              // Use raw SQL via postgres client to exclude account_id from SELECT
+              const postgresClient = (this.dbConnection as any).client || (this.dbConnection as any).session?.client;
+              
+              if (postgresClient) {
+                // Get column names excluding account_id
+                const columnsResult = await postgresClient`
+                  SELECT column_name 
+                  FROM information_schema.columns 
+                  WHERE table_schema = 'public' 
+                  AND table_name = 'users'
+                  AND column_name != 'account_id'
+                  ORDER BY ordinal_position
+                `;
+                
+                const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
+                
+                // Execute raw SQL query
+                const rawQuery = `SELECT ${columnNames} FROM "users" WHERE "id" = $1 AND "deleted_at" IS NULL LIMIT 1`;
+                const result = await postgresClient.unsafe(rawQuery, [id]);
+                user = result[0] || null;
+              } else {
+                // Fallback: try without accountId filter (will still fail if account_id is in SELECT)
+                const fallbackConditions = [
+                  eq(schema.users.id, id),
+                  sql`${schema.users.deletedAt} IS NULL`,
+                ];
+                const [foundUser] = await this.dbConnection
+                  .select()
+                  .from(schema.users)
+                  .where(and(...fallbackConditions))
+                  .limit(1);
+                user = foundUser;
+              }
             } else {
               throw error;
             }

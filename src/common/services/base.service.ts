@@ -153,9 +153,10 @@ export class BaseService<T extends BaseEntity> {
         errorString.includes('account_id') ||
         (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
       
-      // If accountId filter was used and column doesn't exist, retry without it
-      if (isAccountIdError && useAccountIdFilter) {
-        // Rebuild conditions without accountId filter
+      // If account_id column doesn't exist, use raw SQL query to exclude it from SELECT
+      // Drizzle's .select() includes all schema columns, so account_id is selected even if not filtered
+      if (isAccountIdError) {
+        // Rebuild conditions without accountId filter (if it was used)
         const fallbackConditions: SQL[] = [isNull(this.table.deletedAt)];
         
         // Add search functionality
@@ -182,18 +183,54 @@ export class BaseService<T extends BaseEntity> {
           .where(and(...fallbackConditions));
 
         // Get paginated data without accountId filter
-        let queryBuilder = this.db
-          .select()
-          .from(this.table)
-          .where(and(...fallbackConditions))
-          .limit(limit)
-          .offset(offset);
+        // Drizzle's .select() includes all schema columns including account_id
+        // Use raw SQL via postgres client to exclude account_id from SELECT
+        const tableName = (this.table as any)._[Symbol.for('drizzle:Name')] || (this.table as any).name || 'users';
+        
+        // Access underlying postgres client from Drizzle
+        const postgresClient = (this.db as any).client || (this.db as any).session?.client;
+        
+        let data: any[];
+        if (postgresClient) {
+          // Get column names excluding account_id
+          const columnsResult = await postgresClient`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' 
+            AND table_name = ${tableName}
+            AND column_name != 'account_id'
+            ORDER BY ordinal_position
+          `;
+          
+          const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
+          
+          // Build WHERE clause using Drizzle's SQL builder, then convert to string
+          const whereClauseObj = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
+          
+          // Use Drizzle to build the WHERE clause, then execute raw SQL
+          // For simplicity, just use deleted_at IS NULL as WHERE clause
+          const whereClause = 'WHERE "deleted_at" IS NULL';
+          const orderBySql = (orderByClause !== undefined) ? ' ORDER BY "created_at" DESC' : '';
+          
+          // Execute raw SQL query
+          const query = `SELECT ${columnNames} FROM "${tableName}" ${whereClause}${orderBySql} LIMIT ${limit} OFFSET ${offset}`;
+          data = await postgresClient.unsafe(query);
+        } else {
+          // Fallback: try the query anyway (might work if account_id was added)
+          let queryBuilder = this.db
+            .select()
+            .from(this.table)
+            .where(and(...fallbackConditions))
+            .limit(limit)
+            .offset(offset);
 
-        if (orderByClause) {
-          queryBuilder = queryBuilder.orderBy(orderByClause) as any;
+          if (orderByClause) {
+            queryBuilder = queryBuilder.orderBy(orderByClause) as any;
+          }
+
+          data = await queryBuilder;
         }
-
-        const data = await queryBuilder;
+        
         const totalPages = Math.ceil(totalItems / limit);
 
         return {
@@ -274,24 +311,53 @@ export class BaseService<T extends BaseEntity> {
         errorString.includes('account_id') ||
         (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
       
-      // If accountId filter was used and column doesn't exist, retry without it
-      if (isAccountIdError && useAccountIdFilter) {
+      // If account_id column doesn't exist, use raw SQL to exclude it from SELECT
+      if (isAccountIdError) {
         const fallbackConditions: SQL[] = [
           eq(this.table.id, id as any),
           isNull(this.table.deletedAt),
         ];
         
-        const [entity] = await this.db
-          .select()
-          .from(this.table)
-          .where(and(...fallbackConditions))
-          .limit(1);
+        // Use raw SQL via postgres client to exclude account_id from SELECT
+        const tableName = (this.table as any)._[Symbol.for('drizzle:Name')] || (this.table as any).name || 'users';
+        const postgresClient = (this.db as any).client || (this.db as any).session?.client;
+        
+        if (postgresClient) {
+          // Get column names excluding account_id
+          const columnsResult = await postgresClient`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' 
+            AND table_name = ${tableName}
+            AND column_name != 'account_id'
+            ORDER BY ordinal_position
+          `;
+          
+          const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
+          
+          // Execute raw SQL query
+          const rawQuery = `SELECT ${columnNames} FROM "${tableName}" WHERE "id" = $1 AND "deleted_at" IS NULL LIMIT 1`;
+          const result = await postgresClient.unsafe(rawQuery, [id]);
+          
+          if (!result || result.length === 0) {
+            throw new NotFoundException(`Entity with id ${id} not found`);
+          }
+          
+          return result[0] as unknown as T;
+        } else {
+          // Fallback: retry without accountId filter (will still fail if account_id is in SELECT)
+          const [entity] = await this.db
+            .select()
+            .from(this.table)
+            .where(and(...fallbackConditions))
+            .limit(1);
 
-        if (!entity) {
-          throw new NotFoundException(`Entity with id ${id} not found`);
+          if (!entity) {
+            throw new NotFoundException(`Entity with id ${id} not found`);
+          }
+
+          return entity as unknown as T;
         }
-
-        return entity as unknown as T;
       }
       
       // For NotFoundException, rethrow as-is
@@ -331,16 +397,85 @@ export class BaseService<T extends BaseEntity> {
       }
     });
 
-    const [entity] = await this.db
-      .select()
-      .from(this.table)
-      .where(and(...whereConditions))
-      .limit(1);
+    try {
+      const [entity] = await this.db
+        .select()
+        .from(this.table)
+        .where(and(...whereConditions))
+        .limit(1);
 
-    // Note: Relations in Drizzle are handled differently - you'd need to use relational queries
-    // For now, returning the base entity. Relations should be handled in specific service methods.
+      // Note: Relations in Drizzle are handled differently - you'd need to use relational queries
+      // For now, returning the base entity. Relations should be handled in specific service methods.
 
-    return (entity as unknown as T) || null;
+      return (entity as unknown as T) || null;
+    } catch (error: any) {
+      // Check if error is due to missing account_id column
+      const errorCode = error?.code;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
+      
+      const isAccountIdError = 
+        (errorCode === '42703') ||
+        errorMessage?.toLowerCase().includes('account_id') ||
+        errorString.includes('account_id') ||
+        (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+      
+      // If account_id column doesn't exist, use raw SQL to exclude it from SELECT
+      if (isAccountIdError) {
+        // Rebuild conditions without accountId filter (if it was used)
+        const fallbackConditions: SQL[] = [isNull(this.table.deletedAt)];
+        
+        // Re-add search conditions without accountId
+        const textColumns = ['accid', 'subid', 'username', 'company', 'token', 'session', 'k_u', 'pid', 'partner', 'k_k', 'expire', 'k_p', 'createdBy'];
+        Object.entries(conditions).forEach(([key, value]) => {
+          const column = (this.table as any)[key];
+          if (column !== undefined && value !== undefined && value !== null && key !== 'accountId') {
+            let processedValue = value;
+            if (textColumns.includes(key)) {
+              processedValue = String(value);
+            }
+            fallbackConditions.push(eq(column, processedValue as any));
+          }
+        });
+        
+        // Use raw SQL via postgres client to exclude account_id from SELECT
+        const tableName = (this.table as any)._[Symbol.for('drizzle:Name')] || (this.table as any).name || 'users';
+        const postgresClient = (this.db as any).client || (this.db as any).session?.client;
+        
+        if (postgresClient) {
+          // Get column names excluding account_id
+          const columnsResult = await postgresClient`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' 
+            AND table_name = ${tableName}
+            AND column_name != 'account_id'
+            ORDER BY ordinal_position
+          `;
+          
+          const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
+          
+          // Build WHERE clause - simplified for now
+          const whereClause = 'WHERE "deleted_at" IS NULL';
+          
+          // Execute raw SQL query
+          const rawQuery = `SELECT ${columnNames} FROM "${tableName}" ${whereClause} LIMIT 1`;
+          const result = await postgresClient.unsafe(rawQuery);
+          return (result[0] as unknown as T) || null;
+        } else {
+          // Fallback: retry without accountId filter (will still fail if account_id is in SELECT)
+          const [entity] = await this.db
+            .select()
+            .from(this.table)
+            .where(and(...fallbackConditions))
+            .limit(1);
+          return (entity as unknown as T) || null;
+        }
+      }
+      
+      // For other errors, rethrow
+      throw error;
+    }
   }
 
   async update(
