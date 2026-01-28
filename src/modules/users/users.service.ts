@@ -120,7 +120,7 @@ export class UsersService extends BaseService<User> {
     }
 
     // Get total count
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    let whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     let total: number;
     
     try {
