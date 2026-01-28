@@ -22,14 +22,20 @@ export class BaseService<T extends BaseEntity> {
    * Check if the table has an accountId column
    */
   private hasAccountIdColumn(): boolean {
-    return (this.table as any).accountId !== undefined;
+    const accountIdColumn = (this.table as any).accountId;
+    return accountIdColumn !== undefined && accountIdColumn !== null;
   }
 
   /**
    * Get the accountId column from the table
+   * Throws error if column doesn't exist (accountId is mandatory)
    */
   private getAccountIdColumn(): any {
-    return (this.table as any).accountId;
+    const accountIdColumn = (this.table as any).accountId;
+    if (!accountIdColumn) {
+      throw new Error(`accountId column not found in table. Run migrations to add account_id column.`);
+    }
+    return accountIdColumn;
   }
 
   async create(
@@ -68,21 +74,36 @@ export class BaseService<T extends BaseEntity> {
 
     // Automatically filter by accountId if the table has the column and accountId is provided
     if (this.hasAccountIdColumn() && options?.accountId !== undefined) {
-      conditions.push(eq(this.getAccountIdColumn(), options.accountId));
-      useAccountIdFilter = true;
+      try {
+        const accountIdColumn = this.getAccountIdColumn();
+        if (accountIdColumn) {
+          conditions.push(eq(accountIdColumn, options.accountId));
+          useAccountIdFilter = true;
+        }
+      } catch (error) {
+        // If accountId column doesn't exist, log warning but don't fail
+        // This should not happen if migrations ran, but handle gracefully
+        console.warn('accountId column not found, skipping accountId filter:', error);
+      }
     }
 
     // Add search functionality
     if (query.search && query.searchBy && query.searchBy.length > 0) {
       const searchConditions = query.searchBy
         .map((field) => {
-          const column = (this.table as any)[field];
-          if (column) {
-            return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+          try {
+            const column = (this.table as any)[field];
+            // Check if column exists and is a valid Drizzle column object
+            if (column && typeof column === 'object' && column.name !== undefined) {
+              return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+            }
+            return null;
+          } catch (error) {
+            // If column access fails, skip this field
+            return null;
           }
-          return null;
         })
-        .filter(Boolean) as SQL[];
+        .filter((condition): condition is SQL => condition !== null);
 
       if (searchConditions.length > 0) {
         conditions.push(sql`(${sql.join(searchConditions, sql` OR `)})`);
@@ -93,9 +114,15 @@ export class BaseService<T extends BaseEntity> {
     let orderByClause: any;
     if (query.sortBy && query.sortBy.length > 0) {
       const [field, direction] = query.sortBy[0];
-      const column = (this.table as any)[field];
-      if (column) {
-        orderByClause = direction === 'DESC' ? desc(column) : asc(column);
+      try {
+        const column = (this.table as any)[field];
+        // Check if column exists and is a valid Drizzle column object
+        if (column && typeof column === 'object' && column.name !== undefined) {
+          orderByClause = direction === 'DESC' ? desc(column) : asc(column);
+        }
+      } catch (error) {
+        // If column access fails, skip sorting for this field
+        // Will use default ordering if no valid sort field found
       }
     }
 

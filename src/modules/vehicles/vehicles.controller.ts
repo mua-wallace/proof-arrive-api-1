@@ -49,9 +49,15 @@ export class VehiclesController {
         : undefined,
     };
 
+    // Convert accid to number for accountId (multi-tenant filtering)
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+
     const options = {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
-      accountId: credentials.accid, // Multi-tenant: filter by account ID
+      accountId: accountIdNum, // Multi-tenant: filter by account ID
     };
 
     return this.vehiclesService.findAll(query, options);

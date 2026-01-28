@@ -45,36 +45,60 @@ export class UsersService extends BaseService<User> {
 
     // Automatically filter by accountId if provided (mandatory for multi-tenant isolation)
     if (options?.accountId !== undefined) {
-      conditions.push(eq(schema.users.accountId, options.accountId));
+      try {
+        // Check if accountId column exists before using it
+        if (schema.users.accountId && typeof schema.users.accountId === 'object' && schema.users.accountId.name !== undefined) {
+          conditions.push(eq(schema.users.accountId, options.accountId));
+        } else {
+          throw new Error('accountId column not found in users schema. Run migrations to add account_id column.');
+        }
+      } catch (error) {
+        // If accountId column doesn't exist, throw error (migrations must be run)
+        throw new Error(`accountId column missing: ${error instanceof Error ? error.message : 'Unknown error'}. Please run migrations.`);
+      }
     }
 
     // Add search functionality
     if (query.search && query.searchBy && query.searchBy.length > 0) {
       const searchConditions = query.searchBy
         .map((field) => {
-          const column = (schema.users as any)[field];
-          if (column) {
-            return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+          try {
+            const column = (schema.users as any)[field];
+            // Check if column exists and is a valid Drizzle column object
+            if (column && typeof column === 'object' && column.name !== undefined) {
+              return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+            }
+            return null;
+          } catch (error) {
+            // If column access fails, skip this field
+            return null;
           }
-          return null;
         })
-        .filter(Boolean);
+        .filter((condition): condition is any => condition !== null);
 
       if (searchConditions.length > 0) {
-        conditions.push(sql`(${sql.join(searchConditions.filter(Boolean) as any[], sql` OR `)})`);
+        conditions.push(sql`(${sql.join(searchConditions, sql` OR `)})`);
       }
     }
 
     // Build order by
     let orderByClause: any;
     if (query.sortBy && query.sortBy.length > 0) {
-      const sortFields = query.sortBy.map(([field, direction]) => {
-        const column = (schema.users as any)[field];
-        if (column) {
-          return direction === 'DESC' ? desc(column) : asc(column);
-        }
-        return null;
-      }).filter(Boolean);
+      const sortFields = query.sortBy
+        .map(([field, direction]) => {
+          try {
+            const column = (schema.users as any)[field];
+            // Check if column exists and is a valid Drizzle column object
+            if (column && typeof column === 'object' && column.name !== undefined) {
+              return direction === 'DESC' ? desc(column) : asc(column);
+            }
+            return null;
+          } catch (error) {
+            // If column access fails, skip this field
+            return null;
+          }
+        })
+        .filter((field): field is any => field !== null);
 
       if (sortFields.length > 0) {
         orderByClause = sortFields;
