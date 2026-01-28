@@ -140,7 +140,17 @@ export class UsersSyncService {
 
       return user.length > 0;
     } catch (error) {
-      this.logger.error(`Error checking if user exists (accid=${accidStr}):`, error instanceof Error ? error.message : error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      const errorCode = (error as any)?.code;
+      const errorDetail = (error as any)?.detail;
+      
+      this.logger.error(`Error checking if user exists (accid=${accidStr}):`);
+      this.logger.error(`  Message: ${errorMessage}`);
+      if (errorCode) this.logger.error(`  Code: ${errorCode}`);
+      if (errorDetail) this.logger.error(`  Detail: ${errorDetail}`);
+      if (errorStack) this.logger.error(`  Stack: ${errorStack}`);
+      
       throw error;
     }
   }
