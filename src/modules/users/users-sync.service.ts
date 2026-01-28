@@ -104,7 +104,17 @@ export class UsersSyncService {
         await this.dbConnection.insert(schema.users).values(userRecord).execute();
       } catch (insertError: any) {
         // If account_id column doesn't exist, try without it
-        if (insertError?.code === '42703' && insertError?.message?.includes('account_id')) {
+        const insertErrorCode = insertError?.code;
+        const insertErrorMessage = insertError instanceof Error ? insertError.message : String(insertError);
+        const insertErrorString = String(insertError).toLowerCase();
+        
+        const isAccountIdInsertError = 
+          (insertErrorCode === '42703') ||
+          insertErrorMessage?.toLowerCase().includes('account_id') ||
+          insertErrorString.includes('account_id') ||
+          (insertErrorMessage?.includes('column') && insertErrorMessage?.includes('account_id'));
+        
+        if (isAccountIdInsertError) {
           this.logger.warn(
             `account_id column not found, inserting user without accountId (accid=${accidStr}). ` +
             `Run migrations to add account_id column for multi-tenant support.`
@@ -144,12 +154,20 @@ export class UsersSyncService {
         )
         .execute();
     } catch (error: any) {
-      // Check if error is due to missing account_id column (PostgreSQL error code 42703)
+      // Check if error is due to missing account_id column
       const errorCode = error?.code;
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
       
-      // PostgreSQL error code 42703 = "undefined column"
-      if (errorCode === '42703' && errorMessage?.includes('account_id')) {
+      // Check multiple patterns for "column does not exist" error
+      const isAccountIdError = 
+        (errorCode === '42703') || // PostgreSQL error code for undefined column
+        errorMessage?.toLowerCase().includes('account_id') ||
+        errorString.includes('account_id') ||
+        (errorMessage?.includes('column') && errorMessage?.includes('account_id')) ||
+        (errorString.includes('column') && errorString.includes('account_id'));
+      
+      if (isAccountIdError) {
         this.logger.warn(
           `account_id column not found, falling back to accid-only update (accid=${accidStr}). ` +
           `Run migrations to add account_id column for multi-tenant support.`
@@ -199,12 +217,20 @@ export class UsersSyncService {
 
       return user.length > 0;
     } catch (error: any) {
-      // Check if error is due to missing account_id column (PostgreSQL error code 42703)
+      // Check if error is due to missing account_id column
       const errorCode = error?.code;
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
       
-      // PostgreSQL error code 42703 = "undefined column"
-      if (errorCode === '42703' && errorMessage?.includes('account_id')) {
+      // Check multiple patterns for "column does not exist" error
+      const isAccountIdError = 
+        (errorCode === '42703') || // PostgreSQL error code for undefined column
+        errorMessage?.toLowerCase().includes('account_id') ||
+        errorString.includes('account_id') ||
+        (errorMessage?.includes('column') && errorMessage?.includes('account_id')) ||
+        (errorString.includes('column') && errorString.includes('account_id'));
+      
+      if (isAccountIdError) {
         this.logger.warn(
           `account_id column not found, falling back to accid-only query (accid=${accidStr}). ` +
           `Run migrations to add account_id column for multi-tenant support.`

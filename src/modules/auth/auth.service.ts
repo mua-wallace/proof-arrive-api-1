@@ -63,7 +63,37 @@ export class AuthService {
     }
     
     // Check if user exists in database
-    const userExists = await this.usersSyncService.userExists(accidStr);
+    // Wrap in try-catch to handle database schema issues gracefully
+    let userExists = false;
+    try {
+      userExists = await this.usersSyncService.userExists(accidStr);
+    } catch (error: any) {
+      // If userExists fails due to missing account_id column, assume user doesn't exist
+      // This allows the login flow to continue and create the user
+      const errorCode = error?.code;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
+      
+      // Check multiple patterns for "column does not exist" error
+      const isAccountIdError = 
+        (errorCode === '42703') || // PostgreSQL error code for undefined column
+        errorMessage?.toLowerCase().includes('account_id') ||
+        errorString.includes('account_id') ||
+        (errorMessage?.includes('column') && errorMessage?.includes('account_id')) ||
+        (errorString.includes('column') && errorString.includes('account_id'));
+      
+      if (isAccountIdError) {
+        this.logger.warn(
+          `account_id column missing during userExists check (accid=${accidStr}). ` +
+          `Assuming user doesn't exist and will be created. Run migrations to add account_id column.`
+        );
+        userExists = false; // Assume user doesn't exist, will be created
+      } else {
+        // For other errors, log and rethrow
+        this.logger.error(`Error checking if user exists (accid=${accidStr}):`, error);
+        throw error;
+      }
+    }
     
     if (!userExists) {
       // User doesn't exist, trigger background sync job with full user data
@@ -87,7 +117,32 @@ export class AuthService {
       });
     } else {
       // User exists, update lastLoginAt
-      await this.usersSyncService.updateLastLogin(accidStr);
+      try {
+        await this.usersSyncService.updateLastLogin(accidStr);
+      } catch (error: any) {
+        // Log but don't fail login if updateLastLogin fails
+        const errorCode = error?.code;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorString = String(error).toLowerCase();
+        
+        // Check multiple patterns for "column does not exist" error
+        const isAccountIdError = 
+          (errorCode === '42703') ||
+          errorMessage?.toLowerCase().includes('account_id') ||
+          errorString.includes('account_id') ||
+          (errorMessage?.includes('column') && errorMessage?.includes('account_id')) ||
+          (errorString.includes('column') && errorString.includes('account_id'));
+        
+        if (isAccountIdError) {
+          this.logger.warn(
+            `account_id column missing during updateLastLogin (accid=${accidStr}). ` +
+            `Login will continue but lastLoginAt won't be updated. Run migrations to add account_id column.`
+          );
+        } else {
+          this.logger.error(`Error updating lastLoginAt (accid=${accidStr}):`, error);
+          // Don't throw - allow login to continue
+        }
+      }
       
       // Ensure default centers exist for this account (non-blocking, runs in background)
       // This handles cases where centers weren't seeded before (e.g., existing users)

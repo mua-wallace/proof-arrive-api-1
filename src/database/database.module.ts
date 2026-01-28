@@ -20,6 +20,15 @@ import { MigrationService } from './migration.service';
 
         const client = postgres(connectionString, {
           max: 10,
+          idle_timeout: 20,
+          connect_timeout: 10,
+          // Enable SSL if DATABASE_SSL env var is set
+          ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
+          // Better error handling
+          onnotice: () => {}, // Suppress notices
+          transform: {
+            undefined: null, // Transform undefined to null
+          },
         });
 
         return drizzle(client, {
