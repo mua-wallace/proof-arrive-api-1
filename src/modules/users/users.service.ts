@@ -29,8 +29,32 @@ export class UsersService extends BaseService<User> {
       if (options?.include && options.include.length > 0) {
         return await this.findAllWithRelations(query, options);
       }
+      // BaseService.findAll() already has fallback logic for missing account_id column
       return await super.findAll(query, options);
     } catch (error: any) {
+      // Check if error is due to missing account_id column (in case BaseService fallback didn't catch it)
+      const errorCode = error?.code;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
+      
+      const isAccountIdError = 
+        (errorCode === '42703') ||
+        errorMessage?.toLowerCase().includes('account_id') ||
+        errorString.includes('account_id') ||
+        (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+      
+      // If accountId filter was used and column doesn't exist, retry without it
+      if (isAccountIdError && options?.accountId !== undefined) {
+        this.logger.warn(
+          `account_id column missing during findAll (accountId=${options.accountId}). ` +
+          `Falling back to query without accountId filter. Run migrations to add account_id column.`
+        );
+        // Retry without accountId
+        const fallbackOptions = { ...options };
+        delete fallbackOptions.accountId;
+        return await super.findAll(query, fallbackOptions);
+      }
+      
       this.logger.error(`Failed to fetch users: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
@@ -144,9 +168,10 @@ export class UsersService extends BaseService<User> {
           .from(schema.users)
           .where(fallbackWhereClause);
         total = countResult;
-        // Update conditions for data query
+        // Update conditions and whereClause for data query
         conditions.length = 0;
         conditions.push(...fallbackConditions);
+        whereClause = fallbackWhereClause;
       } else {
         throw error;
       }
@@ -164,16 +189,63 @@ export class UsersService extends BaseService<User> {
     }
 
     // Get paginated results with relations
-    let data: any[];
+    let data: any[] = [];
     if (Object.keys(withRelations).length > 0) {
       // When relations are requested, first get the IDs that match the conditions
-      const matchingIds = await this.dbConnection
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(whereClause)
-        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-        .limit(limit)
-        .offset(offset);
+      let matchingIds: any[] = [];
+      try {
+        matchingIds = await this.dbConnection
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(whereClause)
+          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+          .limit(limit)
+          .offset(offset);
+      } catch (error: any) {
+        // Check if error is due to missing account_id column
+        const errorCode = error?.code;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorString = String(error).toLowerCase();
+        
+        const isAccountIdError = 
+          (errorCode === '42703') ||
+          errorMessage?.toLowerCase().includes('account_id') ||
+          errorString.includes('account_id') ||
+          (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+        
+        // If accountId filter was used and column doesn't exist, retry without it
+        if (isAccountIdError && useAccountIdFilter) {
+          const fallbackConditions: any[] = [sql`${schema.users.deletedAt} IS NULL`];
+          
+          // Add search functionality
+          if (query.search && query.searchBy && query.searchBy.length > 0) {
+            const searchConditions = query.searchBy
+              .map((field) => {
+                const column = (schema.users as any)[field];
+                if (column) {
+                  return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+                }
+                return null;
+              })
+              .filter(Boolean);
+
+            if (searchConditions.length > 0) {
+              fallbackConditions.push(sql`(${sql.join(searchConditions.filter(Boolean) as any[], sql` OR `)})`);
+            }
+          }
+          
+          const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
+          matchingIds = await this.dbConnection
+            .select({ id: schema.users.id })
+            .from(schema.users)
+            .where(fallbackWhereClause)
+            .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+            .limit(limit)
+            .offset(offset);
+        } else {
+          throw error;
+        }
+      }
 
       const ids = matchingIds.map((row: any) => row.id);
 
@@ -251,6 +323,11 @@ export class UsersService extends BaseService<User> {
         }
       }
     }
+    
+    // Ensure data is defined
+    if (!data) {
+      data = [];
+    }
 
     return {
       data: data as User[],
@@ -299,31 +376,83 @@ export class UsersService extends BaseService<User> {
       let user: any;
       if (Object.keys(withRelations).length > 0) {
         // Use relational query API when relations are requested
-        user = await this.dbConnection.query.users.findFirst({
-          where: (users: any, { eq: eqFn, and: andFn }: any) => {
-            const conditions = [eqFn(users.id, id)];
-            if (options?.accountId !== undefined) {
-              conditions.push(eqFn(users.accountId, options.accountId));
-            }
-            return conditions.length > 1 ? andFn(...conditions) : conditions[0];
-          },
-          with: withRelations,
-        });
+        try {
+          user = await this.dbConnection.query.users.findFirst({
+            where: (users: any, { eq: eqFn, and: andFn }: any) => {
+              const conditions = [eqFn(users.id, id)];
+              if (options?.accountId !== undefined) {
+                conditions.push(eqFn(users.accountId, options.accountId));
+              }
+              return conditions.length > 1 ? andFn(...conditions) : conditions[0];
+            },
+            with: withRelations,
+          });
+        } catch (error: any) {
+          // Check if error is due to missing account_id column
+          const errorCode = error?.code;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorString = String(error).toLowerCase();
+          
+          const isAccountIdError = 
+            (errorCode === '42703') ||
+            errorMessage?.toLowerCase().includes('account_id') ||
+            errorString.includes('account_id') ||
+            (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+          
+          // If accountId filter was used and column doesn't exist, retry without it
+          if (isAccountIdError && options?.accountId !== undefined) {
+            user = await this.dbConnection.query.users.findFirst({
+              where: (users: any, { eq: eqFn }: any) => eqFn(users.id, id),
+              with: withRelations,
+            });
+          } else {
+            throw error;
+          }
+        }
       } else {
         // Use standard query when no relations
         if (options?.accountId !== undefined) {
           // Custom query with accountId filter
-          const conditions = [
-            eq(schema.users.id, id),
-            eq(schema.users.accountId, options.accountId),
-            sql`${schema.users.deletedAt} IS NULL`,
-          ];
-          const [foundUser] = await this.dbConnection
-            .select()
-            .from(schema.users)
-            .where(and(...conditions))
-            .limit(1);
-          user = foundUser;
+          try {
+            const conditions = [
+              eq(schema.users.id, id),
+              eq(schema.users.accountId, options.accountId),
+              sql`${schema.users.deletedAt} IS NULL`,
+            ];
+            const [foundUser] = await this.dbConnection
+              .select()
+              .from(schema.users)
+              .where(and(...conditions))
+              .limit(1);
+            user = foundUser;
+          } catch (error: any) {
+            // Check if error is due to missing account_id column
+            const errorCode = error?.code;
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorString = String(error).toLowerCase();
+            
+            const isAccountIdError = 
+              (errorCode === '42703') ||
+              errorMessage?.toLowerCase().includes('account_id') ||
+              errorString.includes('account_id') ||
+              (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+            
+            // If accountId filter was used and column doesn't exist, retry without it
+            if (isAccountIdError) {
+              const fallbackConditions = [
+                eq(schema.users.id, id),
+                sql`${schema.users.deletedAt} IS NULL`,
+              ];
+              const [foundUser] = await this.dbConnection
+                .select()
+                .from(schema.users)
+                .where(and(...fallbackConditions))
+                .limit(1);
+              user = foundUser;
+            } else {
+              throw error;
+            }
+          }
         } else {
           user = await super.findOneById(id);
         }
@@ -334,6 +463,29 @@ export class UsersService extends BaseService<User> {
       }
       return user;
     } catch (error: any) {
+      // Check if error is due to missing account_id column
+      const errorCode = error?.code;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
+      
+      const isAccountIdError = 
+        (errorCode === '42703') ||
+        errorMessage?.toLowerCase().includes('account_id') ||
+        errorString.includes('account_id') ||
+        (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+      
+      // If accountId filter was used and column doesn't exist, retry without it
+      if (isAccountIdError && options?.accountId !== undefined) {
+        this.logger.warn(
+          `account_id column missing during findOneById (id=${id}, accountId=${options.accountId}). ` +
+          `Falling back to query without accountId filter. Run migrations to add account_id column.`
+        );
+        // Retry without accountId
+        const fallbackOptions = { ...options };
+        delete fallbackOptions.accountId;
+        return await this.findOneById(id, fallbackOptions);
+      }
+      
       this.logger.error(`Failed to fetch user with id=${id}: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
@@ -390,11 +542,35 @@ export class UsersService extends BaseService<User> {
     try {
       // Build search criteria with accountId filter
       const searchCriteria: any = { accid: accidStr };
+      let user: User | null = null;
+      
       if (accountIdNum !== undefined) {
         searchCriteria.accountId = accountIdNum;
+        try {
+          user = await this.findOneBy(searchCriteria);
+        } catch (error: any) {
+          // Check if error is due to missing account_id column
+          const errorCode = error?.code;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorString = String(error).toLowerCase();
+          
+          const isAccountIdError = 
+            (errorCode === '42703') ||
+            errorMessage?.toLowerCase().includes('account_id') ||
+            errorString.includes('account_id') ||
+            (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+          
+          // If accountId filter was used and column doesn't exist, retry without it
+          if (isAccountIdError) {
+            const fallbackCriteria = { accid: accidStr };
+            user = await this.findOneBy(fallbackCriteria);
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        user = await this.findOneBy(searchCriteria);
       }
-      
-      const user = await this.findOneBy(searchCriteria);
       if (!user) {
         throw new NotFoundException(`User with accid ${accidStr} not found`);
       }
@@ -421,11 +597,35 @@ export class UsersService extends BaseService<User> {
     try {
       // Build search criteria with accountId filter
       const searchCriteria: any = { accid: accidStr, subid: subidStr };
+      let user: User | null = null;
+      
       if (accountIdNum !== undefined) {
         searchCriteria.accountId = accountIdNum;
+        try {
+          user = await this.findOneBy(searchCriteria);
+        } catch (error: any) {
+          // Check if error is due to missing account_id column
+          const errorCode = error?.code;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorString = String(error).toLowerCase();
+          
+          const isAccountIdError = 
+            (errorCode === '42703') ||
+            errorMessage?.toLowerCase().includes('account_id') ||
+            errorString.includes('account_id') ||
+            (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+          
+          // If accountId filter was used and column doesn't exist, retry without it
+          if (isAccountIdError) {
+            const fallbackCriteria = { accid: accidStr, subid: subidStr };
+            user = await this.findOneBy(fallbackCriteria);
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        user = await this.findOneBy(searchCriteria);
       }
-      
-      const user = await this.findOneBy(searchCriteria);
       if (!user) {
         throw new NotFoundException(`User with accid ${accidStr} and subid ${subidStr} not found`);
       }
