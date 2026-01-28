@@ -196,6 +196,7 @@ export class VehiclesService extends BaseService<Vehicle> {
         }
 
         // Get paginated results with relations
+        let data: any[] = [];
         if (Object.keys(withRelations).length > 0) {
           // When relations are requested, first get the IDs that match the conditions
           const matchingIds = await this.dbConnection
