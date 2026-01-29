@@ -293,7 +293,7 @@ export class BaseService<T extends BaseEntity> {
         errorString.includes('account_id') ||
         (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
       
-      // If account_id column doesn't exist, use raw SQL query to exclude it from SELECT
+      // If account_id column doesn't exist, use Drizzle ORM with explicit column selection to exclude it
       // Drizzle's .select() includes all schema columns, so account_id is selected even if not filtered
       if (isAccountIdError) {
         // Rebuild conditions without accountId filter (if it was used)
@@ -331,44 +331,34 @@ export class BaseService<T extends BaseEntity> {
           .where(and(...fallbackConditions));
 
         // Get paginated data without accountId filter
-        // Drizzle's .select() includes all schema columns including account_id
-        // Use raw SQL via postgres client to exclude account_id from SELECT
-        const tableName = (this.table as any)._[Symbol.for('drizzle:Name')] || (this.table as any).name || 'users';
-        
-        // Access underlying postgres client from Drizzle
-        const postgresClient = (this.db as any).client || (this.db as any).session?.client;
+        // Use explicit column selection to exclude account_id if it doesn't exist
+        const whereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
         
         let data: any[];
-        if (postgresClient) {
-          // Get column names excluding account_id
-          const columnsResult = await postgresClient`
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_schema = 'public' 
-            AND table_name = ${tableName}
-            AND column_name != 'account_id'
-            ORDER BY ordinal_position
-          `;
+        try {
+          // Try with explicit column selection excluding account_id
+          const selectColumns: any = {};
+          const tableColumns = this.table as any;
           
-          const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
+          // Build select object with all columns except account_id
+          if (tableColumns.id) selectColumns.id = tableColumns.id;
+          if (tableColumns.createdAt) selectColumns.createdAt = tableColumns.createdAt;
+          if (tableColumns.updatedAt) selectColumns.updatedAt = tableColumns.updatedAt;
+          if (tableColumns.deletedAt) selectColumns.deletedAt = tableColumns.deletedAt;
           
-          // Build WHERE clause using Drizzle's SQL builder, then convert to string
-          const whereClauseObj = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
+          // Add other columns dynamically (excluding accountId)
+          Object.keys(tableColumns).forEach((key) => {
+            if (key !== 'accountId' && tableColumns[key] && typeof tableColumns[key] === 'object' && tableColumns[key].name) {
+              // Convert camelCase to the property name used in select
+              const selectKey = key;
+              selectColumns[selectKey] = tableColumns[key];
+            }
+          });
           
-          // Use Drizzle to build the WHERE clause, then execute raw SQL
-          // For simplicity, just use deleted_at IS NULL as WHERE clause
-          const whereClause = 'WHERE "deleted_at" IS NULL';
-          const orderBySql = (orderByClause !== undefined) ? ' ORDER BY "created_at" DESC' : '';
-          
-          // Execute raw SQL query
-          const query = `SELECT ${columnNames} FROM "${tableName}" ${whereClause}${orderBySql} LIMIT ${limit} OFFSET ${offset}`;
-          data = await postgresClient.unsafe(query);
-        } else {
-          // Fallback: try the query anyway (might work if account_id was added)
           let queryBuilder = this.db
-            .select()
+            .select(selectColumns)
             .from(this.table)
-            .where(and(...fallbackConditions))
+            .where(whereClause)
             .limit(limit)
             .offset(offset);
 
@@ -377,6 +367,43 @@ export class BaseService<T extends BaseEntity> {
           }
 
           data = await queryBuilder;
+        } catch (selectError: any) {
+          // If explicit selection fails, try with minimal columns
+          console.warn('Explicit column selection failed, trying minimal columns:', selectError?.message);
+          try {
+            const minimalSelect: any = {};
+            if (this.table.id) minimalSelect.id = this.table.id;
+            if (this.table.createdAt) minimalSelect.createdAt = this.table.createdAt;
+            if (this.table.updatedAt) minimalSelect.updatedAt = this.table.updatedAt;
+            if (this.table.deletedAt) minimalSelect.deletedAt = this.table.deletedAt;
+            
+            let queryBuilder = this.db
+              .select(minimalSelect)
+              .from(this.table)
+              .where(whereClause)
+              .limit(limit)
+              .offset(offset);
+
+            if (orderByClause) {
+              queryBuilder = queryBuilder.orderBy(orderByClause) as any;
+            }
+
+            data = await queryBuilder;
+          } catch (minimalError) {
+            // Last resort: try without explicit selection (will fail if columns missing)
+            let queryBuilder = this.db
+              .select()
+              .from(this.table)
+              .where(whereClause)
+              .limit(limit)
+              .offset(offset);
+
+            if (orderByClause) {
+              queryBuilder = queryBuilder.orderBy(orderByClause) as any;
+            }
+
+            data = await queryBuilder;
+          }
         }
         
         const totalPages = Math.ceil(totalItems / limit);
@@ -459,43 +486,33 @@ export class BaseService<T extends BaseEntity> {
         errorString.includes('account_id') ||
         (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
       
-      // If account_id column doesn't exist, use raw SQL to exclude it from SELECT
+      // If account_id column doesn't exist, use explicit column selection to exclude it
       if (isAccountIdError) {
         const fallbackConditions: SQL[] = [
           eq(this.table.id, id as any),
           isNull(this.table.deletedAt),
         ];
         
-        // Use raw SQL via postgres client to exclude account_id from SELECT
-        const tableName = (this.table as any)._[Symbol.for('drizzle:Name')] || (this.table as any).name || 'users';
-        const postgresClient = (this.db as any).client || (this.db as any).session?.client;
-        
-        if (postgresClient) {
-          // Get column names excluding account_id
-          const columnsResult = await postgresClient`
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_schema = 'public' 
-            AND table_name = ${tableName}
-            AND column_name != 'account_id'
-            ORDER BY ordinal_position
-          `;
+        try {
+          // Build select object with all columns except account_id
+          const selectColumns: any = {};
+          const tableColumns = this.table as any;
           
-          const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
+          // Add base columns
+          if (tableColumns.id) selectColumns.id = tableColumns.id;
+          if (tableColumns.createdAt) selectColumns.createdAt = tableColumns.createdAt;
+          if (tableColumns.updatedAt) selectColumns.updatedAt = tableColumns.updatedAt;
+          if (tableColumns.deletedAt) selectColumns.deletedAt = tableColumns.deletedAt;
           
-          // Execute raw SQL query
-          const rawQuery = `SELECT ${columnNames} FROM "${tableName}" WHERE "id" = $1 AND "deleted_at" IS NULL LIMIT 1`;
-          const result = await postgresClient.unsafe(rawQuery, [id]);
+          // Add other columns dynamically (excluding accountId)
+          Object.keys(tableColumns).forEach((key) => {
+            if (key !== 'accountId' && tableColumns[key] && typeof tableColumns[key] === 'object' && tableColumns[key].name) {
+              selectColumns[key] = tableColumns[key];
+            }
+          });
           
-          if (!result || result.length === 0) {
-            throw new NotFoundException(`Entity with id ${id} not found`);
-          }
-          
-          return result[0] as unknown as T;
-        } else {
-          // Fallback: retry without accountId filter (will still fail if account_id is in SELECT)
           const [entity] = await this.db
-            .select()
+            .select(selectColumns)
             .from(this.table)
             .where(and(...fallbackConditions))
             .limit(1);
@@ -505,6 +522,40 @@ export class BaseService<T extends BaseEntity> {
           }
 
           return entity as unknown as T;
+        } catch (selectError: any) {
+          // If explicit selection fails, try with minimal columns
+          try {
+            const minimalSelect: any = {};
+            if (this.table.id) minimalSelect.id = this.table.id;
+            if (this.table.createdAt) minimalSelect.createdAt = this.table.createdAt;
+            if (this.table.updatedAt) minimalSelect.updatedAt = this.table.updatedAt;
+            if (this.table.deletedAt) minimalSelect.deletedAt = this.table.deletedAt;
+            
+            const [entity] = await this.db
+              .select(minimalSelect)
+              .from(this.table)
+              .where(and(...fallbackConditions))
+              .limit(1);
+
+            if (!entity) {
+              throw new NotFoundException(`Entity with id ${id} not found`);
+            }
+
+            return entity as unknown as T;
+          } catch (minimalError) {
+            // Last resort: try without explicit selection
+            const [entity] = await this.db
+              .select()
+              .from(this.table)
+              .where(and(...fallbackConditions))
+              .limit(1);
+
+            if (!entity) {
+              throw new NotFoundException(`Entity with id ${id} not found`);
+            }
+
+            return entity as unknown as T;
+          }
         }
       }
       
@@ -651,75 +702,64 @@ export class BaseService<T extends BaseEntity> {
           }
         });
         
-        // Use raw SQL via postgres client to exclude problematic columns from SELECT
-        const tableName = (this.table as any)._[Symbol.for('drizzle:Name')] || (this.table as any).name || 'users';
-        const postgresClient = (this.db as any).client || (this.db as any).session?.client;
+        // Use explicit column selection to exclude problematic columns
+        const whereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
         
-        if (postgresClient) {
+        try {
+          // Build select object excluding accountId, email, role if they cause issues
+          const selectColumns: any = {};
+          const tableColumns = this.table as any;
+          
+          // Add base columns
+          if (tableColumns.id) selectColumns.id = tableColumns.id;
+          if (tableColumns.createdAt) selectColumns.createdAt = tableColumns.createdAt;
+          if (tableColumns.updatedAt) selectColumns.updatedAt = tableColumns.updatedAt;
+          if (tableColumns.deletedAt) selectColumns.deletedAt = tableColumns.deletedAt;
+          
+          // Add other columns dynamically (excluding problematic ones)
+          const excludeColumns = ['accountId', 'email', 'role', 'fullname'];
+          Object.keys(tableColumns).forEach((key) => {
+            if (!excludeColumns.includes(key) && tableColumns[key] && typeof tableColumns[key] === 'object' && tableColumns[key].name) {
+              selectColumns[key] = tableColumns[key];
+            }
+          });
+          
+          const [entity] = await this.db
+            .select(selectColumns)
+            .from(this.table)
+            .where(whereClause)
+            .limit(1);
+          
+          return (entity as unknown as T) || null;
+        } catch (selectError: any) {
+          // If explicit selection fails, try with minimal columns
           try {
-            // Get column names excluding account_id, email, role (if they don't exist)
-            const columnsResult = await postgresClient`
-              SELECT column_name 
-              FROM information_schema.columns 
-              WHERE table_schema = 'public' 
-              AND table_name = ${tableName}
-              ORDER BY ordinal_position
-            `;
+            const minimalSelect: any = {};
+            if (this.table.id) minimalSelect.id = this.table.id;
+            if (this.table.createdAt) minimalSelect.createdAt = this.table.createdAt;
+            if (this.table.updatedAt) minimalSelect.updatedAt = this.table.updatedAt;
+            if (this.table.deletedAt) minimalSelect.deletedAt = this.table.deletedAt;
             
-            // Filter out columns that might not exist
-            const existingColumns = columnsResult.map((row: any) => row.column_name);
-            const columnNames = existingColumns
-              .map((col: string) => `"${col}"`)
-              .join(', ');
+            const [entity] = await this.db
+              .select(minimalSelect)
+              .from(this.table)
+              .where(whereClause)
+              .limit(1);
             
-            // Build WHERE clause dynamically
-            const whereParts: string[] = ['"deleted_at" IS NULL'];
-            
-            // Add conditions for accid, subid, etc.
-            Object.entries(conditions).forEach(([key, value]) => {
-              if (key === 'accountId') return;
-              if (value === undefined || value === null) return;
-              
-              const dbColumnName = key.replace(/([A-Z])/g, '_$1').toLowerCase(); // Convert camelCase to snake_case
-              if (existingColumns.includes(dbColumnName)) {
-                const processedValue = textColumns.includes(key) ? String(value) : value;
-                whereParts.push(`"${dbColumnName}" = ${typeof processedValue === 'string' ? `'${processedValue.replace(/'/g, "''")}'` : processedValue}`);
-              }
-            });
-            
-            const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
-            
-            // Execute raw SQL query
-            const rawQuery = `SELECT ${columnNames} FROM "${tableName}" ${whereClause} LIMIT 1`;
-            const result = await postgresClient.unsafe(rawQuery);
-            return (result[0] as unknown as T) || null;
-          } catch (rawError: any) {
-            console.error('Raw SQL query failed:', rawError);
-            // Fallback: retry without accountId filter using Drizzle (might still fail if columns missing)
+            return (entity as unknown as T) || null;
+          } catch (minimalError) {
+            // Last resort: try without explicit selection
             try {
               const [entity] = await this.db
                 .select()
                 .from(this.table)
-                .where(and(...fallbackConditions))
+                .where(whereClause)
                 .limit(1);
               return (entity as unknown as T) || null;
             } catch (fallbackError) {
               // Last resort: throw original error
               throw error;
             }
-          }
-        } else {
-          // Fallback: retry without accountId filter (will still fail if account_id is in SELECT)
-          try {
-            const [entity] = await this.db
-              .select()
-              .from(this.table)
-              .where(and(...fallbackConditions))
-              .limit(1);
-            return (entity as unknown as T) || null;
-          } catch (fallbackError) {
-            // Last resort: throw original error
-            throw error;
           }
         }
       }

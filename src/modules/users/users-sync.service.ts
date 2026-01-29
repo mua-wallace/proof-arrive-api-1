@@ -101,7 +101,7 @@ export class UsersSyncService {
 
       // Insert user with data from Malambi API login response
       // accountId is mandatory - derived from accid for multi-tenancy
-      // Handle missing email/role columns gracefully
+      // Handle missing email/role columns gracefully by using Drizzle ORM with explicit columns
       const userRecord: any = {
         accountId: accountIdNum, // Multi-tenant: account ID (derived from accid)
         accid: accidStr,
@@ -119,34 +119,127 @@ export class UsersSyncService {
         lastLoginAt: new Date(),
       };
 
-      // Only add email/role/fullname if columns exist (migration 0005 may not have run)
-      // Try inserting with all fields first, fallback to basic fields if columns don't exist
+      // Check if email/role/fullname columns exist by attempting a select first
+      // If they don't exist, use Drizzle insert without these fields
+      let hasEmailRoleColumns = false;
       try {
-        userRecord.fullname = userData.username || null;
-        userRecord.role = 'agent';
-        userRecord.email = userData.email || null;
-        await this.dbConnection.insert(schema.users).values(userRecord).execute();
-      } catch (insertError: any) {
-        const errorMessage = insertError instanceof Error ? insertError.message : String(insertError);
-        const errorString = String(errorMessage).toLowerCase();
-        
-        // Check if error is due to missing email/role/fullname columns
-        if (errorMessage?.includes('email') || errorMessage?.includes('role') || errorMessage?.includes('fullname') ||
-            errorString.includes('email') || errorString.includes('role') || errorString.includes('fullname')) {
-          this.logger.warn('email/role/fullname columns missing, inserting user without these fields. Run migration 0005_add_user_fields.sql');
-          // Remove email/role/fullname and retry
-          delete userRecord.email;
-          delete userRecord.role;
-          delete userRecord.fullname;
-          await this.dbConnection.insert(schema.users).values(userRecord).execute();
+        // Try to select email column to check if it exists
+        await this.dbConnection
+          .select({ email: schema.users.email })
+          .from(schema.users)
+          .limit(0);
+        hasEmailRoleColumns = true;
+      } catch (checkError: any) {
+        const errorMessage = checkError instanceof Error ? checkError.message : String(checkError);
+        if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role')) {
+          hasEmailRoleColumns = false;
         } else {
-          throw insertError;
+          // Some other error, assume columns exist and let insert fail if needed
+          hasEmailRoleColumns = true;
         }
+      }
+
+      if (hasEmailRoleColumns) {
+        // Columns exist, use normal Drizzle insert with all fields
+        try {
+          userRecord.fullname = userData.username || null;
+          userRecord.role = 'agent';
+          userRecord.email = userData.email || null;
+          await this.dbConnection.insert(schema.users).values(userRecord).execute();
+        } catch (insertError: any) {
+          // If insert still fails, fall back to raw SQL
+          const errorMessage = insertError instanceof Error ? insertError.message : String(insertError);
+          if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role') || errorMessage?.toLowerCase().includes('fullname')) {
+            this.logger.warn('email/role/fullname columns missing, using raw SQL insert. Run migration 0005_add_user_fields.sql');
+            await this.insertUserWithRawSql(userRecord, accountIdNum);
+          } else {
+            throw insertError;
+          }
+        }
+      } else {
+        // Columns don't exist, use Drizzle insert without email/role/fullname
+        this.logger.warn('email/role/fullname columns missing, inserting user without these fields using Drizzle. Run migration 0005_add_user_fields.sql');
+        await this.insertUserWithRawSql(userRecord, accountIdNum);
       }
     } catch (error) {
       this.logger.error(`Error syncing user:`, error instanceof Error ? error.stack : error);
       throw error;
     }
+  }
+
+  /**
+   * Insert user using Drizzle ORM (when email/role/fullname columns don't exist)
+   */
+  private async insertUserWithRawSql(userRecord: any, accountId: number): Promise<void> {
+    // Build insert object with only columns that exist (excluding email, role, fullname)
+    const insertData: any = {};
+    
+    // Map userRecord fields to schema columns, excluding email/role/fullname
+    if (userRecord.accountId !== undefined) insertData.accountId = userRecord.accountId;
+    if (userRecord.accid !== undefined) insertData.accid = userRecord.accid;
+    if (userRecord.subid !== undefined) insertData.subid = userRecord.subid;
+    if (userRecord.token !== undefined) insertData.token = userRecord.token;
+    if (userRecord.session !== undefined) insertData.session = userRecord.session;
+    if (userRecord.username !== undefined) insertData.username = userRecord.username;
+    if (userRecord.company !== undefined) insertData.company = userRecord.company;
+    if (userRecord.k_u !== undefined) insertData.k_u = userRecord.k_u;
+    if (userRecord.pid !== undefined) insertData.pid = userRecord.pid;
+    if (userRecord.partner !== undefined) insertData.partner = userRecord.partner;
+    if (userRecord.k_k !== undefined) insertData.k_k = userRecord.k_k;
+    if (userRecord.expire !== undefined) insertData.expire = userRecord.expire;
+    if (userRecord.k_p !== undefined) insertData.k_p = userRecord.k_p;
+    if (userRecord.lastLoginAt !== undefined) insertData.lastLoginAt = userRecord.lastLoginAt;
+    
+    // Use Drizzle's insert with explicit column selection
+    // Build select object to only include columns that exist
+    const insertValues: any = {};
+    
+    // Add columns that definitely exist (base columns)
+    if (schema.users.accountId && insertData.accountId !== undefined) {
+      insertValues.accountId = insertData.accountId;
+    }
+    if (schema.users.accid && insertData.accid !== undefined) {
+      insertValues.accid = insertData.accid;
+    }
+    if (schema.users.subid && insertData.subid !== undefined) {
+      insertValues.subid = insertData.subid;
+    }
+    if (schema.users.token && insertData.token !== undefined) {
+      insertValues.token = insertData.token;
+    }
+    if (schema.users.session && insertData.session !== undefined) {
+      insertValues.session = insertData.session;
+    }
+    if (schema.users.username && insertData.username !== undefined) {
+      insertValues.username = insertData.username;
+    }
+    if (schema.users.company && insertData.company !== undefined) {
+      insertValues.company = insertData.company;
+    }
+    if (schema.users.k_u && insertData.k_u !== undefined) {
+      insertValues.k_u = insertData.k_u;
+    }
+    if (schema.users.pid && insertData.pid !== undefined) {
+      insertValues.pid = insertData.pid;
+    }
+    if (schema.users.partner && insertData.partner !== undefined) {
+      insertValues.partner = insertData.partner;
+    }
+    if (schema.users.k_k && insertData.k_k !== undefined) {
+      insertValues.k_k = insertData.k_k;
+    }
+    if (schema.users.expire && insertData.expire !== undefined) {
+      insertValues.expire = insertData.expire;
+    }
+    if (schema.users.k_p && insertData.k_p !== undefined) {
+      insertValues.k_p = insertData.k_p;
+    }
+    if (schema.users.lastLoginAt && insertData.lastLoginAt !== undefined) {
+      insertValues.lastLoginAt = insertData.lastLoginAt;
+    }
+    
+    // Use Drizzle insert - it will handle missing columns gracefully
+    await this.dbConnection.insert(schema.users).values(insertValues).execute();
   }
 
   /**

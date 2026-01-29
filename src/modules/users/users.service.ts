@@ -316,40 +316,71 @@ export class UsersService extends BaseService<User> {
               errorString.includes('account_id') ||
               (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
             
-            // If account_id column doesn't exist, use raw SQL to exclude it from SELECT
+            // If account_id column doesn't exist, use explicit column selection to exclude it
             if (isAccountIdError) {
-              // Use raw SQL via postgres client to exclude account_id from SELECT
-              const postgresClient = (this.dbConnection as any).client || (this.dbConnection as any).session?.client;
+              // Use Drizzle with explicit column selection excluding account_id
+              const fallbackConditions = [
+                eq(schema.users.id, id),
+                sql`${schema.users.deletedAt} IS NULL`,
+              ];
               
-              if (postgresClient) {
-                // Get column names excluding account_id
-                const columnsResult = await postgresClient`
-                  SELECT column_name 
-                  FROM information_schema.columns 
-                  WHERE table_schema = 'public' 
-                  AND table_name = 'users'
-                  AND column_name != 'account_id'
-                  ORDER BY ordinal_position
-                `;
+              try {
+                // Build select object excluding accountId
+                const selectColumns: any = {
+                  id: schema.users.id,
+                  createdAt: schema.users.createdAt,
+                  updatedAt: schema.users.updatedAt,
+                  deletedAt: schema.users.deletedAt,
+                  kU: schema.users.k_u,
+                  pid: schema.users.pid,
+                  subid: schema.users.subid,
+                  partner: schema.users.partner,
+                  kK: schema.users.k_k,
+                  expire: schema.users.expire,
+                  token: schema.users.token,
+                  session: schema.users.session,
+                  accid: schema.users.accid,
+                  company: schema.users.company,
+                  username: schema.users.username,
+                  kP: schema.users.k_p,
+                  lastLoginAt: schema.users.lastLoginAt,
+                };
                 
-                const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
+                // Add optional columns if they exist (email, role, fullname)
+                try {
+                  if (schema.users.email) selectColumns.email = schema.users.email;
+                } catch {}
+                try {
+                  if (schema.users.role) selectColumns.role = schema.users.role;
+                } catch {}
+                try {
+                  if (schema.users.fullname) selectColumns.fullname = schema.users.fullname;
+                } catch {}
                 
-                // Execute raw SQL query
-                const rawQuery = `SELECT ${columnNames} FROM "users" WHERE "id" = $1 AND "deleted_at" IS NULL LIMIT 1`;
-                const result = await postgresClient.unsafe(rawQuery, [id]);
-                user = result[0] || null;
-              } else {
-                // Fallback: try without accountId filter (will still fail if account_id is in SELECT)
-                const fallbackConditions = [
-                  eq(schema.users.id, id),
-                  sql`${schema.users.deletedAt} IS NULL`,
-                ];
                 const [foundUser] = await this.dbConnection
-                  .select()
+                  .select(selectColumns)
                   .from(schema.users)
                   .where(and(...fallbackConditions))
                   .limit(1);
-                user = foundUser;
+                user = foundUser || null;
+              } catch (selectError: any) {
+                // If explicit selection fails, try with minimal columns
+                const minimalSelect = {
+                  id: schema.users.id,
+                  createdAt: schema.users.createdAt,
+                  updatedAt: schema.users.updatedAt,
+                  deletedAt: schema.users.deletedAt,
+                  accid: schema.users.accid,
+                  username: schema.users.username,
+                  company: schema.users.company,
+                };
+                
+                const [foundUser] = await this.dbConnection
+                  .select(minimalSelect)
+                  .from(schema.users)
+                  .where(and(...fallbackConditions))
+                  .limit(1);
+                user = foundUser || null;
               }
             } else {
               throw error;
