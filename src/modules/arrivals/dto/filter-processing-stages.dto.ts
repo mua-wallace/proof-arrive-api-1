@@ -23,12 +23,18 @@ export class FilterProcessingStagesDto {
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({ description: 'Comma-separated fields to search in' })
+  @ApiPropertyOptional({ 
+    description: 'Comma-separated fields to search in. Available fields: stageType, status, notes',
+    example: 'stageType,status'
+  })
   @IsOptional()
   @IsString()
   searchBy?: string;
 
-  @ApiPropertyOptional({ description: 'Comma-separated sort fields (format: field:direction)' })
+  @ApiPropertyOptional({ 
+    description: 'Comma-separated sort fields (format: field:direction). Available fields: id, accountId, createdAt, updatedAt, arrivalId, stageType, status, startedAt, completedAt',
+    example: 'createdAt:DESC,status:ASC'
+  })
   @IsOptional()
   @IsString()
   sortBy?: string;
@@ -38,4 +44,3 @@ export class FilterProcessingStagesDto {
   @IsString()
   include?: string;
 }
-

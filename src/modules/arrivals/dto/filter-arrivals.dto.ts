@@ -23,12 +23,18 @@ export class FilterArrivalsDto {
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({ description: 'Comma-separated fields to search in' })
+  @ApiPropertyOptional({ 
+    description: 'Comma-separated fields to search in. Available fields: notes, status',
+    example: 'notes,status'
+  })
   @IsOptional()
   @IsString()
   searchBy?: string;
 
-  @ApiPropertyOptional({ description: 'Comma-separated sort fields (format: field:direction)' })
+  @ApiPropertyOptional({ 
+    description: 'Comma-separated sort fields (format: field:direction). Available fields: id, accountId, createdAt, updatedAt, vehicleId, centerId, agentId, status, arrivedAt',
+    example: 'arrivedAt:DESC,status:ASC'
+  })
   @IsOptional()
   @IsString()
   sortBy?: string;
@@ -38,4 +44,3 @@ export class FilterArrivalsDto {
   @IsString()
   include?: string;
 }
-

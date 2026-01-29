@@ -35,8 +35,8 @@ export class FilterUsersDto {
   search?: string;
 
   @ApiPropertyOptional({
-    example: 'username,company',
-    description: 'Comma-separated list of fields to search in',
+    example: 'username,company,email,fullname',
+    description: 'Comma-separated list of fields to search in. Available fields: username, company, email, fullname, accid',
   })
   @IsOptional()
   @IsString()
@@ -44,7 +44,7 @@ export class FilterUsersDto {
 
   @ApiPropertyOptional({
     example: 'createdAt:DESC,username:ASC',
-    description: 'Comma-separated list of fields to sort by (format: field:direction)',
+    description: 'Comma-separated list of fields to sort by (format: field:direction). Available fields: id, accountId, createdAt, updatedAt, deletedAt, username, company, email, role, fullname, accid, lastLoginAt',
   })
   @IsOptional()
   @IsString()
@@ -57,4 +57,3 @@ export class FilterUsersDto {
   @IsString()
   include?: string;
 }
-

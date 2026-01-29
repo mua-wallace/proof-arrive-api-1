@@ -96,12 +96,46 @@ export class VehiclesService extends BaseService<Vehicle> {
 
       // Get total count
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      const [{ count: total }] = await this.dbConnection
-        .select({ count: count() })
-        .from(schema.vehicles)
-        .where(whereClause);
+      let total: number;
+      try {
+        const [{ count: totalCount }] = await this.dbConnection
+          .select({ count: count() })
+          .from(schema.vehicles)
+          .where(whereClause);
+        total = totalCount;
+      } catch (countError: any) {
+        // If count fails due to missing account_id, retry without it
+        const errorMessage = countError instanceof Error ? countError.message : String(countError);
+        const errorCode = countError?.code;
+        const errorString = String(errorMessage).toLowerCase();
+        
+        const isAccountIdError = 
+          (errorCode === '42703') ||
+          errorString.includes('account_id') ||
+          (errorString.includes('column') && errorString.includes('does not exist') && errorString.includes('account'));
+        
+        if (isAccountIdError) {
+          this.logger.warn('account_id column missing during count, counting without accountId filter');
+          const fallbackConditions = conditions.filter((c: any) => {
+            try {
+              const conditionStr = JSON.stringify(c);
+              return !conditionStr.includes('account_id');
+            } catch {
+              return true;
+            }
+          });
+          const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
+          const [{ count: totalCount }] = await this.dbConnection
+            .select({ count: count() })
+            .from(schema.vehicles)
+            .where(fallbackWhereClause);
+          total = totalCount;
+        } else {
+          throw countError;
+        }
+      }
 
-        // Build relations object for Drizzle query API
+      // Build relations object for Drizzle query API
         const withRelations: any = {};
         if (options?.include) {
           if (options.include.includes('arrivals')) {
@@ -157,8 +191,110 @@ export class VehiclesService extends BaseService<Vehicle> {
               .limit(limit)
               .offset(offset);
           } catch (selectError: any) {
-            this.logger.error(`Failed to fetch vehicles: ${selectError?.message || 'Unknown error'}`, selectError?.stack);
-            throw selectError;
+            // Extract error details - Drizzle wraps PostgreSQL errors
+            const errorMessage = selectError instanceof Error ? selectError.message : String(selectError);
+            const errorCode = selectError?.code;
+            const errorStack = selectError instanceof Error ? selectError.stack : '';
+            
+            // Try to get the underlying PostgreSQL error
+            // Drizzle errors may have cause, originalError, or the error itself may be the PG error
+            const pgError = selectError?.cause || selectError?.originalError || selectError;
+            const pgErrorMessage = pgError instanceof Error ? pgError.message : String(pgError);
+            const pgErrorCode = pgError?.code;
+            const pgErrorString = String(pgErrorMessage).toLowerCase();
+            
+            // Log full error details for debugging
+            this.logger.error(`Failed to fetch vehicles: ${errorMessage}`);
+            if (pgErrorMessage !== errorMessage && pgErrorMessage) {
+              this.logger.error(`PostgreSQL error: ${pgErrorMessage}`);
+            }
+            if (pgErrorCode) {
+              this.logger.error(`PostgreSQL error code: ${pgErrorCode}`);
+            }
+            this.logger.error(`Stack trace:`, errorStack);
+            
+            // Check if error is due to missing account_id column
+            const isAccountIdError = 
+              (pgErrorCode === '42703') ||
+              (errorCode === '42703') ||
+              pgErrorString.includes('account_id') ||
+              errorMessage?.toLowerCase().includes('account_id') ||
+              (pgErrorString.includes('column') && pgErrorString.includes('does not exist') && pgErrorString.includes('account'));
+            
+            if (isAccountIdError) {
+              // Retry without account_id filter
+              this.logger.warn('account_id column missing in vehicles table, retrying without accountId filter. Run migrations to add account_id column.');
+              try {
+                // Remove account_id condition from conditions array
+                const fallbackConditions = conditions.filter((c: any) => {
+                  try {
+                    // Check if this condition uses account_id by examining the SQL or column name
+                    const conditionStr = JSON.stringify(c);
+                    if (conditionStr.includes('account_id')) {
+                      return false;
+                    }
+                    // Also check if it's an eq condition with accountId column
+                    if (c && typeof c === 'object') {
+                      // Check various ways the condition might reference account_id
+                      if (c.left?.name === 'account_id' || c.column?.name === 'account_id') {
+                        return false;
+                      }
+                    }
+                    return true;
+                  } catch {
+                    return true;
+                  }
+                });
+                const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
+                
+                // Also need to update total count without account_id filter
+                const [{ count: fallbackTotal }] = await this.dbConnection
+                  .select({ count: count() })
+                  .from(schema.vehicles)
+                  .where(fallbackWhereClause);
+                total = fallbackTotal;
+                
+                data = await this.dbConnection
+                  .select()
+                  .from(schema.vehicles)
+                  .where(fallbackWhereClause)
+                  .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+                  .limit(limit)
+                  .offset(offset);
+                
+                this.logger.warn(`Successfully fetched vehicles without accountId filter (total: ${total})`);
+              } catch (fallbackError: any) {
+                const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+                const fallbackPgError = fallbackError?.cause || fallbackError?.originalError || fallbackError;
+                const fallbackPgMessage = fallbackPgError instanceof Error ? fallbackPgError.message : String(fallbackPgError);
+                
+                this.logger.error(`Fallback query also failed: ${fallbackMessage}`);
+                if (fallbackPgMessage !== fallbackMessage && fallbackPgMessage) {
+                  this.logger.error(`Fallback PostgreSQL error: ${fallbackPgMessage}`);
+                }
+                // Re-throw with more context
+                throw new Error(
+                  `Failed to fetch vehicles: ${pgErrorMessage || errorMessage}. ` +
+                  `Fallback query also failed: ${fallbackPgMessage || fallbackMessage}. ` +
+                  `Please check database schema and run migrations.`
+                );
+              }
+            } else {
+              // Check if it's a general column error
+              const isColumnError = 
+                (pgErrorCode === '42703') ||
+                (errorCode === '42703') ||
+                (pgErrorString.includes('column') && pgErrorString.includes('does not exist'));
+              
+              if (isColumnError) {
+                throw new Error(
+                  `Database column error: ${pgErrorMessage || errorMessage}. ` +
+                  `This usually means migrations haven't completed. ` +
+                  `Please run migrations: npm run migrate or node scripts/run-migrations.js`
+                );
+              }
+              throw selectError;
+            }
           }
         }
 

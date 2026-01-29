@@ -35,8 +35,8 @@ export class FilterCentersDto {
   search?: string;
 
   @ApiPropertyOptional({
-    example: 'name,fullname,manager',
-    description: 'Comma-separated list of fields to search in',
+    example: 'name,fullname,manager,geozone,groupname',
+    description: 'Comma-separated list of fields to search in. Available fields: name, fullname, manager, geozone, groupname',
   })
   @IsOptional()
   @IsString()
@@ -44,7 +44,7 @@ export class FilterCentersDto {
 
   @ApiPropertyOptional({
     example: 'createdAt:DESC,name:ASC',
-    description: 'Comma-separated list of fields to sort by (format: field:direction)',
+    description: 'Comma-separated list of fields to sort by (format: field:direction). Available fields: id, accountId, createdAt, updatedAt, thirdPartyId, siteid, name, fullname, geozone, geozoneId, manager, groupid, groupname, sitetype, distance',
   })
   @IsOptional()
   @IsString()
@@ -57,4 +57,3 @@ export class FilterCentersDto {
   @IsString()
   include?: string;
 }
-

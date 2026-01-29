@@ -42,12 +42,18 @@ export class FilterExitsDto {
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({ description: 'Comma-separated fields to search in' })
+  @ApiPropertyOptional({ 
+    description: 'Comma-separated fields to search in. Available fields: exitType, destinationName, notes, status',
+    example: 'exitType,destinationName,notes'
+  })
   @IsOptional()
   @IsString()
   searchBy?: string;
 
-  @ApiPropertyOptional({ description: 'Comma-separated sort fields (format: field:direction)' })
+  @ApiPropertyOptional({ 
+    description: 'Comma-separated sort fields (format: field:direction). Available fields: id, accountId, createdAt, updatedAt, vehicleId, centerId, agentId, exitType, status, destinationCenterId, destinationName, exitedAt',
+    example: 'exitedAt:DESC,status:ASC'
+  })
   @IsOptional()
   @IsString()
   sortBy?: string;
@@ -57,4 +63,3 @@ export class FilterExitsDto {
   @IsString()
   include?: string;
 }
-
