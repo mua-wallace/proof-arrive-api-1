@@ -39,7 +39,16 @@ export class VehiclesService extends BaseService<Vehicle> {
 
       // Automatically filter by accountId if provided (mandatory for multi-tenant isolation)
       if (options?.accountId !== undefined) {
-        conditions.push(eq(schema.vehicles.accountId, options.accountId));
+        try {
+          const accountIdColumn = schema.vehicles.accountId;
+          if (accountIdColumn) {
+            conditions.push(eq(accountIdColumn, options.accountId));
+          } else {
+            this.logger.warn('accountId column not found in vehicles schema, skipping accountId filter');
+          }
+        } catch (error) {
+          this.logger.warn('Failed to access accountId column, skipping accountId filter:', error);
+        }
       }
 
       // Add search functionality
@@ -49,10 +58,17 @@ export class VehiclesService extends BaseService<Vehicle> {
             try {
               const column = (schema.vehicles as any)[field];
               // Check if column exists and is a valid Drizzle column object
-              if (column && typeof column === 'object' && column.name !== undefined) {
-                return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+              if (!column) {
+                return null;
               }
-              return null;
+              if (typeof column !== 'object') {
+                return null;
+              }
+              // Check for Drizzle column properties
+              if (!column.name && !column.columnType && !column.dataType) {
+                return null;
+              }
+              return sql`${column}::text ILIKE ${`%${query.search}%`}`;
             } catch (error) {
               // If column access fails, skip this field
               return null;
@@ -73,10 +89,17 @@ export class VehiclesService extends BaseService<Vehicle> {
             try {
               const column = (schema.vehicles as any)[field];
               // Check if column exists and is a valid Drizzle column object
-              if (column && typeof column === 'object' && column.name !== undefined) {
-                return direction === 'DESC' ? desc(column) : asc(column);
+              if (!column) {
+                return null;
               }
-              return null;
+              if (typeof column !== 'object') {
+                return null;
+              }
+              // Check for Drizzle column properties
+              if (!column.name && !column.columnType && !column.dataType) {
+                return null;
+              }
+              return direction === 'DESC' ? desc(column) : asc(column);
             } catch (error) {
               // If column access fails, skip this field
               return null;
@@ -318,6 +341,28 @@ export class VehiclesService extends BaseService<Vehicle> {
         },
       };
     } catch (error: any) {
+      // Check if error is due to Symbol error (undefined column access)
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
+      const errorStack = error instanceof Error ? error.stack : '';
+      
+      const isSymbolError = 
+        errorMessage?.includes('Symbol(drizzle:Name)') ||
+        errorMessage?.includes('Cannot read properties of undefined') ||
+        errorString.includes('symbol') ||
+        (errorStack && errorStack.includes('Symbol(drizzle:Name)'));
+      
+      if (isSymbolError) {
+        this.logger.error(
+          `Drizzle column access error in VehiclesService.findAll - likely using undefined column. ` +
+          `Error: ${errorMessage}`
+        );
+        throw new InternalServerErrorException(
+          `Invalid column reference in query. Please check that searchBy and sortBy fields exist in the vehicles schema. ` +
+          `Error: ${errorMessage}`
+        );
+      }
+      
       this.logger.error(`Failed to fetch vehicles: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
@@ -401,17 +446,51 @@ export class VehiclesService extends BaseService<Vehicle> {
     try {
       const conditions = Object.entries(requestData)
         .map(([key, value]) => {
-          const column = (schema.vehicles as any)[key];
-          if (column && value !== undefined) {
-            return eq(column, value as any);
+          try {
+            const column = (schema.vehicles as any)[key];
+            // Check if column exists and is a valid Drizzle column object
+            if (!column) {
+              this.logger.warn(`Column ${key} not found in vehicles schema, skipping`);
+              return null;
+            }
+            
+            // Verify it's actually a Drizzle column object
+            if (typeof column !== 'object') {
+              this.logger.warn(`Column ${key} is not a valid Drizzle column object, skipping`);
+              return null;
+            }
+            
+            // Check for Drizzle column properties - columns have a name property
+            if (!column.name && !column.columnType && !column.dataType) {
+              this.logger.warn(`Column ${key} does not have required Drizzle column properties, skipping`);
+              return null;
+            }
+            
+            if (value !== undefined && value !== null) {
+              return eq(column, value as any);
+            }
+            return null;
+          } catch (colError) {
+            // If column access fails, skip this field
+            this.logger.warn(`Failed to access column ${key}, skipping:`, colError);
+            return null;
           }
-          return null;
         })
         .filter(Boolean) as any[];
 
       // Automatically filter by accountId if provided
       if (accountId !== undefined) {
-        conditions.push(eq(schema.vehicles.accountId, accountId));
+        try {
+          // Check if accountId column exists before using it
+          const accountIdColumn = schema.vehicles.accountId;
+          if (accountIdColumn) {
+            conditions.push(eq(accountIdColumn, accountId));
+          } else {
+            this.logger.warn('accountId column not found in vehicles schema, skipping accountId filter');
+          }
+        } catch (error) {
+          this.logger.warn('Failed to access accountId column, skipping accountId filter:', error);
+        }
       }
 
       if (conditions.length === 0) {
@@ -429,6 +508,42 @@ export class VehiclesService extends BaseService<Vehicle> {
       }
       return vehicle as Vehicle;
     } catch (error: any) {
+      // Check if error is due to Symbol error or missing columns
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorString = String(error).toLowerCase();
+      const errorStack = error instanceof Error ? error.stack : '';
+      const errorCode = error?.code;
+      
+      const isSymbolError = 
+        errorMessage?.includes('Symbol(drizzle:Name)') ||
+        errorMessage?.includes('Cannot read properties of undefined') ||
+        errorString.includes('symbol') ||
+        (errorStack && errorStack.includes('Symbol(drizzle:Name)'));
+      
+      const isAccountIdError = 
+        (errorCode === '42703') ||
+        errorMessage?.toLowerCase().includes('account_id') ||
+        errorString.includes('account_id') ||
+        (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+      
+      // If Symbol error or accountId error, retry without accountId filter
+      if ((isSymbolError || isAccountIdError) && accountId !== undefined) {
+        this.logger.warn(
+          `account_id column missing or Symbol error during findOneBy (accountId=${accountId}). ` +
+          `Falling back to query without accountId filter. Run migrations to add account_id column.`
+        );
+        try {
+          // Retry without accountId
+          const fallbackOptions = { ...options };
+          delete fallbackOptions.accountId;
+          return await this.findOneBy(requestData, fallbackOptions);
+        } catch (fallbackError) {
+          // If fallback also fails, throw original error
+          this.logger.error(`Fallback query also failed: ${fallbackError?.message || 'Unknown error'}`);
+          throw error;
+        }
+      }
+      
       this.logger.error(`Failed to find vehicle by criteria: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(

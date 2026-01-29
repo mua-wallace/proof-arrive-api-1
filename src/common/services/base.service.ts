@@ -526,22 +526,58 @@ export class BaseService<T extends BaseEntity> {
 
     // Automatically filter by accountId if the table has the column and accountId is provided
     if (this.hasAccountIdColumn() && options?.accountId !== undefined) {
-      whereConditions.push(eq(this.getAccountIdColumn(), options.accountId));
+      try {
+        const accountIdColumn = this.getAccountIdColumn();
+        if (accountIdColumn) {
+          whereConditions.push(eq(accountIdColumn, options.accountId));
+        }
+      } catch (error) {
+        // If accountId column doesn't exist, skip it (will be handled in error handler)
+        console.warn('accountId column not found, skipping accountId filter:', error);
+      }
     }
 
     // Known text columns that should always be converted to strings
     const textColumns = ['accid', 'subid', 'username', 'company', 'token', 'session', 'k_u', 'pid', 'partner', 'k_k', 'expire', 'k_p', 'createdBy'];
 
     Object.entries(conditions).forEach(([key, value]) => {
-      const column = (this.table as any)[key];
-      if (column !== undefined && value !== undefined && value !== null) {
-        // Convert to string if it's a known text column (handle both numbers and string numbers)
-        let processedValue = value;
-        if (textColumns.includes(key)) {
-          // Always convert to string for text columns, regardless of input type
-          processedValue = String(value);
+      // Skip accountId if it's in conditions - it's handled separately via options
+      if (key === 'accountId') {
+        return;
+      }
+      
+      try {
+        const column = (this.table as any)[key];
+        // Check if column exists and is a valid Drizzle column object
+        if (!column) {
+          console.warn(`Column ${key} not found in schema, skipping`);
+          return;
         }
-        whereConditions.push(eq(column, processedValue as any));
+        
+        // Verify it's actually a Drizzle column object
+        if (typeof column !== 'object') {
+          console.warn(`Column ${key} is not a valid Drizzle column object, skipping`);
+          return;
+        }
+        
+        // Check for Drizzle column properties - columns have a name property
+        if (!column.name && !column.columnType && !column.dataType) {
+          console.warn(`Column ${key} does not have required Drizzle column properties, skipping`);
+          return;
+        }
+        
+        if (value !== undefined && value !== null) {
+          // Convert to string if it's a known text column (handle both numbers and string numbers)
+          let processedValue = value;
+          if (textColumns.includes(key)) {
+            // Always convert to string for text columns, regardless of input type
+            processedValue = String(value);
+          }
+          whereConditions.push(eq(column, processedValue as any));
+        }
+      } catch (error) {
+        // If column access fails, skip this field
+        console.warn(`Failed to access column ${key}, skipping:`, error);
       }
     });
 
@@ -557,67 +593,134 @@ export class BaseService<T extends BaseEntity> {
 
       return (entity as unknown as T) || null;
     } catch (error: any) {
-      // Check if error is due to missing account_id column
-      const errorCode = error?.code;
+      // Check if error is due to Symbol(drizzle:Name) error (undefined column access)
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorString = String(error).toLowerCase();
+      const errorStack = error instanceof Error ? error.stack : '';
       
+      const isSymbolError = 
+        errorMessage?.includes('Symbol(drizzle:Name)') ||
+        errorMessage?.includes('Cannot read properties of undefined') ||
+        errorString.includes('symbol') ||
+        (errorStack && errorStack.includes('Symbol(drizzle:Name)'));
+      
+      // Check if error is due to missing account_id column
+      const errorCode = error?.code;
       const isAccountIdError = 
         (errorCode === '42703') ||
         errorMessage?.toLowerCase().includes('account_id') ||
         errorString.includes('account_id') ||
         (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
       
-      // If account_id column doesn't exist, use raw SQL to exclude it from SELECT
-      if (isAccountIdError) {
+      // Check if error is due to missing email/role columns
+      const isEmailRoleError = 
+        errorMessage?.toLowerCase().includes('email') ||
+        errorMessage?.toLowerCase().includes('role') ||
+        (errorMessage?.includes('column') && (errorMessage?.includes('email') || errorMessage?.includes('role')));
+      
+      // If account_id column doesn't exist or Symbol error, use raw SQL to exclude problematic columns
+      if (isAccountIdError || isSymbolError || isEmailRoleError) {
         // Rebuild conditions without accountId filter (if it was used)
         const fallbackConditions: SQL[] = [isNull(this.table.deletedAt)];
         
-        // Re-add search conditions without accountId
+        // Re-add search conditions without accountId, with proper error handling
         const textColumns = ['accid', 'subid', 'username', 'company', 'token', 'session', 'k_u', 'pid', 'partner', 'k_k', 'expire', 'k_p', 'createdBy'];
         Object.entries(conditions).forEach(([key, value]) => {
-          const column = (this.table as any)[key];
-          if (column !== undefined && value !== undefined && value !== null && key !== 'accountId') {
-            let processedValue = value;
-            if (textColumns.includes(key)) {
-              processedValue = String(value);
+          // Skip accountId - it's handled separately
+          if (key === 'accountId') {
+            return;
+          }
+          
+          try {
+            const column = (this.table as any)[key];
+            // Check if column exists and is a valid Drizzle column object
+            if (!column || typeof column !== 'object' || (!column.name && !column.columnType && !column.dataType)) {
+              console.warn(`Column ${key} not found or invalid in schema, skipping`);
+              return;
             }
-            fallbackConditions.push(eq(column, processedValue as any));
+            
+            if (value !== undefined && value !== null) {
+              let processedValue = value;
+              if (textColumns.includes(key)) {
+                processedValue = String(value);
+              }
+              fallbackConditions.push(eq(column, processedValue as any));
+            }
+          } catch (colError) {
+            console.warn(`Failed to access column ${key}, skipping:`, colError);
           }
         });
         
-        // Use raw SQL via postgres client to exclude account_id from SELECT
+        // Use raw SQL via postgres client to exclude problematic columns from SELECT
         const tableName = (this.table as any)._[Symbol.for('drizzle:Name')] || (this.table as any).name || 'users';
         const postgresClient = (this.db as any).client || (this.db as any).session?.client;
         
         if (postgresClient) {
-          // Get column names excluding account_id
-          const columnsResult = await postgresClient`
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_schema = 'public' 
-            AND table_name = ${tableName}
-            AND column_name != 'account_id'
-            ORDER BY ordinal_position
-          `;
-          
-          const columnNames = columnsResult.map((row: any) => `"${row.column_name}"`).join(', ');
-          
-          // Build WHERE clause - simplified for now
-          const whereClause = 'WHERE "deleted_at" IS NULL';
-          
-          // Execute raw SQL query
-          const rawQuery = `SELECT ${columnNames} FROM "${tableName}" ${whereClause} LIMIT 1`;
-          const result = await postgresClient.unsafe(rawQuery);
-          return (result[0] as unknown as T) || null;
+          try {
+            // Get column names excluding account_id, email, role (if they don't exist)
+            const columnsResult = await postgresClient`
+              SELECT column_name 
+              FROM information_schema.columns 
+              WHERE table_schema = 'public' 
+              AND table_name = ${tableName}
+              ORDER BY ordinal_position
+            `;
+            
+            // Filter out columns that might not exist
+            const existingColumns = columnsResult.map((row: any) => row.column_name);
+            const columnNames = existingColumns
+              .map((col: string) => `"${col}"`)
+              .join(', ');
+            
+            // Build WHERE clause dynamically
+            const whereParts: string[] = ['"deleted_at" IS NULL'];
+            
+            // Add conditions for accid, subid, etc.
+            Object.entries(conditions).forEach(([key, value]) => {
+              if (key === 'accountId') return;
+              if (value === undefined || value === null) return;
+              
+              const dbColumnName = key.replace(/([A-Z])/g, '_$1').toLowerCase(); // Convert camelCase to snake_case
+              if (existingColumns.includes(dbColumnName)) {
+                const processedValue = textColumns.includes(key) ? String(value) : value;
+                whereParts.push(`"${dbColumnName}" = ${typeof processedValue === 'string' ? `'${processedValue.replace(/'/g, "''")}'` : processedValue}`);
+              }
+            });
+            
+            const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+            
+            // Execute raw SQL query
+            const rawQuery = `SELECT ${columnNames} FROM "${tableName}" ${whereClause} LIMIT 1`;
+            const result = await postgresClient.unsafe(rawQuery);
+            return (result[0] as unknown as T) || null;
+          } catch (rawError: any) {
+            console.error('Raw SQL query failed:', rawError);
+            // Fallback: retry without accountId filter using Drizzle (might still fail if columns missing)
+            try {
+              const [entity] = await this.db
+                .select()
+                .from(this.table)
+                .where(and(...fallbackConditions))
+                .limit(1);
+              return (entity as unknown as T) || null;
+            } catch (fallbackError) {
+              // Last resort: throw original error
+              throw error;
+            }
+          }
         } else {
           // Fallback: retry without accountId filter (will still fail if account_id is in SELECT)
-          const [entity] = await this.db
-            .select()
-            .from(this.table)
-            .where(and(...fallbackConditions))
-            .limit(1);
-          return (entity as unknown as T) || null;
+          try {
+            const [entity] = await this.db
+              .select()
+              .from(this.table)
+              .where(and(...fallbackConditions))
+              .limit(1);
+            return (entity as unknown as T) || null;
+          } catch (fallbackError) {
+            // Last resort: throw original error
+            throw error;
+          }
         }
       }
       

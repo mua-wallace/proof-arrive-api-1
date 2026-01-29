@@ -497,37 +497,46 @@ export class UsersService extends BaseService<User> {
     }
 
     try {
-      // Build search criteria with accountId filter
+      // Build search criteria (only accid and subid - accountId goes in options)
       const searchCriteria: any = { accid: accidStr, subid: subidStr };
       let user: User | null = null;
       
-      if (accountIdNum !== undefined) {
-        searchCriteria.accountId = accountIdNum;
-        try {
+      // Pass accountId via options, not in conditions
+      const options = accountIdNum !== undefined ? { accountId: accountIdNum } : undefined;
+      
+      try {
+        user = await this.findOneBy(searchCriteria, options);
+      } catch (error: any) {
+        // Check if error is due to missing account_id column or Symbol error
+        const errorCode = error?.code;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorString = String(error).toLowerCase();
+        const errorStack = error instanceof Error ? error.stack : '';
+        
+        const isAccountIdError = 
+          (errorCode === '42703') ||
+          errorMessage?.toLowerCase().includes('account_id') ||
+          errorString.includes('account_id') ||
+          (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
+        
+        const isSymbolError = 
+          errorMessage?.includes('Symbol(drizzle:Name)') ||
+          errorMessage?.includes('Cannot read properties of undefined') ||
+          errorString.includes('symbol') ||
+          (errorStack && errorStack.includes('Symbol(drizzle:Name)'));
+        
+        // If accountId filter was used and column doesn't exist, or Symbol error, retry without accountId
+        if ((isAccountIdError || isSymbolError) && accountIdNum !== undefined) {
+          this.logger.warn(
+            `account_id column missing or Symbol error during findByAccidAndSubid (accid=${accidStr}, subid=${subidStr}, accountId=${accountIdNum}). ` +
+            `Falling back to query without accountId filter. Run migrations to add account_id column.`
+          );
           user = await this.findOneBy(searchCriteria);
-        } catch (error: any) {
-          // Check if error is due to missing account_id column
-          const errorCode = error?.code;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          const errorString = String(error).toLowerCase();
-          
-          const isAccountIdError = 
-            (errorCode === '42703') ||
-            errorMessage?.toLowerCase().includes('account_id') ||
-            errorString.includes('account_id') ||
-            (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
-          
-          // If accountId filter was used and column doesn't exist, retry without it
-          if (isAccountIdError) {
-            const fallbackCriteria = { accid: accidStr, subid: subidStr };
-            user = await this.findOneBy(fallbackCriteria);
-          } else {
-            throw error;
-          }
+        } else {
+          throw error;
         }
-      } else {
-        user = await this.findOneBy(searchCriteria);
       }
+      
       if (!user) {
         throw new NotFoundException(`User with accid ${accidStr} and subid ${subidStr} not found`);
       }
