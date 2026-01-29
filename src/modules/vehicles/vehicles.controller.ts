@@ -232,13 +232,14 @@ export class VehiclesController {
       throw new BadRequestException(`Invalid vehicle ID: ${id}`);
     }
 
+    // Convert accid to number for accountId (do this once before try block)
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+
     try {
       // First, try to find by internal database ID
-      // Convert accid to number for accountId
-      const accountIdNum = Number(credentials.accid);
-      if (isNaN(accountIdNum) || accountIdNum <= 0) {
-        throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
-      }
       vehicle = await this.vehiclesService.findOneById(numericId, {
         accountId: accountIdNum,
       });
@@ -260,11 +261,6 @@ export class VehiclesController {
       }
     }
 
-    // Convert accid to number for accountId
-    const accountIdNum = Number(credentials.accid);
-    if (isNaN(accountIdNum) || accountIdNum <= 0) {
-      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
-    }
     // Generate QR code
     const qrCodeResult = await this.qrCodeService.generateQrCode(
       vehicle.thirdPartyId,
@@ -303,13 +299,14 @@ export class VehiclesController {
       throw new BadRequestException(`Invalid vehicle ID: ${id}`);
     }
 
+    // Convert accid to number for accountId (do this once before try block)
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+
     try {
       // First, try to find by internal database ID
-      // Convert accid to number for accountId
-      const accountIdNum = Number(credentials.accid);
-      if (isNaN(accountIdNum) || accountIdNum <= 0) {
-        throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
-      }
       vehicle = await this.vehiclesService.findOneById(numericId, {
         accountId: accountIdNum,
       });
@@ -331,11 +328,6 @@ export class VehiclesController {
       }
     }
 
-    // Convert accid to number for accountId
-    const accountIdNum = Number(credentials.accid);
-    if (isNaN(accountIdNum) || accountIdNum <= 0) {
-      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
-    }
     // Regenerate QR code
     const qrCodeResult = await this.qrCodeService.regenerateQrCode(
       vehicle.thirdPartyId,

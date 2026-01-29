@@ -112,7 +112,7 @@ export class CentersController {
     // Convert accid to number for accountId (multi-tenant filtering)
     const accountIdNum = credentials?.accid ? Number(credentials.accid) : undefined;
     if (accountIdNum !== undefined && (isNaN(accountIdNum) || accountIdNum <= 0)) {
-      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+      throw new BadRequestException(`Invalid account ID: ${credentials?.accid || 'undefined'}`);
     }
 
     const options = {

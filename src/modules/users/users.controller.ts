@@ -74,10 +74,16 @@ export class UsersController {
   async getMe(
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<User> {
+    // Convert accid to number for accountId (multi-tenant filtering)
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    
     return this.usersService.findByAccidAndSubid(
       String(credentials.accid),
       String(credentials.subid),
-      Number(credentials.accid), // Multi-tenant: filter by account ID
+      accountIdNum, // Multi-tenant: filter by account ID
     );
   }
 
@@ -93,17 +99,23 @@ export class UsersController {
     @Body() updateDto: UpdateUserDto,
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<User> {
+    // Convert accid to number for accountId (multi-tenant filtering)
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    
     // Get current user to find their ID
     const currentUser = await this.usersService.findByAccidAndSubid(
       String(credentials.accid),
       String(credentials.subid),
-      Number(credentials.accid),
+      accountIdNum,
     );
     
     return this.usersService.update(
       currentUser.id,
       updateDto,
-      Number(credentials.accid),
+      accountIdNum,
     );
   }
 
@@ -118,9 +130,18 @@ export class UsersController {
     @Query('include') include?: string,
     @CurrentUserCredentials() credentials?: Credentials,
   ): Promise<User> {
+    // Convert accid to number for accountId (multi-tenant filtering) if credentials provided
+    let accountIdNum: number | undefined;
+    if (credentials?.accid) {
+      accountIdNum = Number(credentials.accid);
+      if (isNaN(accountIdNum) || accountIdNum <= 0) {
+        throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+      }
+    }
+    
     const options = {
       include: include ? include.split(',') : undefined,
-      accountId: credentials ? Number(credentials.accid) : undefined, // Multi-tenant: filter by account ID
+      accountId: accountIdNum, // Multi-tenant: filter by account ID
     };
     return this.usersService.findOneById(id, options);
   }
@@ -138,7 +159,13 @@ export class UsersController {
     @Body() updateDto: UpdateUserDto,
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<User> {
-    return this.usersService.update(id, updateDto, Number(credentials.accid));
+    // Convert accid to number for accountId (multi-tenant filtering)
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    
+    return this.usersService.update(id, updateDto, accountIdNum);
   }
 
   @Delete(':id')
