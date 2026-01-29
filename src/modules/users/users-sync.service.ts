@@ -40,9 +40,12 @@ export class UsersSyncService {
       const subidStr = String(userData.subid);
       
       // Convert accid (string) to accountId (number) for multi-tenancy
+      // Note: accountId can be the same for multiple users (multi-tenant)
+      // Multiple users/agents can belong to the same account
       const accountIdNum = Number(accidStr);
       
-      // Check if user already exists for this accountId
+      // Check if user already exists - only check by accid (not accountId)
+      // Multiple users can have the same accountId, but accid should be unique per user
       // Use sql template to explicitly cast the parameter as text for accid
       let existingUser: any[] = [];
       try {
@@ -50,10 +53,7 @@ export class UsersSyncService {
           .select()
           .from(schema.users)
           .where(
-            and(
-              sql`${schema.users.accid} = ${accidStr}::text`,
-              eq(schema.users.accountId, accountIdNum),
-            ),
+            sql`${schema.users.accid} = ${accidStr}::text`,
           )
           .limit(1);
       } catch (error: any) {
@@ -84,10 +84,7 @@ export class UsersSyncService {
             })
             .from(schema.users)
             .where(
-              and(
-                sql`${schema.users.accid} = ${accidStr}::text`,
-                eq(schema.users.accountId, accountIdNum),
-              ),
+              sql`${schema.users.accid} = ${accidStr}::text`,
             )
             .limit(1);
         } else {
@@ -244,11 +241,10 @@ export class UsersSyncService {
 
   /**
    * Update lastLoginAt timestamp for existing user
-   * accountId is mandatory for multi-tenant isolation
+   * Updates by accid only (not accountId) - multiple users can have same accountId
    */
   async updateLastLogin(accid: string | number): Promise<void> {
     const accidStr = String(accid);
-    const accountIdNum = Number(accidStr);
     
     await this.dbConnection
       .update(schema.users)
@@ -257,35 +253,29 @@ export class UsersSyncService {
         updatedAt: new Date(),
       })
       .where(
-        and(
-          sql`${schema.users.accid} = ${accidStr}::text`,
-          eq(schema.users.accountId, accountIdNum),
-        ),
+        sql`${schema.users.accid} = ${accidStr}::text`,
       )
       .execute();
   }
 
   /**
-   * Check if user exists in database for the given accountId
-   * accountId is mandatory for multi-tenant isolation
+   * Check if user exists in database by accid
+   * Note: Multiple users can have the same accountId (multi-tenant)
+   * This method checks by accid only, not accountId
    */
   async userExists(accid: number | string): Promise<boolean> {
     // Explicitly convert to string and ensure it's treated as a string type
     // This is critical because accid is a text column in the database
     const accidStr: string = typeof accid === 'number' ? accid.toString() : String(accid);
-    const accountIdNum = Number(accidStr);
     
-    // Query with account_id for multi-tenant isolation
+    // Query by accid only (not accountId) - multiple users can have same accountId
     // Handle missing email/role columns gracefully
     try {
       const user = await this.dbConnection
         .select()
         .from(schema.users)
         .where(
-          and(
-            sql`${schema.users.accid} = ${accidStr}::text`,
-            eq(schema.users.accountId, accountIdNum),
-          ),
+          sql`${schema.users.accid} = ${accidStr}::text`,
         )
         .limit(1);
 
@@ -318,10 +308,7 @@ export class UsersSyncService {
           })
           .from(schema.users)
           .where(
-            and(
-              sql`${schema.users.accid} = ${accidStr}::text`,
-              eq(schema.users.accountId, accountIdNum),
-            ),
+            sql`${schema.users.accid} = ${accidStr}::text`,
           )
           .limit(1);
 
