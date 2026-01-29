@@ -160,10 +160,85 @@ if [ "$MIGRATION_SUCCESS" = false ]; then
   echo "Or connect to the container and run:"
   echo "  docker exec -it <container-name> node scripts/run-migrations.js"
   echo ""
+else
+  # Verify critical migrations completed successfully
+  echo ""
+  echo "=== Verifying Critical Migrations ==="
+  VERIFICATION_FAILED=false
+  
+  # Check if account_id column exists in users table
+  if node -e "
+    const { Client } = require('pg');
+    const client = new Client({
+      host: process.env.DATABASE_HOST,
+      port: parseInt(process.env.DATABASE_PORT || '5432'),
+      user: process.env.DATABASE_USERNAME || 'postgres',
+      password: process.env.DATABASE_PASSWORD,
+      database: process.env.DATABASE_NAME,
+    });
+    client.connect()
+      .then(() => client.query(\"SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='account_id'\"))
+      .then(result => {
+        if (result.rows.length === 0) {
+          console.log('⚠️  WARNING: account_id column missing in users table');
+          process.exit(1);
+        } else {
+          console.log('✓ account_id column exists in users table');
+        }
+        return client.query(\"SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='vehicles' AND column_name='account_id'\");
+      })
+      .then(result => {
+        if (result.rows.length === 0) {
+          console.log('⚠️  WARNING: account_id column missing in vehicles table');
+          process.exit(1);
+        } else {
+          console.log('✓ account_id column exists in vehicles table');
+        }
+        return client.query(\"SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='vehicles' AND column_name='qr_code'\");
+      })
+      .then(result => {
+        if (result.rows.length === 0) {
+          console.log('⚠️  WARNING: qr_code column missing in vehicles table');
+          process.exit(1);
+        } else {
+          console.log('✓ qr_code column exists in vehicles table');
+        }
+        return client.query(\"SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name IN ('email', 'role')\");
+      })
+      .then(result => {
+        if (result.rows.length < 2) {
+          console.log('⚠️  WARNING: email or role columns missing in users table');
+          process.exit(1);
+        } else {
+          console.log('✓ email and role columns exist in users table');
+        }
+        client.end();
+        process.exit(0);
+      })
+      .catch(err => {
+        console.error('✗ Verification failed:', err.message);
+        client.end();
+        process.exit(1);
+      });
+  " 2>&1; then
+    echo "✅ All critical migrations verified successfully!"
+  else
+    VERIFICATION_EXIT_CODE=$?
+    echo ""
+    echo "⚠️  WARNING: Migration verification failed (exit code: $VERIFICATION_EXIT_CODE)"
+    echo "⚠️  Some columns may be missing. The application may encounter errors."
+    echo "⚠️  Please check the migration logs above and ensure all migrations completed."
+    VERIFICATION_FAILED=true
+  fi
 fi
 
 # Always start the application, even if migrations failed
 # This allows the app to start and show proper error messages
-echo "🚀 Starting application..."
+echo ""
+if [ "$MIGRATION_SUCCESS" = false ] || [ "$VERIFICATION_FAILED" = true ]; then
+  echo "⚠️  Starting application with migration warnings..."
+else
+  echo "🚀 Starting application..."
+fi
 exec node dist/main
 

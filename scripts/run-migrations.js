@@ -347,7 +347,7 @@ async function runMigrations() {
           console.log(`  ... and ${skippedCount - 3} more statements skipped`);
         }
         
-        console.log(`✓ ${file} applied successfully (${executedCount} statements executed)`);
+        console.log(`✓ ${file} applied successfully (${executedCount} statements executed, ${skippedCount} skipped)`);
       } catch (error) {
         // Check if error is because table/column already exists (safe to ignore)
         const errorMsg = error.message.toLowerCase();

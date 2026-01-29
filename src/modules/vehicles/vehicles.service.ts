@@ -174,36 +174,60 @@ export class VehiclesService extends BaseService<Vehicle> {
 
         // Get paginated results with relations
         let data: any[] = [];
+        let useStandardQuery = Object.keys(withRelations).length === 0;
+        
         if (Object.keys(withRelations).length > 0) {
-          // When relations are requested, first get the IDs that match the conditions
-          const matchingIds = await this.dbConnection
-            .select({ id: schema.vehicles.id })
-            .from(schema.vehicles)
-            .where(whereClause)
-            .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-            .limit(limit)
-            .offset(offset);
+          try {
+            // When relations are requested, first get the IDs that match the conditions
+            const matchingIds = await this.dbConnection
+              .select({ id: schema.vehicles.id })
+              .from(schema.vehicles)
+              .where(whereClause)
+              .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+              .limit(limit)
+              .offset(offset);
 
-          const ids = matchingIds.map((row: any) => row.id);
+            const ids = matchingIds.map((row: any) => row.id);
 
-          if (ids.length > 0) {
-            // Use relational query API to get data with relations
-            const allData = await this.dbConnection.query.vehicles.findMany({
-              where: (vehicles: any, { inArray: inArrayFn }: any) => inArrayFn(vehicles.id, ids),
-              with: withRelations,
-            });
-            // Re-sort to match original order
-            const idMap = new Map<number, number>(ids.map((id: number, idx: number) => [id, idx]));
-            allData.sort((a: any, b: any) => {
-              const aIdx: number = idMap.get(a.id) ?? 0;
-              const bIdx: number = idMap.get(b.id) ?? 0;
-              return aIdx - bIdx;
-            });
-            data = allData;
-          } else {
-            data = [];
+            if (ids.length > 0) {
+              // Use relational query API to get data with relations
+              const allData = await this.dbConnection.query.vehicles.findMany({
+                where: (vehicles: any, { inArray: inArrayFn }: any) => inArrayFn(vehicles.id, ids),
+                with: withRelations,
+              });
+              // Re-sort to match original order
+              const idMap = new Map<number, number>(ids.map((id: number, idx: number) => [id, idx]));
+              allData.sort((a: any, b: any) => {
+                const aIdx: number = idMap.get(a.id) ?? 0;
+                const bIdx: number = idMap.get(b.id) ?? 0;
+                return aIdx - bIdx;
+              });
+              data = allData;
+            } else {
+              data = [];
+            }
+          } catch (relError: any) {
+            // If relational query fails due to missing columns, fall back to standard query
+            const relErrorMessage = relError instanceof Error ? relError.message : String(relError);
+            const relPgError = relError?.cause || relError?.originalError || relError;
+            const relPgMessage = relPgError instanceof Error ? relPgError.message : String(relPgError);
+            const relPgString = String(relPgMessage).toLowerCase();
+            
+            const isRelColumnError = 
+              (relPgString.includes('column') && relPgString.includes('does not exist')) ||
+              relPgString.includes('qr_code') || relPgString.includes('account_id');
+            
+            if (isRelColumnError) {
+              this.logger.warn('Relational query failed due to missing columns, falling back to standard query');
+              useStandardQuery = true;
+            } else {
+              throw relError;
+            }
           }
-        } else {
+        }
+        
+        // Use standard query when no relations or relational query failed
+        if (useStandardQuery) {
           // Use standard query when no relations
           try {
             data = await this.dbConnection
@@ -236,7 +260,7 @@ export class VehiclesService extends BaseService<Vehicle> {
             }
             this.logger.error(`Stack trace:`, errorStack);
             
-            // Check if error is due to missing account_id column
+            // Check if error is due to missing columns (account_id, qr_code, etc.)
             const isAccountIdError = 
               (pgErrorCode === '42703') ||
               (errorCode === '42703') ||
@@ -244,48 +268,95 @@ export class VehiclesService extends BaseService<Vehicle> {
               errorMessage?.toLowerCase().includes('account_id') ||
               (pgErrorString.includes('column') && pgErrorString.includes('does not exist') && pgErrorString.includes('account'));
             
-            if (isAccountIdError) {
-              // Retry without account_id filter
-              this.logger.warn('account_id column missing in vehicles table, retrying without accountId filter. Run migrations to add account_id column.');
+            const isQrCodeError = 
+              (pgErrorCode === '42703') ||
+              (errorCode === '42703') ||
+              pgErrorString.includes('qr_code') ||
+              errorMessage?.toLowerCase().includes('qr_code') ||
+              (pgErrorString.includes('column') && pgErrorString.includes('does not exist') && pgErrorString.includes('qr'));
+            
+            const isColumnError = 
+              (pgErrorCode === '42703') ||
+              (errorCode === '42703') ||
+              (pgErrorString.includes('column') && pgErrorString.includes('does not exist'));
+            
+            if (isAccountIdError || isQrCodeError || isColumnError) {
+              // Retry with explicit column selection excluding problematic columns
+              const missingColumns: string[] = [];
+              if (isAccountIdError) missingColumns.push('account_id');
+              if (isQrCodeError) missingColumns.push('qr_code');
+              
+              this.logger.warn(
+                `Missing columns in vehicles table (${missingColumns.join(', ')}), retrying with explicit column selection. Run migrations to add missing columns.`
+              );
+              
               try {
-                // Remove account_id condition from conditions array
-                const fallbackConditions = conditions.filter((c: any) => {
-                  try {
-                    // Check if this condition uses account_id by examining the SQL or column name
-                    const conditionStr = JSON.stringify(c);
-                    if (conditionStr.includes('account_id')) {
-                      return false;
-                    }
-                    // Also check if it's an eq condition with accountId column
-                    if (c && typeof c === 'object') {
-                      // Check various ways the condition might reference account_id
-                      if (c.left?.name === 'account_id' || c.column?.name === 'account_id') {
+                // Remove account_id condition from conditions array if account_id is missing
+                let fallbackConditions = conditions;
+                if (isAccountIdError) {
+                  fallbackConditions = conditions.filter((c: any) => {
+                    try {
+                      const conditionStr = JSON.stringify(c);
+                      if (conditionStr.includes('account_id')) {
                         return false;
                       }
+                      if (c && typeof c === 'object') {
+                        if (c.left?.name === 'account_id' || c.column?.name === 'account_id') {
+                          return false;
+                        }
+                      }
+                      return true;
+                    } catch {
+                      return true;
                     }
-                    return true;
-                  } catch {
-                    return true;
-                  }
-                });
+                  });
+                }
+                
                 const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
                 
-                // Also need to update total count without account_id filter
+                // Build explicit select excluding problematic columns
+                const selectColumns: any = {
+                  id: schema.vehicles.id,
+                  createdAt: schema.vehicles.createdAt,
+                  updatedAt: schema.vehicles.updatedAt,
+                  thirdPartyId: schema.vehicles.thirdPartyId,
+                  plate: schema.vehicles.plate,
+                  model: schema.vehicles.model,
+                  brand: schema.vehicles.brand,
+                  year: schema.vehicles.year,
+                  tag2: schema.vehicles.tag2,
+                  groupId: schema.vehicles.groupId,
+                  isActive: schema.vehicles.isActive,
+                  lastSyncedAt: schema.vehicles.lastSyncedAt,
+                };
+                
+                // Only include accountId if it exists
+                if (!isAccountIdError && schema.vehicles.accountId) {
+                  selectColumns.accountId = schema.vehicles.accountId;
+                }
+                
+                // Only include qrCode if it exists
+                if (!isQrCodeError && schema.vehicles.qrCode) {
+                  selectColumns.qrCode = schema.vehicles.qrCode;
+                }
+                
+                // Update total count
                 const [{ count: fallbackTotal }] = await this.dbConnection
                   .select({ count: count() })
                   .from(schema.vehicles)
                   .where(fallbackWhereClause);
                 total = fallbackTotal;
                 
+                // Fetch data with explicit column selection
                 data = await this.dbConnection
-                  .select()
+                  .select(selectColumns)
                   .from(schema.vehicles)
                   .where(fallbackWhereClause)
                   .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
                   .limit(limit)
                   .offset(offset);
                 
-                this.logger.warn(`Successfully fetched vehicles without accountId filter (total: ${total})`);
+                this.logger.warn(`Successfully fetched vehicles with explicit column selection (total: ${total}, excluded: ${missingColumns.join(', ')})`);
               } catch (fallbackError: any) {
                 const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
                 const fallbackPgError = fallbackError?.cause || fallbackError?.originalError || fallbackError;
@@ -303,19 +374,6 @@ export class VehiclesService extends BaseService<Vehicle> {
                 );
               }
             } else {
-              // Check if it's a general column error
-              const isColumnError = 
-                (pgErrorCode === '42703') ||
-                (errorCode === '42703') ||
-                (pgErrorString.includes('column') && pgErrorString.includes('does not exist'));
-              
-              if (isColumnError) {
-                throw new Error(
-                  `Database column error: ${pgErrorMessage || errorMessage}. ` +
-                  `This usually means migrations haven't completed. ` +
-                  `Please run migrations: npm run migrate or node scripts/run-migrations.js`
-                );
-              }
               throw selectError;
             }
           }
