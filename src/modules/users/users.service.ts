@@ -24,12 +24,9 @@ export class UsersService extends BaseService<User> {
     query: PaginateQuery = {},
     options?: { include?: string[]; accountId?: number },
   ): Promise<PaginateResult<User>> {
-    // If relations are requested, use custom implementation
-    if (options?.include && options.include.length > 0) {
-      return await this.findAllWithRelations(query, options);
-    }
-    // BaseService.findAll() handles accountId filtering
-    return await super.findAll(query, options);
+    // Always use custom implementation to handle missing email/role columns gracefully
+    // BaseService.findAll() would fail if email/role columns don't exist yet
+    return await this.findAllWithRelations(query, options);
   }
 
   private async findAllWithRelations(
@@ -167,8 +164,42 @@ export class UsersService extends BaseService<User> {
           .limit(limit)
           .offset(offset);
       } catch (selectError: any) {
-        this.logger.error(`Failed to fetch users: ${selectError?.message || 'Unknown error'}`, selectError?.stack);
-        throw selectError;
+        // Check if error is due to missing email/role columns
+        const errorMessage = selectError instanceof Error ? selectError.message : String(selectError);
+        if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role')) {
+          // Retry with explicit column selection excluding email/role
+          this.logger.warn('email/role columns missing, selecting columns explicitly (excluding email/role). Run migration 0005_add_user_fields.sql');
+          data = await this.dbConnection
+            .select({
+              id: schema.users.id,
+              accountId: schema.users.accountId,
+              createdAt: schema.users.createdAt,
+              updatedAt: schema.users.updatedAt,
+              deletedAt: schema.users.deletedAt,
+              kU: schema.users.k_u,
+              pid: schema.users.pid,
+              subid: schema.users.subid,
+              partner: schema.users.partner,
+              kK: schema.users.k_k,
+              expire: schema.users.expire,
+              token: schema.users.token,
+              session: schema.users.session,
+              accid: schema.users.accid,
+              company: schema.users.company,
+              username: schema.users.username,
+              kP: schema.users.k_p,
+              fullname: schema.users.fullname,
+              lastLoginAt: schema.users.lastLoginAt,
+            })
+            .from(schema.users)
+            .where(finalWhereClause)
+            .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+            .limit(limit)
+            .offset(offset);
+        } else {
+          this.logger.error(`Failed to fetch users: ${selectError?.message || 'Unknown error'}`, selectError?.stack);
+          throw selectError;
+        }
       }
     }
     

@@ -94,10 +94,27 @@ export class BaseService<T extends BaseEntity> {
           try {
             const column = (this.table as any)[field];
             // Check if column exists and is a valid Drizzle column object
-            if (column && typeof column === 'object' && column.name !== undefined) {
-              return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+            // Drizzle columns have a Symbol(drizzle:Name) property, so we check for that
+            if (!column) {
+              return null;
             }
-            return null;
+            // Verify it's actually a Drizzle column object
+            if (typeof column !== 'object') {
+              return null;
+            }
+            // Check for Drizzle column properties - columns have a name property
+            if (!column.name) {
+              return null;
+            }
+            // Additional safety check: try to access the column to ensure it's valid
+            // If accessing the column throws or returns undefined, skip it
+            try {
+              // Use the column in a safe way - if it's invalid, this will fail gracefully
+              return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+            } catch (colError) {
+              // If column is invalid, skip it
+              return null;
+            }
           } catch (error) {
             // If column access fails, skip this field
             return null;
@@ -113,39 +130,114 @@ export class BaseService<T extends BaseEntity> {
     // Build order by
     let orderByClause: any;
     if (query.sortBy && query.sortBy.length > 0) {
-      const [field, direction] = query.sortBy[0];
-      try {
-        const column = (this.table as any)[field];
-        // Check if column exists and is a valid Drizzle column object
-        if (column && typeof column === 'object' && column.name !== undefined) {
-          orderByClause = direction === 'DESC' ? desc(column) : asc(column);
-        }
-      } catch (error) {
-        // If column access fails, skip sorting for this field
-        // Will use default ordering if no valid sort field found
+      const sortFields = query.sortBy
+        .map(([field, direction]) => {
+          try {
+            const column = (this.table as any)[field];
+            // Check if column exists and is a valid Drizzle column object
+            if (!column) {
+              return null;
+            }
+            // Verify it's actually a Drizzle column object
+            if (typeof column !== 'object') {
+              return null;
+            }
+            // Check for Drizzle column properties - columns have a name property
+            if (!column.name) {
+              return null;
+            }
+            // Additional safety check: try to create the orderBy clause
+            // If the column is invalid, this will fail gracefully
+            try {
+              return direction === 'DESC' ? desc(column) : asc(column);
+            } catch (colError) {
+              // If column is invalid, skip it
+              return null;
+            }
+          } catch (error) {
+            // If column access fails, skip this field
+            return null;
+          }
+        })
+        .filter((field): field is any => field !== null);
+
+      if (sortFields.length > 0) {
+        orderByClause = sortFields.length === 1 ? sortFields[0] : sortFields;
       }
     }
 
     try {
+      // Ensure conditions array is valid (not empty or containing invalid SQL)
+      const validConditions = conditions.filter((c): c is SQL => c !== null && c !== undefined);
+      
       // Get total count
+      const whereClause = validConditions.length > 0 ? and(...validConditions) : undefined;
       const [{ count: totalItems }] = await this.db
         .select({ count: count() })
         .from(this.table)
-        .where(and(...conditions));
+        .where(whereClause);
 
       // Get paginated data
+      // Note: Drizzle's .select() includes all schema columns, which may not exist in DB yet
+      // If email/role columns don't exist, we'll catch the error and retry with explicit columns
       let queryBuilder = this.db
         .select()
         .from(this.table)
-        .where(and(...conditions))
+        .where(whereClause)
         .limit(limit)
         .offset(offset);
 
       if (orderByClause) {
-        queryBuilder = queryBuilder.orderBy(orderByClause) as any;
+        // Handle both single orderBy and array of orderBy clauses
+        try {
+          if (Array.isArray(orderByClause)) {
+            queryBuilder = queryBuilder.orderBy(...orderByClause) as any;
+          } else {
+            queryBuilder = queryBuilder.orderBy(orderByClause) as any;
+          }
+        } catch (orderError) {
+          // If ordering fails, log and continue without ordering
+          console.warn('Failed to apply orderBy clause:', orderError);
+        }
+      } else {
+        // Default ordering by createdAt DESC if available, otherwise by id
+        try {
+          if (this.table.createdAt) {
+            queryBuilder = queryBuilder.orderBy(desc(this.table.createdAt)) as any;
+          } else if ((this.table as any).id) {
+            queryBuilder = queryBuilder.orderBy(desc((this.table as any).id)) as any;
+          }
+        } catch (error) {
+          // If default ordering fails, continue without ordering
+        }
       }
 
-      const data = await queryBuilder;
+      let data;
+      try {
+        data = await queryBuilder;
+      } catch (selectError: any) {
+        // Check if error is due to missing columns (common during migration)
+        const errorMessage = selectError instanceof Error ? selectError.message : String(selectError);
+        const isColumnError = 
+          errorMessage?.toLowerCase().includes('column') && 
+          (errorMessage?.toLowerCase().includes('does not exist') || 
+           errorMessage?.toLowerCase().includes('doesn\'t exist'));
+        
+        if (isColumnError) {
+          // This is a column missing error - log and rethrow with helpful message
+          // Specific services (like UsersService) should handle this with explicit column selection
+          console.warn(`Column missing error in BaseService.findAll: ${errorMessage}`);
+          console.warn('This usually means migrations haven\'t completed. The specific service should handle this with explicit column selection.');
+          throw new Error(
+            `Database column missing: ${errorMessage}. ` +
+            `This usually means migrations haven't completed. ` +
+            `Please run migrations or check if the service has fallback logic for missing columns.`
+          );
+        } else {
+          // For other errors, rethrow
+          throw selectError;
+        }
+      }
 
       const totalPages = Math.ceil(totalItems / limit);
 
@@ -169,11 +261,32 @@ export class BaseService<T extends BaseEntity> {
         },
       };
     } catch (error: any) {
-      // Check if error is due to missing account_id column
-      const errorCode = error?.code;
+      // Check if error is due to undefined column access (Symbol error)
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorString = String(error).toLowerCase();
+      const errorStack = error instanceof Error ? error.stack : '';
       
+      const isSymbolError = 
+        errorMessage?.includes('Symbol(drizzle:Name)') ||
+        errorMessage?.includes('Cannot read properties of undefined') ||
+        errorString.includes('symbol') ||
+        (errorStack && errorStack.includes('Symbol(drizzle:Name)'));
+      
+      if (isSymbolError) {
+        // This usually means we're trying to use an undefined column
+        // Log the error and throw a more helpful message
+        console.error('Drizzle column access error - likely using undefined column:', {
+          error: errorMessage,
+          query: { search: query.search, searchBy: query.searchBy, sortBy: query.sortBy },
+        });
+        throw new Error(
+          `Invalid column reference in query. Please check that searchBy and sortBy fields exist in the schema. ` +
+          `Error: ${errorMessage}`
+        );
+      }
+      
+      // Check if error is due to missing account_id column
+      const errorCode = error?.code;
       const isAccountIdError = 
         (errorCode === '42703') ||
         errorMessage?.toLowerCase().includes('account_id') ||
@@ -190,13 +303,21 @@ export class BaseService<T extends BaseEntity> {
         if (query.search && query.searchBy && query.searchBy.length > 0) {
           const searchConditions = query.searchBy
             .map((field) => {
-              const column = (this.table as any)[field];
-              if (column) {
-                return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+              try {
+                const column = (this.table as any)[field];
+                // Check if column exists and is a valid Drizzle column object
+                if (column && typeof column === 'object' && column.name !== undefined) {
+                  // Additional check: verify it's actually a Drizzle column
+                  if (column.columnType || column.dataType || column.name) {
+                    return sql`${column}::text ILIKE ${`%${query.search}%`}`;
+                  }
+                }
+                return null;
+              } catch (error) {
+                return null;
               }
-              return null;
             })
-            .filter(Boolean) as SQL[];
+            .filter((condition): condition is SQL => condition !== null);
 
           if (searchConditions.length > 0) {
             fallbackConditions.push(sql`(${sql.join(searchConditions, sql` OR `)})`);
