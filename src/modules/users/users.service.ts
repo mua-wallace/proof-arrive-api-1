@@ -45,17 +45,7 @@ export class UsersService extends BaseService<User> {
 
     // Automatically filter by accountId if provided (mandatory for multi-tenant isolation)
     if (options?.accountId !== undefined) {
-      try {
-        // Check if accountId column exists before using it
-        if (schema.users.accountId && typeof schema.users.accountId === 'object' && schema.users.accountId.name !== undefined) {
-          conditions.push(eq(schema.users.accountId, options.accountId));
-        } else {
-          throw new Error('accountId column not found in users schema. Run migrations to add account_id column.');
-        }
-      } catch (error) {
-        // If accountId column doesn't exist, throw error (migrations must be run)
-        throw new Error(`accountId column missing: ${error instanceof Error ? error.message : 'Unknown error'}. Please run migrations.`);
-      }
+      conditions.push(eq(schema.users.accountId, options.accountId));
     }
 
     // Add search functionality
@@ -159,46 +149,8 @@ export class UsersService extends BaseService<User> {
           });
           data = allData;
         } catch (relError: any) {
-          // If relational query fails due to missing columns, fall back to standard query
-          const errorMessage = relError instanceof Error ? relError.message : String(relError);
-          if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role')) {
-            this.logger.warn('email/role columns missing, falling back to standard query without relations. Run migration 0005_add_user_fields.sql');
-            // Fall back to standard query without relations
-            const finalWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
-            try {
-              data = await this.dbConnection
-                .select({
-                  id: schema.users.id,
-                  accountId: schema.users.accountId,
-                  createdAt: schema.users.createdAt,
-                  updatedAt: schema.users.updatedAt,
-                  deletedAt: schema.users.deletedAt,
-                  kU: schema.users.k_u,
-                  pid: schema.users.pid,
-                  subid: schema.users.subid,
-                  partner: schema.users.partner,
-                  kK: schema.users.k_k,
-                  expire: schema.users.expire,
-                  token: schema.users.token,
-                  session: schema.users.session,
-                  accid: schema.users.accid,
-                  company: schema.users.company,
-                  username: schema.users.username,
-                  kP: schema.users.k_p,
-                  lastLoginAt: schema.users.lastLoginAt,
-                })
-                .from(schema.users)
-                .where(finalWhereClause)
-                .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-                .limit(limit)
-                .offset(offset);
-            } catch (fallbackError: any) {
-              // If fallback also fails, throw original error
-              throw relError;
-            }
-          } else {
-            throw relError;
-          }
+          this.logger.error(`Failed to fetch users with relations: ${relError?.message || 'Unknown error'}`, relError?.stack);
+          throw relError;
         }
       } else {
         data = [];
@@ -215,40 +167,8 @@ export class UsersService extends BaseService<User> {
           .limit(limit)
           .offset(offset);
       } catch (selectError: any) {
-        // Check if error is due to missing email/role columns
-        const errorMessage = selectError instanceof Error ? selectError.message : String(selectError);
-        if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role')) {
-          // Retry with explicit column selection excluding email/role
-          this.logger.warn('email/role columns missing, selecting columns explicitly (excluding email/role). Run migration 0005_add_user_fields.sql');
-          data = await this.dbConnection
-            .select({
-              id: schema.users.id,
-              accountId: schema.users.accountId,
-              createdAt: schema.users.createdAt,
-              updatedAt: schema.users.updatedAt,
-              deletedAt: schema.users.deletedAt,
-              kU: schema.users.k_u,
-              pid: schema.users.pid,
-              subid: schema.users.subid,
-              partner: schema.users.partner,
-              kK: schema.users.k_k,
-              expire: schema.users.expire,
-              token: schema.users.token,
-              session: schema.users.session,
-              accid: schema.users.accid,
-              company: schema.users.company,
-              username: schema.users.username,
-              kP: schema.users.k_p,
-              lastLoginAt: schema.users.lastLoginAt,
-            })
-            .from(schema.users)
-            .where(finalWhereClause)
-            .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-            .limit(limit)
-            .offset(offset);
-        } else {
-          throw selectError;
-        }
+        this.logger.error(`Failed to fetch users: ${selectError?.message || 'Unknown error'}`, selectError?.stack);
+        throw selectError;
       }
     }
     

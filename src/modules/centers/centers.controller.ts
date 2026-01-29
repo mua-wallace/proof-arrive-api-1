@@ -46,9 +46,15 @@ export class CentersController {
         : undefined,
     };
 
+    // Convert accid to number for accountId (multi-tenant filtering)
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+
     const options = {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
-      accountId: credentials.accid, // Multi-tenant: filter by account ID
+      accountId: accountIdNum, // Multi-tenant: filter by account ID
     };
 
     return this.centersService.findAll(query, options);
@@ -103,9 +109,15 @@ export class CentersController {
     @Query('include') include?: string,
     @CurrentUserCredentials() credentials?: Credentials,
   ): Promise<Center> {
+    // Convert accid to number for accountId (multi-tenant filtering)
+    const accountIdNum = credentials?.accid ? Number(credentials.accid) : undefined;
+    if (accountIdNum !== undefined && (isNaN(accountIdNum) || accountIdNum <= 0)) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+
     const options = {
       include: include ? include.split(',') : undefined,
-      accountId: credentials?.accid, // Multi-tenant: filter by account ID
+      accountId: accountIdNum, // Multi-tenant: filter by account ID
     };
     return this.centersService.findOneById(Number(id), options);
   }

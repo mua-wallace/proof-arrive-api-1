@@ -123,7 +123,12 @@ export class VehiclesController {
       throw new BadRequestException('At least one search criterion must be provided (e.g., plate, thirdPartyId, id, etc.)');
     }
     
-    return this.vehiclesService.findOneBy(requestData, { accountId: credentials.accid });
+    // Convert accid to number for accountId (multi-tenant filtering)
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    return this.vehiclesService.findOneBy(requestData, { accountId: accountIdNum });
   }
 
   @Get('qr-code/:qrCode')
@@ -142,7 +147,12 @@ export class VehiclesController {
     vehicleId: number;
     qrCode: string;
   }> {
-    const result = await this.qrCodeService.validateQrCode(qrCode, credentials.accid);
+    // Convert accid to number for accountId
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    const result = await this.qrCodeService.validateQrCode(qrCode, accountIdNum);
     return {
       vehicle: result.vehicle as Vehicle,
       vehicleId: result.vehicleId,
@@ -161,9 +171,15 @@ export class VehiclesController {
     @Query('include') include?: string,
     @CurrentUserCredentials() credentials?: Credentials,
   ): Promise<Vehicle> {
+    // Convert accid to number for accountId (multi-tenant filtering)
+    const accountIdNum = credentials?.accid ? Number(credentials.accid) : undefined;
+    if (accountIdNum !== undefined && (isNaN(accountIdNum) || accountIdNum <= 0)) {
+      throw new BadRequestException(`Invalid account ID: ${credentials?.accid}`);
+    }
+
     const options = {
       include: include ? include.split(',') : undefined,
-      accountId: credentials?.accid, // Multi-tenant: filter by account ID
+      accountId: accountIdNum, // Multi-tenant: filter by account ID
     };
     return this.vehiclesService.findOneById(Number(id), options);
   }
@@ -218,8 +234,13 @@ export class VehiclesController {
 
     try {
       // First, try to find by internal database ID
+      // Convert accid to number for accountId
+      const accountIdNum = Number(credentials.accid);
+      if (isNaN(accountIdNum) || accountIdNum <= 0) {
+        throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+      }
       vehicle = await this.vehiclesService.findOneById(numericId, {
-        accountId: credentials.accid,
+        accountId: accountIdNum,
       });
     } catch (error) {
       // If not found by ID, try to find by thirdPartyId
@@ -227,7 +248,7 @@ export class VehiclesController {
         try {
           vehicle = await this.vehiclesService.findOneBy(
             { thirdPartyId: numericId },
-            { accountId: credentials.accid },
+            { accountId: accountIdNum },
           );
         } catch (secondError) {
           throw new NotFoundException(
@@ -239,10 +260,15 @@ export class VehiclesController {
       }
     }
 
+    // Convert accid to number for accountId
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
     // Generate QR code
     const qrCodeResult = await this.qrCodeService.generateQrCode(
       vehicle.thirdPartyId,
-      credentials.accid,
+      accountIdNum,
     );
 
     return {
@@ -279,8 +305,13 @@ export class VehiclesController {
 
     try {
       // First, try to find by internal database ID
+      // Convert accid to number for accountId
+      const accountIdNum = Number(credentials.accid);
+      if (isNaN(accountIdNum) || accountIdNum <= 0) {
+        throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+      }
       vehicle = await this.vehiclesService.findOneById(numericId, {
-        accountId: credentials.accid,
+        accountId: accountIdNum,
       });
     } catch (error) {
       // If not found by ID, try to find by thirdPartyId
@@ -288,7 +319,7 @@ export class VehiclesController {
         try {
           vehicle = await this.vehiclesService.findOneBy(
             { thirdPartyId: numericId },
-            { accountId: credentials.accid },
+            { accountId: accountIdNum },
           );
         } catch (secondError) {
           throw new NotFoundException(
@@ -300,23 +331,28 @@ export class VehiclesController {
       }
     }
 
+    // Convert accid to number for accountId
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
     // Regenerate QR code
     const qrCodeResult = await this.qrCodeService.regenerateQrCode(
       vehicle.thirdPartyId,
-      credentials.accid,
+      accountIdNum,
     );
 
     // Get updated vehicle (use the same lookup method)
     let updatedVehicle: Vehicle;
     try {
       updatedVehicle = await this.vehiclesService.findOneById(vehicle.id, {
-        accountId: credentials.accid,
+        accountId: accountIdNum,
       });
     } catch {
       // Fallback to thirdPartyId if needed
       updatedVehicle = await this.vehiclesService.findOneBy(
         { thirdPartyId: vehicle.thirdPartyId },
-        { accountId: credentials.accid },
+        { accountId: accountIdNum },
       );
     }
 
@@ -335,7 +371,12 @@ export class VehiclesController {
     @Param('id') id: string,
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<Vehicle> {
-    return this.vehiclesService.remove(Number(id), credentials.accid);
+    // Convert accid to number for accountId
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    return this.vehiclesService.remove(Number(id), accountIdNum);
   }
 }
 

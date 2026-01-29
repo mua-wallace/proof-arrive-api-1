@@ -38,20 +38,8 @@ export class VehiclesService extends BaseService<Vehicle> {
       const conditions: SQL[] = [];
 
       // Automatically filter by accountId if provided (mandatory for multi-tenant isolation)
-      // Note: If account_id column doesn't exist in database, this will be handled in error catch blocks
       if (options?.accountId !== undefined) {
-        try {
-          // Check if accountId column exists in schema before using it
-          if (schema.vehicles.accountId && typeof schema.vehicles.accountId === 'object' && schema.vehicles.accountId.name !== undefined) {
-            conditions.push(eq(schema.vehicles.accountId, options.accountId));
-          } else {
-            // Schema doesn't have accountId - this shouldn't happen if migrations ran
-            this.logger.warn('accountId column not found in vehicles schema. Skipping accountId filter. Run migrations.');
-          }
-        } catch (error) {
-          // If accountId column access fails, log warning but continue without filter
-          this.logger.warn(`Failed to add accountId filter: ${error instanceof Error ? error.message : 'Unknown error'}. Continuing without accountId filter.`);
-        }
+        conditions.push(eq(schema.vehicles.accountId, options.accountId));
       }
 
       // Add search functionality
@@ -107,79 +95,11 @@ export class VehiclesService extends BaseService<Vehicle> {
       }
 
       // Get total count
-      // Build where clause, but handle account_id errors gracefully
-      let whereClause: SQL | undefined;
-      let useAccountIdFilter = false;
-      
-      try {
-        whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-        useAccountIdFilter = options?.accountId !== undefined && conditions.some((c: any) => {
-          try {
-            return c && typeof c === 'object' && c.operator === '=' && c.left?.name === 'account_id';
-          } catch {
-            return false;
-          }
-        });
-      } catch (error: any) {
-        // If building WHERE clause fails due to account_id, remove it and retry
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage?.toLowerCase().includes('account_id')) {
-          this.logger.warn('account_id column missing, removing accountId filter. Run migrations to add account_id column.');
-          const fallbackConditions = conditions.filter((c: any) => {
-            try {
-              return !(c && typeof c === 'object' && c.operator === '=' && c.left?.name === 'account_id');
-            } catch {
-              return true;
-            }
-          });
-          whereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
-          useAccountIdFilter = false;
-        } else {
-          throw error;
-        }
-      }
-      
-      let total: number;
-      try {
-        const [{ count: totalItems }] = await this.dbConnection
-          .select({ count: count() })
-          .from(schema.vehicles)
-          .where(whereClause);
-        total = totalItems;
-      } catch (countError: any) {
-        // Check if error is due to missing account_id column
-        const errorCode = countError?.code;
-        const errorMessage = countError instanceof Error ? countError.message : String(countError);
-        const errorString = String(errorMessage).toLowerCase();
-        
-        const isAccountIdError = 
-          (errorCode === '42703') ||
-          errorMessage?.toLowerCase().includes('account_id') ||
-          errorString.includes('account_id');
-        
-        if (isAccountIdError) {
-          // Retry count without accountId filter (account_id column doesn't exist)
-          this.logger.warn('account_id column missing in database, counting without accountId filter. Run migrations to add account_id column.');
-          const fallbackConditions = conditions.filter((c: any) => {
-            try {
-              return !(c && typeof c === 'object' && c.operator === '=' && c.left?.name === 'account_id');
-            } catch {
-              return true;
-            }
-          });
-          const fallbackWhereClause = fallbackConditions.length > 0 ? and(...fallbackConditions) : undefined;
-          const [{ count: totalItems }] = await this.dbConnection
-            .select({ count: count() })
-            .from(schema.vehicles)
-            .where(fallbackWhereClause);
-          total = totalItems;
-          // Update whereClause for data query
-          whereClause = fallbackWhereClause;
-          useAccountIdFilter = false;
-        } else {
-          throw countError;
-        }
-      }
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const [{ count: total }] = await this.dbConnection
+        .select({ count: count() })
+        .from(schema.vehicles)
+        .where(whereClause);
 
         // Build relations object for Drizzle query API
         const withRelations: any = {};
@@ -237,44 +157,8 @@ export class VehiclesService extends BaseService<Vehicle> {
               .limit(limit)
               .offset(offset);
           } catch (selectError: any) {
-            // Check if error is due to missing account_id column
-            const errorCode = selectError?.code;
-            const errorMessage = selectError instanceof Error ? selectError.message : String(selectError);
-            const errorString = String(errorMessage).toLowerCase();
-            
-            const isAccountIdError = 
-              (errorCode === '42703') ||
-              errorMessage?.toLowerCase().includes('account_id') ||
-              errorString.includes('account_id') ||
-              (errorMessage?.includes('column') && errorMessage?.includes('account_id'));
-            
-            if (isAccountIdError) {
-              // Retry with explicit column selection excluding account_id
-              this.logger.warn('account_id column missing, selecting columns explicitly (excluding account_id). Run migrations to add account_id column.');
-              data = await this.dbConnection
-                .select({
-                  id: schema.vehicles.id,
-                  createdAt: schema.vehicles.createdAt,
-                  updatedAt: schema.vehicles.updatedAt,
-                  thirdPartyId: schema.vehicles.thirdPartyId,
-                  plate: schema.vehicles.plate,
-                  model: schema.vehicles.model,
-                  brand: schema.vehicles.brand,
-                  year: schema.vehicles.year,
-                  tag2: schema.vehicles.tag2,
-                  groupId: schema.vehicles.groupId,
-                  isActive: schema.vehicles.isActive,
-                  lastSyncedAt: schema.vehicles.lastSyncedAt,
-                  qrCode: schema.vehicles.qrCode,
-                })
-                .from(schema.vehicles)
-                .where(whereClause)
-                .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-                .limit(limit)
-                .offset(offset);
-            } else {
-              throw selectError;
-            }
+            this.logger.error(`Failed to fetch vehicles: ${selectError?.message || 'Unknown error'}`, selectError?.stack);
+            throw selectError;
           }
         }
 
