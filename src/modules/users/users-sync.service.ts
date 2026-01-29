@@ -44,16 +44,56 @@ export class UsersSyncService {
       
       // Check if user already exists for this accountId
       // Use sql template to explicitly cast the parameter as text for accid
-      const existingUser = await this.dbConnection
-        .select()
-        .from(schema.users)
-        .where(
-          and(
-            sql`${schema.users.accid} = ${accidStr}::text`,
-            eq(schema.users.accountId, accountIdNum),
-          ),
-        )
-        .limit(1);
+      let existingUser: any[] = [];
+      try {
+        existingUser = await this.dbConnection
+          .select()
+          .from(schema.users)
+          .where(
+            and(
+              sql`${schema.users.accid} = ${accidStr}::text`,
+              eq(schema.users.accountId, accountIdNum),
+            ),
+          )
+          .limit(1);
+      } catch (error: any) {
+        // If select fails due to missing columns (email/role), try with explicit columns
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role')) {
+          this.logger.warn('email/role columns missing, checking user existence with explicit columns');
+          existingUser = await this.dbConnection
+            .select({
+              id: schema.users.id,
+              accountId: schema.users.accountId,
+              createdAt: schema.users.createdAt,
+              updatedAt: schema.users.updatedAt,
+              deletedAt: schema.users.deletedAt,
+              kU: schema.users.k_u,
+              pid: schema.users.pid,
+              subid: schema.users.subid,
+              partner: schema.users.partner,
+              kK: schema.users.k_k,
+              expire: schema.users.expire,
+              token: schema.users.token,
+              session: schema.users.session,
+              accid: schema.users.accid,
+              company: schema.users.company,
+              username: schema.users.username,
+              kP: schema.users.k_p,
+              lastLoginAt: schema.users.lastLoginAt,
+            })
+            .from(schema.users)
+            .where(
+              and(
+                sql`${schema.users.accid} = ${accidStr}::text`,
+                eq(schema.users.accountId, accountIdNum),
+              ),
+            )
+            .limit(1);
+        } else {
+          throw error;
+        }
+      }
 
       if (existingUser.length > 0) {
         return;
@@ -61,7 +101,8 @@ export class UsersSyncService {
 
       // Insert user with data from Malambi API login response
       // accountId is mandatory - derived from accid for multi-tenancy
-      const userRecord = {
+      // Handle missing email/role columns gracefully
+      const userRecord: any = {
         accountId: accountIdNum, // Multi-tenant: account ID (derived from accid)
         accid: accidStr,
         subid: subidStr,
@@ -75,13 +116,33 @@ export class UsersSyncService {
         k_k: userData.k_k || '',
         expire: userData.expire || '0',
         k_p: userData.k_p || '',
-        fullname: userData.username || null, // Set fullname from username
-        role: 'agent' as const, // Default role is 'agent'
-        email: userData.email || null, // Email is optional
         lastLoginAt: new Date(),
       };
 
-      await this.dbConnection.insert(schema.users).values(userRecord).execute();
+      // Only add email/role/fullname if columns exist (migration 0005 may not have run)
+      // Try inserting with all fields first, fallback to basic fields if columns don't exist
+      try {
+        userRecord.fullname = userData.username || null;
+        userRecord.role = 'agent';
+        userRecord.email = userData.email || null;
+        await this.dbConnection.insert(schema.users).values(userRecord).execute();
+      } catch (insertError: any) {
+        const errorMessage = insertError instanceof Error ? insertError.message : String(insertError);
+        const errorString = String(errorMessage).toLowerCase();
+        
+        // Check if error is due to missing email/role/fullname columns
+        if (errorMessage?.includes('email') || errorMessage?.includes('role') || errorMessage?.includes('fullname') ||
+            errorString.includes('email') || errorString.includes('role') || errorString.includes('fullname')) {
+          this.logger.warn('email/role/fullname columns missing, inserting user without these fields. Run migration 0005_add_user_fields.sql');
+          // Remove email/role/fullname and retry
+          delete userRecord.email;
+          delete userRecord.role;
+          delete userRecord.fullname;
+          await this.dbConnection.insert(schema.users).values(userRecord).execute();
+        } else {
+          throw insertError;
+        }
+      }
     } catch (error) {
       this.logger.error(`Error syncing user:`, error instanceof Error ? error.stack : error);
       throw error;
@@ -122,18 +183,60 @@ export class UsersSyncService {
     const accountIdNum = Number(accidStr);
     
     // Query with account_id for multi-tenant isolation
-    const user = await this.dbConnection
-      .select()
-      .from(schema.users)
-      .where(
-        and(
-          sql`${schema.users.accid} = ${accidStr}::text`,
-          eq(schema.users.accountId, accountIdNum),
-        ),
-      )
-      .limit(1);
+    // Handle missing email/role columns gracefully
+    try {
+      const user = await this.dbConnection
+        .select()
+        .from(schema.users)
+        .where(
+          and(
+            sql`${schema.users.accid} = ${accidStr}::text`,
+            eq(schema.users.accountId, accountIdNum),
+          ),
+        )
+        .limit(1);
 
-    return user.length > 0;
+      return user.length > 0;
+    } catch (error: any) {
+      // If select fails due to missing columns (email/role), try with explicit columns
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role')) {
+        this.logger.warn('email/role columns missing, checking user existence with explicit columns');
+        const user = await this.dbConnection
+          .select({
+            id: schema.users.id,
+            accountId: schema.users.accountId,
+            createdAt: schema.users.createdAt,
+            updatedAt: schema.users.updatedAt,
+            deletedAt: schema.users.deletedAt,
+            kU: schema.users.k_u,
+            pid: schema.users.pid,
+            subid: schema.users.subid,
+            partner: schema.users.partner,
+            kK: schema.users.k_k,
+            expire: schema.users.expire,
+            token: schema.users.token,
+            session: schema.users.session,
+            accid: schema.users.accid,
+            company: schema.users.company,
+            username: schema.users.username,
+            kP: schema.users.k_p,
+            lastLoginAt: schema.users.lastLoginAt,
+          })
+          .from(schema.users)
+          .where(
+            and(
+              sql`${schema.users.accid} = ${accidStr}::text`,
+              eq(schema.users.accountId, accountIdNum),
+            ),
+          )
+          .limit(1);
+
+        return user.length > 0;
+      } else {
+        throw error;
+      }
+    }
   }
 }
 

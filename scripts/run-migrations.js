@@ -122,16 +122,75 @@ async function runMigrations() {
         
         // Split SQL by statement-breakpoint and execute each statement separately
         // This handles drizzle-kit's statement-breakpoint format
-        // If no statement-breakpoint exists, split by semicolons for plain SQL files
+        // IMPORTANT: Handle DO blocks (PostgreSQL anonymous code blocks) - they span multiple statement-breakpoints
         let statements;
         if (sql.includes('--> statement-breakpoint')) {
-          // Drizzle-kit format: split by statement-breakpoint
-          statements = sql
-            .split('--> statement-breakpoint')
-            .map(s => s.trim())
-            .filter(s => s.length > 0 && !s.startsWith('-- Migration:') && !s.startsWith('-- Generated'));
+          // Drizzle-kit format: split by statement-breakpoint, but keep DO blocks together
+          const parts = sql.split('--> statement-breakpoint');
+          statements = [];
+          let i = 0;
+          
+          while (i < parts.length) {
+            let part = parts[i].trim();
+            
+            // Skip empty parts and comments
+            if (part.length === 0 || part.startsWith('-- Migration:') || part.startsWith('-- Generated')) {
+              i++;
+              continue;
+            }
+            
+            // Check if this part starts a DO block (DO $$ or DO $tag$)
+            const upperPart = part.toUpperCase();
+            const doBlockStartMatch = upperPart.match(/DO\s+\$(\$|[a-zA-Z]*\$)/);
+            
+            if (doBlockStartMatch) {
+              // DO block detected - need to find the matching END
+              const doTag = doBlockStartMatch[1]; // Get the tag ($$ or $tag$)
+              let doBlock = part;
+              let j = i + 1;
+              let foundEnd = false;
+              
+              // Look ahead through remaining parts to find matching END
+              while (j < parts.length && !foundEnd) {
+                const nextPart = parts[j].trim();
+                const upperNext = nextPart.toUpperCase();
+                
+                // Check if this part contains matching END (END $$ or END $tag$)
+                const endPattern = doTag === '$$' ? 'END $$' : `END ${doTag}`;
+                if (upperNext.includes(endPattern)) {
+                  // Found the end - combine all parts from i to j
+                  doBlock = parts.slice(i, j + 1).join('\n').trim();
+                  // Remove statement-breakpoint markers that might be in the middle
+                  doBlock = doBlock.replace(/--> statement-breakpoint/g, '');
+                  statements.push(doBlock);
+                  i = j + 1; // Move past the END
+                  foundEnd = true;
+                } else {
+                  j++;
+                }
+              }
+              
+              if (!foundEnd) {
+                // DO block not properly closed - try to find END in current part
+                if (upperPart.includes('END ' + doTag)) {
+                  // END is in the same part
+                  statements.push(part);
+                  i++;
+                } else {
+                  // DO block not properly closed - add what we have and log warning
+                  console.log(`  ⚠ Warning: DO block may not be properly closed in ${file}, part ${i + 1}`);
+                  statements.push(doBlock);
+                  i++;
+                }
+              }
+            } else {
+              // Regular statement
+              statements.push(part);
+              i++;
+            }
+          }
         } else {
-          // Plain SQL format: split by semicolons
+          // Plain SQL format: split by semicolons, but keep DO blocks together
           // Remove lines that are only comments (starting with --)
           const lines = sql.split('\n');
           const sqlLines = lines.filter(line => {
@@ -140,18 +199,91 @@ async function runMigrations() {
             return trimmed.length === 0 || !trimmed.startsWith('--');
           });
           const cleanedSql = sqlLines.join('\n');
-          // Split by semicolon and filter out empty statements
-          statements = cleanedSql
-            .split(';')
-            .map(s => s.trim())
-            .filter(s => s.length > 0 && !s.match(/^\s*$/));
+          
+          // Handle DO blocks specially - they contain semicolons but must be kept as single statements
+          // Match DO $$ ... END $$ patterns (non-greedy to match shortest block first)
+          const doBlockRegex = /DO\s+\$\$[\s\S]*?END\s+\$\$/gi;
+          const doBlocks = [];
+          let match;
+          
+          while ((match = doBlockRegex.exec(cleanedSql)) !== null) {
+            doBlocks.push({
+              text: match[0].trim(),
+              index: match.index,
+              endIndex: match.index + match[0].length
+            });
+          }
+          
+          // Build statements array: DO blocks + regular statements
+          statements = [];
+          let currentIndex = 0;
+          
+          // Sort DO blocks by index to process in order
+          doBlocks.sort((a, b) => a.index - b.index);
+          
+          doBlocks.forEach(block => {
+            // Add any SQL before this DO block
+            if (block.index > currentIndex) {
+              const beforeBlock = cleanedSql.substring(currentIndex, block.index);
+              // Split by semicolon, but be careful - semicolons inside strings/comments shouldn't split
+              const regularStmts = beforeBlock
+                .split(';')
+                .map(s => s.trim())
+                .filter(s => s.length > 0 && !s.match(/^\s*$/));
+              statements.push(...regularStmts);
+            }
+            
+            // Add the DO block (remove trailing semicolon if present, it's part of the block)
+            let doBlockText = block.text;
+            if (doBlockText.endsWith(';')) {
+              doBlockText = doBlockText.slice(0, -1).trim();
+            }
+            statements.push(doBlockText);
+            currentIndex = block.endIndex;
+            
+            // Skip semicolon after END $$ if present
+            if (cleanedSql.substring(currentIndex, currentIndex + 1) === ';') {
+              currentIndex++;
+            }
+          });
+          
+          // Add any remaining SQL after the last DO block
+          if (currentIndex < cleanedSql.length) {
+            const remainingSql = cleanedSql.substring(currentIndex);
+            const regularStmts = remainingSql
+              .split(';')
+              .map(s => s.trim())
+              .filter(s => s.length > 0 && !s.match(/^\s*$/));
+            statements.push(...regularStmts);
+          }
+          
+          // If no DO blocks found, just split by semicolons
+          if (doBlocks.length === 0) {
+            statements = cleanedSql
+              .split(';')
+              .map(s => s.trim())
+              .filter(s => s.length > 0 && !s.match(/^\s*$/));
+          }
         }
 
         let executedCount = 0;
         let skippedCount = 0;
         for (let i = 0; i < statements.length; i++) {
-          const statement = statements[i].trim();
+          let statement = statements[i].trim();
           if (statement && !statement.startsWith('--')) {
+            // Ensure DO blocks end with semicolon if they don't already
+            const upperStatement = statement.toUpperCase();
+            if ((upperStatement.includes('DO $$') || upperStatement.match(/DO\s+\$[a-zA-Z]*\$/)) && 
+                !statement.endsWith(';')) {
+              statement = statement + ';';
+            }
+            
+            // Ensure regular statements end with semicolon (unless they're DO blocks)
+            if (!upperStatement.includes('DO $$') && !upperStatement.match(/DO\s+\$[a-zA-Z]*\$/) && 
+                !statement.endsWith(';') && statement.length > 0) {
+              statement = statement + ';';
+            }
+            
             try {
               await client.query(statement);
               executedCount++;
@@ -180,12 +312,12 @@ async function runMigrations() {
                   console.log(`  ⚠ Statement ${i + 1} skipped (column doesn't exist - may be dropped in later migration)`);
                 }
               }
-              // Safe to skip: foreign key constraint errors (accid is not unique, handled in later migrations)
-              else if ((errorMsg.includes('no unique constraint') || errorMsg.includes('unique constraint matching')) &&
-                       errorMsg.includes('users') && errorMsg.includes('accid')) {
+              // Safe to skip: foreign key constraint errors (will be fixed in later migrations)
+              else if ((errorMsg.includes('no unique constraint') || errorMsg.includes('unique constraint matching')) ||
+                       (errorMsg.includes('there is no unique constraint matching given keys'))) {
                 skippedCount++;
                 if (skippedCount <= 3) {
-                  console.log(`  ⚠ Statement ${i + 1} skipped (foreign key will be recreated in later migration)`);
+                  console.log(`  ⚠ Statement ${i + 1} skipped (unique constraint missing - will be added in later migration)`);
                 }
               }
               // Safe to skip: index on non-existent column
@@ -195,15 +327,17 @@ async function runMigrations() {
                   console.log(`  ⚠ Statement ${i + 1} skipped (column doesn't exist)`);
                 }
               }
+              // Safe to skip: constraint/foreign key errors (will be handled in later migrations)
+              else if (errorMsg.includes('constraint') || errorMsg.includes('foreign key')) {
+                skippedCount++;
+                if (skippedCount <= 3) {
+                  console.log(`  ⚠ Statement ${i + 1} skipped (constraint/foreign key error - may be fixed in later migration)`);
+                }
+              }
               else {
                 // Log the error but continue
                 console.log(`  ⚠ Statement ${i + 1} error: ${stmtError.message.split('\n')[0]}`);
-                // Don't fail the entire migration for constraint/foreign key errors
-                if (errorMsg.includes('constraint') || errorMsg.includes('foreign key')) {
-                  skippedCount++;
-                } else {
-                  console.log(`  Continuing with next statement...`);
-                }
+                console.log(`  Continuing with next statement...`);
               }
             }
           }

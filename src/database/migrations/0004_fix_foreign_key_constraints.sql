@@ -4,7 +4,41 @@
 -- 2. Fixes vehicle_id foreign keys to reference vehicles.third_party_id instead of vehicles.id
 -- 3. Fixes center_id foreign keys to reference centers.geozone_id instead of centers.id
 
--- Step 1: Make geozone_id unique in centers table (required for foreign key constraints)
+-- Step 1: Ensure unique constraints exist for foreign key references
+-- First, make vehicles.third_party_id unique (required for foreign keys)
+-- Handle duplicates by keeping the one with the lowest id
+DO $$
+BEGIN
+    -- Check if there are duplicate third_party_ids in vehicles
+    IF EXISTS (
+        SELECT 1 FROM "vehicles" 
+        WHERE "third_party_id" IS NOT NULL 
+        GROUP BY "third_party_id" 
+        HAVING COUNT(*) > 1
+    ) THEN
+        -- Delete duplicates, keeping the one with the lowest id
+        DELETE FROM "vehicles" v1
+        WHERE EXISTS (
+            SELECT 1 FROM "vehicles" v2
+            WHERE v2."third_party_id" = v1."third_party_id"
+            AND v2."third_party_id" IS NOT NULL
+            AND v2."id" < v1."id"
+        );
+    END IF;
+END $$;
+
+-- Add unique constraint on vehicles.third_party_id (only if it doesn't exist)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'vehicles_third_party_id_unique'
+    ) THEN
+        ALTER TABLE "vehicles" ADD CONSTRAINT "vehicles_third_party_id_unique" UNIQUE("third_party_id");
+    END IF;
+END $$;
+
+-- Step 1b: Make geozone_id unique in centers table (required for foreign key constraints)
 -- First, handle any potential duplicates by keeping only one record per geozone_id
 -- If there are duplicates, we'll keep the one with the lowest id
 DO $$

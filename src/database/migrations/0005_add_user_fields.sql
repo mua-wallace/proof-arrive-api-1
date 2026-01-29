@@ -23,20 +23,57 @@ UPDATE "users" SET "fullname" = "username" WHERE "fullname" IS NULL;
 UPDATE "users" SET "role" = 'agent' WHERE "role" IS NULL OR "role" = '';
 --> statement-breakpoint
 
--- Now make role NOT NULL with default
-ALTER TABLE "users" ALTER COLUMN "role" SET NOT NULL;
---> statement-breakpoint
-ALTER TABLE "users" ALTER COLUMN "role" SET DEFAULT 'agent';
+-- Now make role NOT NULL with default (only if column exists)
+DO $$
+BEGIN
+    -- Check if role column exists and is nullable
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'users' 
+        AND column_name = 'role' 
+        AND is_nullable = 'YES'
+    ) THEN
+        -- Set any remaining NULLs to 'agent'
+        UPDATE "users" SET "role" = 'agent' WHERE "role" IS NULL OR "role" = '';
+        -- Make NOT NULL
+        ALTER TABLE "users" ALTER COLUMN "role" SET NOT NULL;
+        -- Set default
+        ALTER TABLE "users" ALTER COLUMN "role" SET DEFAULT 'agent';
+    END IF;
+END $$;
 --> statement-breakpoint
 
--- Add check constraint to ensure role is one of: 'agent', 'admin', 'manager'
-ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_role_check";
---> statement-breakpoint
-ALTER TABLE "users" ADD CONSTRAINT "users_role_check" CHECK ("role" IN ('agent', 'admin', 'manager'));
+-- Add check constraint to ensure role is one of: 'agent', 'admin', 'manager' (only if column exists)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'users' 
+        AND column_name = 'role'
+    ) THEN
+        ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_role_check";
+        ALTER TABLE "users" ADD CONSTRAINT "users_role_check" CHECK ("role" IN ('agent', 'admin', 'manager'));
+    END IF;
+END $$;
 --> statement-breakpoint
 
--- Create indexes for email and role
-CREATE INDEX IF NOT EXISTS "idx_users_email" ON "users"("email");
---> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "idx_users_role" ON "users"("role");
+-- Create indexes for email and role (only if columns exist)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'users' 
+        AND column_name = 'email'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS "idx_users_email" ON "users"("email");
+    END IF;
+    
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'users' 
+        AND column_name = 'role'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS "idx_users_role" ON "users"("role");
+    END IF;
+END $$;
 --> statement-breakpoint

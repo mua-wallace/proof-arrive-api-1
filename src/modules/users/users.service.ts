@@ -145,31 +145,111 @@ export class UsersService extends BaseService<User> {
 
       if (ids.length > 0) {
         // Use relational query API to get data with relations
-        const allData = await this.dbConnection.query.users.findMany({
-          where: (users: any, { inArray: inArrayFn }: any) => inArrayFn(users.id, ids),
-          with: withRelations,
-        });
-        // Re-sort to match original order
-        const idMap = new Map<string, number>(ids.map((id: string, idx: number) => [id, idx]));
-        allData.sort((a: any, b: any) => {
-          const aIdx: number = idMap.get(a.id) ?? 0;
-          const bIdx: number = idMap.get(b.id) ?? 0;
-          return aIdx - bIdx;
-        });
-        data = allData;
+        try {
+          const allData = await this.dbConnection.query.users.findMany({
+            where: (users: any, { inArray: inArrayFn }: any) => inArrayFn(users.id, ids),
+            with: withRelations,
+          });
+          // Re-sort to match original order
+          const idMap = new Map<string, number>(ids.map((id: string, idx: number) => [id, idx]));
+          allData.sort((a: any, b: any) => {
+            const aIdx: number = idMap.get(a.id) ?? 0;
+            const bIdx: number = idMap.get(b.id) ?? 0;
+            return aIdx - bIdx;
+          });
+          data = allData;
+        } catch (relError: any) {
+          // If relational query fails due to missing columns, fall back to standard query
+          const errorMessage = relError instanceof Error ? relError.message : String(relError);
+          if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role')) {
+            this.logger.warn('email/role columns missing, falling back to standard query without relations. Run migration 0005_add_user_fields.sql');
+            // Fall back to standard query without relations
+            const finalWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
+            try {
+              data = await this.dbConnection
+                .select({
+                  id: schema.users.id,
+                  accountId: schema.users.accountId,
+                  createdAt: schema.users.createdAt,
+                  updatedAt: schema.users.updatedAt,
+                  deletedAt: schema.users.deletedAt,
+                  kU: schema.users.k_u,
+                  pid: schema.users.pid,
+                  subid: schema.users.subid,
+                  partner: schema.users.partner,
+                  kK: schema.users.k_k,
+                  expire: schema.users.expire,
+                  token: schema.users.token,
+                  session: schema.users.session,
+                  accid: schema.users.accid,
+                  company: schema.users.company,
+                  username: schema.users.username,
+                  kP: schema.users.k_p,
+                  lastLoginAt: schema.users.lastLoginAt,
+                })
+                .from(schema.users)
+                .where(finalWhereClause)
+                .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+                .limit(limit)
+                .offset(offset);
+            } catch (fallbackError: any) {
+              // If fallback also fails, throw original error
+              throw relError;
+            }
+          } else {
+            throw relError;
+          }
+        }
       } else {
         data = [];
       }
     } else {
       // Use standard query when no relations
       const finalWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      data = await this.dbConnection
-        .select()
-        .from(schema.users)
-        .where(finalWhereClause)
-        .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
-        .limit(limit)
-        .offset(offset);
+      try {
+        data = await this.dbConnection
+          .select()
+          .from(schema.users)
+          .where(finalWhereClause)
+          .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+          .limit(limit)
+          .offset(offset);
+      } catch (selectError: any) {
+        // Check if error is due to missing email/role columns
+        const errorMessage = selectError instanceof Error ? selectError.message : String(selectError);
+        if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role')) {
+          // Retry with explicit column selection excluding email/role
+          this.logger.warn('email/role columns missing, selecting columns explicitly (excluding email/role). Run migration 0005_add_user_fields.sql');
+          data = await this.dbConnection
+            .select({
+              id: schema.users.id,
+              accountId: schema.users.accountId,
+              createdAt: schema.users.createdAt,
+              updatedAt: schema.users.updatedAt,
+              deletedAt: schema.users.deletedAt,
+              kU: schema.users.k_u,
+              pid: schema.users.pid,
+              subid: schema.users.subid,
+              partner: schema.users.partner,
+              kK: schema.users.k_k,
+              expire: schema.users.expire,
+              token: schema.users.token,
+              session: schema.users.session,
+              accid: schema.users.accid,
+              company: schema.users.company,
+              username: schema.users.username,
+              kP: schema.users.k_p,
+              lastLoginAt: schema.users.lastLoginAt,
+            })
+            .from(schema.users)
+            .where(finalWhereClause)
+            .orderBy(...(Array.isArray(orderByClause) ? orderByClause : [orderByClause]))
+            .limit(limit)
+            .offset(offset);
+        } else {
+          throw selectError;
+        }
+      }
     }
     
     // Ensure data is defined
