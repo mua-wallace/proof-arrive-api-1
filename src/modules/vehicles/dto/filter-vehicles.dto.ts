@@ -36,7 +36,7 @@ export class FilterVehiclesDto {
 
   @ApiPropertyOptional({
     example: 'plate,model,brand',
-    description: 'Comma-separated list of fields to search in. Available fields: plate, model, brand, tag2, qrCode',
+    description: 'Comma-separated list of fields to search in. Available fields: plate, model, brand, tag2',
   })
   @IsOptional()
   @IsString()
@@ -44,14 +44,14 @@ export class FilterVehiclesDto {
 
   @ApiPropertyOptional({
     example: 'createdAt:DESC,plate:ASC',
-    description: 'Comma-separated list of fields to sort by (format: field:direction). Available fields: id, accountId, createdAt, updatedAt, thirdPartyId, plate, model, brand, year, tag2, groupId, isActive, lastSyncedAt, qrCode',
+    description: 'Comma-separated list of fields to sort by (format: field:direction). Available fields: id, accountId, createdAt, updatedAt, thirdPartyId, plate, model, brand, year, tag2, groupId, isActive, lastSyncedAt',
   })
   @IsOptional()
   @IsString()
   sortBy?: string;
 
   @ApiPropertyOptional({
-    description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles)',
+    description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles, qrCodes)',
   })
   @IsOptional()
   @IsString()

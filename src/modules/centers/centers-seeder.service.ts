@@ -73,8 +73,12 @@ export class CentersSeederService implements OnModuleInit {
         }
       }
 
-      // Check if default centers already exist for this accountId
-      const defaultCenterGeozoneIds = [3001, 3002, 3003];
+      // Use account-scoped geozone_ids so they are globally unique (centers_geozone_id_unique constraint)
+      const defaultCenterGeozoneIds = [
+        accountId * 1000 + 1,
+        accountId * 1000 + 2,
+        accountId * 1000 + 3,
+      ];
       const existingCenters = await this.dbConnection
         .select()
         .from(schema.centers)
@@ -97,12 +101,12 @@ export class CentersSeederService implements OnModuleInit {
 
       const defaultCenters = [
         {
-          thirdPartyId: 1001,
-          siteid: 2001,
+          thirdPartyId: accountId * 1000 + 1,
+          siteid: accountId * 1000 + 2001,
           name: 'Center 001',
           fullname: 'Testing Center 001',
           geozone: 'TEST-ZONE-001',
-          geozoneId: 3001,
+          geozoneId: defaultCenterGeozoneIds[0],
           manager: 'Test Manager 001',
           groupid: 1,
           groupname: 'Test Group',
@@ -120,12 +124,12 @@ export class CentersSeederService implements OnModuleInit {
           timeoutin_muros_str: '00:30',
         },
         {
-          thirdPartyId: 1002,
-          siteid: 2002,
+          thirdPartyId: accountId * 1000 + 2,
+          siteid: accountId * 1000 + 2002,
           name: 'Center 002',
           fullname: 'Testing Center 002',
           geozone: 'TEST-ZONE-002',
-          geozoneId: 3002,
+          geozoneId: defaultCenterGeozoneIds[1],
           manager: 'Test Manager 002',
           groupid: 1,
           groupname: 'Test Group',
@@ -143,12 +147,12 @@ export class CentersSeederService implements OnModuleInit {
           timeoutin_muros_str: '00:30',
         },
         {
-          thirdPartyId: 1003,
-          siteid: 2003,
+          thirdPartyId: accountId * 1000 + 3,
+          siteid: accountId * 1000 + 2003,
           name: 'Center 003',
           fullname: 'Testing Center 003',
           geozone: 'TEST-ZONE-003',
-          geozoneId: 3003,
+          geozoneId: defaultCenterGeozoneIds[2],
           manager: 'Test Manager 003',
           groupid: 1,
           groupname: 'Test Group',
@@ -237,7 +241,12 @@ export class CentersSeederService implements OnModuleInit {
     }
 
     try {
-      const defaultCenterIds = [3001, 3002, 3003]; // geozoneIds of default centers
+      // Must match account-scoped geozone_ids used in seedDefaultCentersForAccount
+      const defaultCenterIds = [
+        accountId * 1000 + 1,
+        accountId * 1000 + 2,
+        accountId * 1000 + 3,
+      ];
 
       const centers = await this.dbConnection
         .select()

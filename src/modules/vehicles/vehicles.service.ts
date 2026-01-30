@@ -170,6 +170,9 @@ export class VehiclesService extends BaseService<Vehicle> {
           if (options.include.includes('incomingVehicles')) {
             withRelations.incomingVehicles = true;
           }
+          if (options.include.includes('qrCodes')) {
+            withRelations.qrCode = true;
+          }
         }
 
         // Get paginated results with relations
@@ -335,10 +338,7 @@ export class VehiclesService extends BaseService<Vehicle> {
                   selectColumns.accountId = schema.vehicles.accountId;
                 }
                 
-                // Only include qrCode if it exists
-                if (!isQrCodeError && schema.vehicles.qrCode) {
-                  selectColumns.qrCode = schema.vehicles.qrCode;
-                }
+                // qrCode is now in qr_codes table; use include=qrCodes to get it
                 
                 // Update total count
                 const [{ count: fallbackTotal }] = await this.dbConnection

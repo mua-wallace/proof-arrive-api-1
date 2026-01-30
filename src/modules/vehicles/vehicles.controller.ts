@@ -31,7 +31,7 @@ export class VehiclesController {
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles, qrCodes)' })
   async findAll(
     @Query() filterDto: FilterVehiclesDto,
     @CurrentUserCredentials() credentials: Credentials,
@@ -129,6 +129,33 @@ export class VehiclesController {
       throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
     }
     return this.vehiclesService.findOneBy(requestData, { accountId: accountIdNum });
+  }
+
+  @Get('qr-code/vehicle/:vehicleId')
+  @ApiOperation({
+    summary: 'Get QR code for a vehicle with vehicle details',
+    description: 'Returns the QR code (image data URL and string) for the given vehicleId (thirdPartyId), with full vehicle details included. Generates and stores the QR code if it does not exist yet.',
+  })
+  @ApiResponse({ status: 200, description: 'QR code and vehicle details returned successfully' })
+  @ApiResponse({ status: 404, description: 'Vehicle not found' })
+  async getQrCodeByVehicleId(
+    @Param('vehicleId') vehicleId: string,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<{
+    vehicle: Vehicle;
+    qrCodeDataUrl: string;
+    qrCodeString: string;
+    vehicleId: number;
+  }> {
+    const vehicleIdNum = Number(vehicleId);
+    if (isNaN(vehicleIdNum) || vehicleIdNum <= 0) {
+      throw new BadRequestException(`Invalid vehicle ID: ${vehicleId}`);
+    }
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    return this.qrCodeService.getQrCodeByVehicleId(vehicleIdNum, accountIdNum);
   }
 
   @Get('qr-code/:qrCode')
