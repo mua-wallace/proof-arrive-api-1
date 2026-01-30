@@ -30,15 +30,20 @@ jobs:
           # Create empty .env file to satisfy docker-compose's default behavior
           # docker-compose-build.yml doesn't use .env, but docker-compose looks for it by default
           # This prevents "env file not found" errors that cause build failures
-          touch .env
+          echo "# Empty .env file for docker-compose" > .env
+          echo "DATABASE_PASSWORD=" >> .env
+          # Verify file was created
+          ls -la .env
           # Build and push images
           # Note: Warnings about DATABASE_PASSWORD are harmless (docker-compose-build.yml doesn't use variables)
           docker compose -f docker-compose-build.yml build
           docker compose -f docker-compose-build.yml push
       - name: Notify Portainer
+        if: always()
+        continue-on-error: true
         run: |
-          curl --fail -X POST \
+          curl -X POST \
             -H "Content-Type: application/json" \
             -d '{"status": "success", "message": "Image successfully built and pushed"}' \
-            "${{ secrets.PORTAINER_WEBHOOK_URL }}"
+            "${{ secrets.PORTAINER_WEBHOOK_URL }}" || echo "Portainer notification failed (non-critical)"
             
