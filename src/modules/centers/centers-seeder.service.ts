@@ -29,10 +29,12 @@ export class CentersSeederService implements OnModuleInit {
    * @returns Promise that resolves when seeding is complete
    */
   async seedDefaultCentersForAccount(accountId: number): Promise<void> {
-    if (!accountId || accountId <= 0) {
+    const accountIdNum = Number(accountId);
+    if (!accountIdNum || accountIdNum <= 0 || isNaN(accountIdNum)) {
       this.logger.warn(`⚠️  Invalid accountId (${accountId}), skipping center seeding`);
       return;
     }
+    const accId = accountIdNum;
 
     try {
       // Verify database connection by checking if centers table is accessible
@@ -59,7 +61,7 @@ export class CentersSeederService implements OnModuleInit {
             // Extract a cleaner error message
             const errorMessage = this.extractCleanErrorMessage(lastError);
             this.logger.warn(
-              `⚠️  Database connection issue or centers table not ready after ${maxRetries} attempts for accountId ${accountId}: ${errorMessage}. Skipping seeding.`,
+              `⚠️  Database connection issue or centers table not ready after ${maxRetries} attempts for accountId ${accId}: ${errorMessage}. Skipping seeding.`,
             );
             return;
           }
@@ -67,7 +69,7 @@ export class CentersSeederService implements OnModuleInit {
           // Wait before retrying with exponential backoff
           const delay = initialDelay * Math.pow(2, attempt);
           this.logger.debug(
-            `⏳ Centers table not ready (attempt ${attempt + 1}/${maxRetries}) for accountId ${accountId}, retrying in ${delay}ms...`,
+            `⏳ Centers table not ready (attempt ${attempt + 1}/${maxRetries}) for accountId ${accId}, retrying in ${delay}ms...`,
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
@@ -75,16 +77,17 @@ export class CentersSeederService implements OnModuleInit {
 
       // Use account-scoped geozone_ids so they are globally unique (centers_geozone_id_unique constraint)
       const defaultCenterGeozoneIds = [
-        accountId * 1000 + 1,
-        accountId * 1000 + 2,
-        accountId * 1000 + 3,
+        accId * 1000 + 1,
+        accId * 1000 + 2,
+        accId * 1000 + 3,
       ];
+      // Check once: if all 3 default centers already exist for this account, skip entirely (create just once)
       const existingCenters = await this.dbConnection
         .select()
         .from(schema.centers)
         .where(
           and(
-            eq(schema.centers.accountId, accountId),
+            eq(schema.centers.accountId, accId),
             or(
               eq(schema.centers.geozoneId, defaultCenterGeozoneIds[0]),
               eq(schema.centers.geozoneId, defaultCenterGeozoneIds[1]),
@@ -93,16 +96,15 @@ export class CentersSeederService implements OnModuleInit {
           ),
         );
 
-      // If all 3 default centers exist for this account, skip seeding
       if (existingCenters.length >= 3) {
-        this.logger.debug(`⏭️  Default centers already exist for accountId ${accountId}, skipping seeding`);
+        this.logger.debug(`⏭️  Default centers already exist for accountId ${accId}, skipping seeding`);
         return;
       }
 
       const defaultCenters = [
         {
-          thirdPartyId: accountId * 1000 + 1,
-          siteid: accountId * 1000 + 2001,
+          thirdPartyId: accId * 1000 + 1,
+          siteid: accId * 1000 + 2001,
           name: 'Center 001',
           fullname: 'Testing Center 001',
           geozone: 'TEST-ZONE-001',
@@ -124,8 +126,8 @@ export class CentersSeederService implements OnModuleInit {
           timeoutin_muros_str: '00:30',
         },
         {
-          thirdPartyId: accountId * 1000 + 2,
-          siteid: accountId * 1000 + 2002,
+          thirdPartyId: accId * 1000 + 2,
+          siteid: accId * 1000 + 2002,
           name: 'Center 002',
           fullname: 'Testing Center 002',
           geozone: 'TEST-ZONE-002',
@@ -147,8 +149,8 @@ export class CentersSeederService implements OnModuleInit {
           timeoutin_muros_str: '00:30',
         },
         {
-          thirdPartyId: accountId * 1000 + 3,
-          siteid: accountId * 1000 + 2003,
+          thirdPartyId: accId * 1000 + 3,
+          siteid: accId * 1000 + 2003,
           name: 'Center 003',
           fullname: 'Testing Center 003',
           geozone: 'TEST-ZONE-003',
@@ -171,35 +173,37 @@ export class CentersSeederService implements OnModuleInit {
         },
       ];
 
+      let seededCount = 0;
       for (const centerData of defaultCenters) {
         try {
-          // Check if center already exists for this accountId by geozoneId (most reliable identifier)
+          // Check if center already exists for this account by geozoneId (most reliable identifier)
           const existingCenter = await this.dbConnection
             .select()
             .from(schema.centers)
             .where(
               and(
-                eq(schema.centers.accountId, accountId),
+                eq(schema.centers.accountId, accId),
                 eq(schema.centers.geozoneId, centerData.geozoneId),
               ),
             )
             .limit(1);
 
           if (existingCenter.length === 0) {
-            // Center doesn't exist for this account, insert it
+            // Center doesn't exist for this account, insert it (create just once)
             await this.dbConnection.insert(schema.centers).values({
               ...centerData,
-              accountId: accountId, // Multi-tenant: use the provided accountId
+              accountId: accId,
             }).execute();
-            this.logger.log(`✅ Seeded default center: ${centerData.name} (geozoneId: ${centerData.geozoneId}) for accountId ${accountId}`);
+            seededCount += 1;
+            this.logger.log(`✅ Seeded default center: ${centerData.name} (geozoneId: ${centerData.geozoneId}) for accountId ${accId}`);
           } else {
-            this.logger.debug(`⏭️  Default center ${centerData.name} (geozoneId: ${centerData.geozoneId}) already exists for accountId ${accountId}, skipping`);
+            this.logger.debug(`⏭️  Default center ${centerData.name} (geozoneId: ${centerData.geozoneId}) already exists for accountId ${accId}, skipping`);
           }
         } catch (centerError) {
           const errorMessage = centerError instanceof Error ? centerError.message : 'Unknown error';
           const errorStack = centerError instanceof Error ? centerError.stack : undefined;
           this.logger.error(
-            `❌ Error seeding center ${centerData.name} (geozoneId: ${centerData.geozoneId}) for accountId ${accountId}: ${errorMessage}`,
+            `❌ Error seeding center ${centerData.name} (geozoneId: ${centerData.geozoneId}) for accountId ${accId}: ${errorMessage}`,
             errorStack,
           );
           // Log the actual error details
@@ -210,10 +214,12 @@ export class CentersSeederService implements OnModuleInit {
         }
       }
 
-      this.logger.log(`✅ Default centers seeding completed for accountId ${accountId}`);
+      if (seededCount > 0) {
+        this.logger.log(`✅ Default centers seeding completed for accountId ${accId} (${seededCount} created)`);
+      }
     } catch (error) {
       this.logger.error(
-        `❌ Error seeding default centers for accountId ${accountId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `❌ Error seeding default centers for accountId ${accId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
         error instanceof Error ? error.stack : undefined,
       );
       // Don't throw - allow app to continue even if seeding fails
