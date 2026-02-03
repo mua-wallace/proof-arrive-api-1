@@ -2,7 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsNumber, IsString, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class FilterVehiclesDto {
+export class FilterVehicleGroupsDto {
   @ApiPropertyOptional({
     example: 1,
     description: 'Page number',
@@ -27,33 +27,41 @@ export class FilterVehiclesDto {
   limit?: number = 100;
 
   @ApiPropertyOptional({
-    example: 'ABC123',
-    description: 'Search term to filter vehicles',
+    example: 'Motos',
+    description: 'Search term to filter vehicle groups',
   })
   @IsOptional()
   @IsString()
   search?: string;
 
   @ApiPropertyOptional({
-    example: 'plate,model,brand',
-    description: 'Comma-separated list of fields to search in. Available fields: plate, model, brand, tag2',
+    example: 'groupName',
+    description: 'Comma-separated list of fields to search in. Available fields: groupName, groupId',
   })
   @IsOptional()
   @IsString()
   searchBy?: string;
 
   @ApiPropertyOptional({
-    example: 'createdAt:DESC,plate:ASC',
-    description: 'Comma-separated list of fields to sort by (format: field:direction). Available fields: id, accountId, createdAt, updatedAt, thirdPartyId, plate, model, brand, year, tag2, groupId, isActive, lastSyncedAt',
+    example: 'groupName:ASC',
+    description: 'Comma-separated list of fields to sort by (format: field:direction). Available fields: groupId, groupName, total',
   })
   @IsOptional()
   @IsString()
   sortBy?: string;
 
   @ApiPropertyOptional({
-    description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles, qrCodes, group)',
+    example: 'root',
+    description: 'Tree node (default: root)',
   })
   @IsOptional()
   @IsString()
-  include?: string;
+  node?: string;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Bulk sync vehicles to local database (default: false). Accepts boolean or string values: true, "true", "1"',
+  })
+  @IsOptional()
+  sync?: boolean | string;
 }

@@ -2,6 +2,7 @@ import { relations } from 'drizzle-orm';
 import { centers } from './centers.schema';
 import { geozones } from './geozones.schema';
 import { vehicles } from './vehicles.schema';
+import { vehicleGroups } from './vehicle-groups.schema';
 import { qrCodes } from './qr-codes.schema';
 import { users } from './users.schema';
 import { arrivals } from './arrivals.schema';
@@ -30,8 +31,19 @@ export const centersRelations = relations(centers, ({ one, many }) => ({
   }),
 }));
 
+// Vehicle Groups Relations
+export const vehicleGroupsRelations = relations(vehicleGroups, ({ many }) => ({
+  // One group can have many vehicles
+  vehicles: many(vehicles),
+}));
+
 // Vehicles Relations
 export const vehiclesRelations = relations(vehicles, ({ one, many }) => ({
+  // One vehicle belongs to one group (optional)
+  group: one(vehicleGroups, {
+    fields: [vehicles.groupId],
+    references: [vehicleGroups.id],
+  }),
   // One vehicle has at most one QR code (1:1)
   qrCode: one(qrCodes),
   // One vehicle can have many arrivals
@@ -151,7 +163,7 @@ export const incomingVehiclesRelations = relations(incomingVehicles, ({ one }) =
   // One incoming vehicle record belongs to one vehicle
   vehicle: one(vehicles, {
     fields: [incomingVehicles.vehicleId],
-    references: [vehicles.id],
+    references: [vehicles.thirdPartyId],
   }),
   // One incoming vehicle record has one destination center
   destinationCenter: one(centers, {

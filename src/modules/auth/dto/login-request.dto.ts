@@ -3,7 +3,7 @@ import { IsNotEmpty, IsString } from 'class-validator';
 
 export class LoginRequest {
   @ApiProperty({
-    example: 'sandou',
+    example: 'wallace',
     description: 'Username of the user',
   })
   @IsString()
@@ -11,7 +11,7 @@ export class LoginRequest {
   username: string;
 
   @ApiProperty({
-    example: 'sandou2022',
+    example: 'wallace2026',
     description: 'Password of the user',
   })
   @IsString()

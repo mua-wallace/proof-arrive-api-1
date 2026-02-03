@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, NotFoundException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { MalambiBaseApiService } from '@common/services/malambi-base-api.service';
@@ -20,6 +20,8 @@ export interface MalambiUser {
   k_p?: string;
   [key: string]: any;
 }
+
+import { transformVehicleGroups, VehicleGroupDto } from '@modules/vehicles/dto';
 
 interface LoginResponse {
   success: boolean;
@@ -256,6 +258,38 @@ export class MalambiApiService extends MalambiBaseApiService {
     }
 
     return this.transformVehicleDetail(data);
+  }
+
+  /**
+   * List vehicle groups from Malambi API (tree structure, optionally for a given node)
+   */
+  async listVehicleGroups(
+    token: string,
+    accId: string,
+    subId: string,
+    node = 'root',
+  ): Promise<VehicleGroupDto[]> {
+    if (!token || !accId || !subId) {
+      throw new UnauthorizedException(
+        'Unauthorized, Please make sure you are logged in correctly',
+      );
+    }
+
+    try {
+      const raw = await this.makeApiCall<any>(
+        'GET',
+        { frm: 'VehiclesSetting', task: 'list', select: 'groups', node },
+        undefined,
+        undefined,
+        { token, accId, subId },
+      );
+      const rawGroups = Array.isArray(raw) ? raw : raw?.rows ?? raw?.data ?? [];
+      return transformVehicleGroups(rawGroups);
+    } catch (error: any) {
+      throw new InternalServerErrorException(
+        `Failed to list vehicle groups: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
   }
 
   /**

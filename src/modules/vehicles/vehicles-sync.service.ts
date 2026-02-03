@@ -3,9 +3,10 @@ import { Inject } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from '@modules/schemas';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
 import { QueueService } from '@common/queue/queue.service';
+import { VehicleGroupDto } from './dto/vehicle-group.dto';
 
 @Injectable()
 export class VehiclesSyncService {
@@ -35,11 +36,16 @@ export class VehiclesSyncService {
     try {
       const thirdPartyId = vehicleData.id;
       
-      // Check if vehicle already exists by thirdPartyId
+      // Check if vehicle already exists by thirdPartyId and accountId
       const existingVehicle = await this.dbConnection
         .select()
         .from(schema.vehicles)
-        .where(eq(schema.vehicles.thirdPartyId, thirdPartyId))
+        .where(
+          and(
+            eq(schema.vehicles.thirdPartyId, thirdPartyId),
+            eq(schema.vehicles.accountId, accountId),
+          ),
+        )
         .limit(1);
 
       if (existingVehicle.length > 0) {
@@ -60,7 +66,23 @@ export class VehiclesSyncService {
         lastSyncedAt: new Date(),
       };
 
-      await this.dbConnection.insert(schema.vehicles).values(vehicleRecord).execute();
+      try {
+        await this.dbConnection.insert(schema.vehicles).values(vehicleRecord).execute();
+      } catch (insertError: any) {
+        // Handle unique constraint violation (duplicate thirdPartyId for this account)
+        const errorCode = insertError?.code;
+        const errorMessage = insertError?.message || '';
+        
+        // PostgreSQL unique constraint violation code
+        if (errorCode === '23505' || errorMessage.includes('unique constraint') || errorMessage.includes('duplicate key')) {
+          // Vehicle already exists, skip silently (idempotent operation)
+          this.logger.debug(`Vehicle with thirdPartyId=${thirdPartyId} already exists for accountId=${accountId}, skipping`);
+          return;
+        }
+        
+        // Re-throw other errors
+        throw insertError;
+      }
     } catch (error) {
       this.logger.error(`Error syncing vehicle:`, error instanceof Error ? error.stack : error);
       throw error;
@@ -68,9 +90,9 @@ export class VehiclesSyncService {
   }
 
   /**
-   * Check if vehicle exists in database by thirdPartyId (vehicleId)
+   * Check if vehicle exists in database by thirdPartyId (vehicleId) and accountId
    */
-  async vehicleExistsByVehicleId(vehicleId: number): Promise<boolean> {
+  async vehicleExistsByVehicleId(vehicleId: number, accountId: number): Promise<boolean> {
     if (!vehicleId) {
       return false;
     }
@@ -78,7 +100,12 @@ export class VehiclesSyncService {
     const vehicle = await this.dbConnection
       .select()
       .from(schema.vehicles)
-      .where(eq(schema.vehicles.thirdPartyId, vehicleId))
+      .where(
+        and(
+          eq(schema.vehicles.thirdPartyId, vehicleId),
+          eq(schema.vehicles.accountId, accountId),
+        ),
+      )
       .limit(1);
 
     return vehicle.length > 0;
@@ -87,8 +114,8 @@ export class VehiclesSyncService {
   /**
    * Check if vehicle exists in database
    */
-  async vehicleExists(thirdPartyId: number): Promise<boolean> {
-    return this.vehicleExistsByVehicleId(thirdPartyId);
+  async vehicleExists(thirdPartyId: number, accountId: number): Promise<boolean> {
+    return this.vehicleExistsByVehicleId(thirdPartyId, accountId);
   }
 
   /**
@@ -124,7 +151,8 @@ export class VehiclesSyncService {
       }
 
       // Check if vehicle already exists in database
-      const exists = await this.vehicleExistsByVehicleId(vehicleIdNum);
+      const accountIdNum = Number(accId);
+      const exists = await this.vehicleExistsByVehicleId(vehicleIdNum, accountIdNum);
       if (exists) {
         return {
           found: true,
@@ -138,7 +166,6 @@ export class VehiclesSyncService {
       const vehicleData = await this.malambiApi.getVehicleDetail(token, accId, subId, vehicleId);
 
       // Vehicle found in API, trigger background job to save it
-      const accountIdNum = Number(accId);
       await this.queueService.add('vehicle-sync', 'sync-vehicle', {
         vehicleData: {
           id: vehicleData.id,
@@ -182,10 +209,150 @@ export class VehiclesSyncService {
    * Ensure vehicle is synced - check if exists, if not trigger background sync job
    * Call this method when a vehicle is scanned/accessed
    */
-  async ensureVehicleSynced(thirdPartyId: number): Promise<void> {
-    const exists = await this.vehicleExists(thirdPartyId);
+  async ensureVehicleSynced(thirdPartyId: number, accountId: number): Promise<void> {
+    const exists = await this.vehicleExists(thirdPartyId, accountId);
     if (!exists) {
-      await this.queueService.add('vehicle-sync', 'sync-vehicle', { thirdPartyId });
+      await this.queueService.add('vehicle-sync', 'sync-vehicle', { thirdPartyId, accountId });
+    }
+  }
+
+  /**
+   * Bulk sync vehicles from vehicle groups
+   * Processes all vehicles from the groups and triggers background sync jobs for vehicles that don't exist
+   * @param groups - Array of vehicle groups with vehicles
+   * @param accountId - Account ID for multi-tenancy
+   * @returns Summary of sync operation
+   */
+  async bulkSyncVehiclesFromGroups(
+    groups: VehicleGroupDto[],
+    accountId: number,
+  ): Promise<{
+    totalGroups: number;
+    totalVehicles: number;
+    synced: number;
+    skipped: number;
+    errors: number;
+    message: string;
+  }> {
+    let totalVehicles = 0;
+    let synced = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    try {
+      for (const group of groups) {
+        if (!group.vehicles || group.vehicles.length === 0) {
+          continue;
+        }
+
+        totalVehicles += group.vehicles.length;
+
+        // First, ensure the group exists
+        let groupRecordId: number | null = null;
+        if (group.groupId) {
+          const [existingGroup] = await this.dbConnection
+            .select()
+            .from(schema.vehicleGroups)
+            .where(
+              and(
+                eq(schema.vehicleGroups.groupId, group.groupId),
+                eq(schema.vehicleGroups.accountId, accountId),
+              ),
+            )
+            .limit(1);
+
+          if (existingGroup) {
+            groupRecordId = existingGroup.id;
+          } else {
+            // Create group if it doesn't exist (handle unique constraint violations)
+            try {
+              const [newGroup] = await this.dbConnection
+                .insert(schema.vehicleGroups)
+                .values({
+                  accountId,
+                  groupId: group.groupId,
+                  groupName: group.groupName,
+                })
+                .returning({ id: schema.vehicleGroups.id });
+              groupRecordId = newGroup.id;
+            } catch (insertError: any) {
+              // Handle unique constraint violation (duplicate groupId for this account)
+              const errorCode = insertError?.code;
+              const errorMessage = insertError?.message || '';
+              
+              // PostgreSQL unique constraint violation code
+              if (errorCode === '23505' || errorMessage.includes('unique constraint') || errorMessage.includes('duplicate key')) {
+                // Group already exists, fetch it
+                this.logger.debug(`Group ${group.groupId} already exists for account ${accountId}, fetching...`);
+                const [existingGroupAfterConflict] = await this.dbConnection
+                  .select()
+                  .from(schema.vehicleGroups)
+                  .where(
+                    and(
+                      eq(schema.vehicleGroups.groupId, group.groupId),
+                      eq(schema.vehicleGroups.accountId, accountId),
+                    ),
+                  )
+                  .limit(1);
+                if (existingGroupAfterConflict) {
+                  groupRecordId = existingGroupAfterConflict.id;
+                }
+              } else {
+                // Re-throw other errors
+                throw insertError;
+              }
+            }
+          }
+        }
+
+        for (const vehicle of group.vehicles) {
+          try {
+            // Check if vehicle already exists (with accountId check)
+            const exists = await this.vehicleExistsByVehicleId(vehicle.id, accountId);
+            if (exists) {
+              skipped++;
+              continue;
+            }
+
+            // Trigger background sync job with vehicle data and groupId
+            await this.queueService.add('vehicle-sync', 'sync-vehicle', {
+              vehicleData: {
+                id: vehicle.id,
+                plate: vehicle.plate,
+                model: vehicle.model,
+                brand: vehicle.brand,
+                year: vehicle.year,
+                tag2: vehicle.tag2,
+                groupId: groupRecordId, // Use the group's database ID (not Malambi groupId)
+              },
+              accountId: accountId,
+            });
+
+            synced++;
+          } catch (error) {
+            this.logger.error(
+              `Error syncing vehicle ${vehicle.id} from group ${group.groupId}:`,
+              error instanceof Error ? error.stack : error,
+            );
+            errors++;
+          }
+        }
+      }
+
+      return {
+        totalGroups: groups.length,
+        totalVehicles,
+        synced,
+        skipped,
+        errors,
+        message: `Bulk sync completed: ${synced} synced, ${skipped} skipped, ${errors} errors`,
+      };
+    } catch (error) {
+      this.logger.error(
+        'Error in bulk sync vehicles from groups:',
+        error instanceof Error ? error.stack : error,
+      );
+      throw error;
     }
   }
 }

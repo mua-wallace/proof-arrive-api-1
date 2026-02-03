@@ -1,12 +1,12 @@
-import { Controller, Post, Get, Delete, Query, Param, BadRequestException, NotFoundException, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import { Controller, Post, Get, Delete, Query, Param, Body, BadRequestException, NotFoundException, UseGuards } from '@nestjs/common';
+import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { VehiclesService } from './vehicles.service';
 import { QrCodeService } from './qr-code.service';
 import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-credentials.decorator';
 import { Roles } from '@modules/auth/decorators/roles.decorator';
 import { RolesGuard } from '@modules/auth/guards/roles.guard';
-import { Credentials, PaginateResult } from '@common/interfaces';
-import { FilterVehiclesDto } from './dto';
+import { Credentials, PaginateQuery, PaginateResult } from '@common/interfaces';
+import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto } from './dto';
 import * as schema from '@modules/schemas';
 
 type Vehicle = typeof schema.vehicles.$inferSelect;
@@ -24,14 +24,14 @@ export class VehiclesController {
   @Get()
   @ApiOperation({
     summary: 'List all synced vehicles in the system with filtering and pagination',
-    description: 'Retrieves a paginated list of vehicles that have been synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (arrivals, exits, incomingVehicles).',
+    description: 'Retrieves a paginated list of vehicles that have been synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (arrivals, exits, incomingVehicles, qrCodes, group).',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles, qrCodes)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles, qrCodes, group)' })
   async findAll(
     @Query() filterDto: FilterVehiclesDto,
     @CurrentUserCredentials() credentials: Credentials,
@@ -85,13 +85,87 @@ export class VehiclesController {
     );
   }
 
+  @Get('groups/from-api')
+  @ApiOperation({
+    summary: 'Get vehicle groups from Malambi API with filtering and pagination',
+    description: 'Retrieves the vehicle groups tree from the Malambi API with support for pagination, filtering, searching, and sorting. Optional query param "node" (default: root) to list groups under a specific node. Optional query param "sync" (default: false) to bulk sync vehicles to local database.',
+  })
+  @ApiResponse({ status: 200, description: 'List of vehicle groups from Malambi API (paginated or array format)' })
+  async getVehicleGroupsFromApi(
+    @Query() filterDto: FilterVehicleGroupsDto,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<VehicleGroupDto[] | PaginateResult<VehicleGroupDto> | { groups: VehicleGroupDto[] | PaginateResult<VehicleGroupDto>; syncResult: any }> {
+    // Build pagination query
+    const query: PaginateQuery = {
+      page: filterDto.page ?? 1,
+      limit: filterDto.limit ?? 100,
+      search: filterDto.search,
+      searchBy: filterDto.searchBy ? filterDto.searchBy.split(',') : undefined,
+      sortBy: filterDto.sortBy
+        ? (filterDto.sortBy.split(',').map((s) => {
+            const [field, direction] = s.split(':');
+            return [field, (direction || 'ASC').toUpperCase()] as [string, 'ASC' | 'DESC'];
+          }) as [string, 'ASC' | 'DESC'][])
+        : undefined,
+    };
+
+    // Fetch groups with pagination/filtering
+    const groupsResult = await this.vehiclesService.listVehicleGroups(
+      credentials.token,
+      credentials.accid.toString(),
+      credentials.subid.toString(),
+      filterDto.node ?? 'root',
+      query,
+    );
+
+    // If sync parameter is true, trigger bulk sync
+    // Handle both boolean and string values from query params
+    const shouldSync = filterDto.sync === true || 
+                       filterDto.sync === 'true' || 
+                       filterDto.sync === '1';
+    if (shouldSync) {
+      const accountIdNum = Number(credentials.accid);
+      if (isNaN(accountIdNum) || accountIdNum <= 0) {
+        throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+      }
+
+      // Extract groups array from result (could be array or PaginateResult)
+      const groupsArray = Array.isArray(groupsResult) ? groupsResult : groupsResult.data;
+      
+      const syncResult = await this.vehiclesService.bulkSyncVehiclesFromGroups(groupsArray, accountIdNum);
+      return {
+        groups: groupsResult,
+        syncResult,
+      };
+    }
+
+    return groupsResult;
+  }
+
+  @Get('groups/database')
+  @ApiOperation({
+    summary: 'Get all vehicle groups with their vehicles from database',
+    description: 'Retrieves all vehicle groups that have been synced to the local database along with their associated vehicles. Returns groups ordered by name.',
+  })
+  @ApiResponse({ status: 200, description: 'List of vehicle groups with their vehicles', type: [VehicleGroupDto] })
+  async getAllGroupsWithVehicles(
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<VehicleGroupDto[]> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+
+    return this.vehiclesService.getAllGroupsWithVehicles(accountIdNum);
+  }
+
   @Get('find')
   @ApiOperation({
     summary: 'Find a vehicle by any field(s)',
-    description: 'Searches for a vehicle using one or more field criteria. Returns the first matching vehicle. Supports fields like: plate, thirdPartyId, model, brand, year, tag2, groupId, isActive, etc.',
+    description: 'Searches for a vehicle using one or more field criteria. Returns the first matching vehicle. Supports fields like: plate, id, model, brand, year, tag2, groupId, isActive, etc.',
   })
   @ApiQuery({ name: 'plate', required: false, type: String, description: 'Vehicle plate number' })
-  @ApiQuery({ name: 'thirdPartyId', required: false, type: Number, description: 'Third party ID from Malambi API' })
+  @ApiQuery({ name: 'id', required: false, type: Number, description: 'Vehicle ID (Malambi API vehicle ID)' })
   @ApiQuery({ name: 'model', required: false, type: String, description: 'Vehicle model' })
   @ApiQuery({ name: 'brand', required: false, type: String, description: 'Vehicle brand' })
   @ApiQuery({ name: 'year', required: false, type: Number, description: 'Vehicle year' })
@@ -107,7 +181,6 @@ export class VehiclesController {
     const requestData: Record<string, any> = {};
     
     if (query.id !== undefined) requestData.id = Number(query.id);
-    if (query.thirdPartyId !== undefined) requestData.thirdPartyId = Number(query.thirdPartyId);
     if (query.plate !== undefined) requestData.plate = query.plate;
     if (query.model !== undefined) requestData.model = query.model;
     if (query.brand !== undefined) requestData.brand = query.brand;
@@ -120,7 +193,7 @@ export class VehiclesController {
     
     // Validate that at least one search criterion is provided
     if (Object.keys(requestData).length === 0) {
-      throw new BadRequestException('At least one search criterion must be provided (e.g., plate, thirdPartyId, id, etc.)');
+      throw new BadRequestException('At least one search criterion must be provided (e.g., plate, id, model, etc.)');
     }
     
     // Convert accid to number for accountId (multi-tenant filtering)
@@ -134,7 +207,7 @@ export class VehiclesController {
   @Get('qr-code/vehicle/:vehicleId')
   @ApiOperation({
     summary: 'Get QR code for a vehicle with vehicle details',
-    description: 'Returns the QR code (image data URL and string) for the given vehicleId (thirdPartyId), with full vehicle details included. Generates and stores the QR code if it does not exist yet.',
+    description: 'Returns the QR code (image data URL and string) for the given vehicleId, with full vehicle details included. Generates and stores the QR code if it does not exist yet.',
   })
   @ApiResponse({ status: 200, description: 'QR code and vehicle details returned successfully' })
   @ApiResponse({ status: 404, description: 'Vehicle not found' })
@@ -237,7 +310,7 @@ export class VehiclesController {
   @Roles('admin', 'manager')
   @ApiOperation({
     summary: 'Generate QR code for a vehicle',
-    description: 'Generates a downloadable QR code for a vehicle. The QR code contains the vehicleId (thirdPartyId) as a string. Only users with admin or manager role can generate QR codes. A vehicle can have only one unique QR code. If a QR code already exists, it will be returned instead of generating a new one. The :id parameter can be either the internal database ID or the thirdPartyId (vehicleId from Malambi API).',
+    description: 'Generates a downloadable QR code for a vehicle. The QR code contains the vehicleId as a string. Only users with admin or manager role can generate QR codes. A vehicle can have only one unique QR code. If a QR code already exists, it will be returned instead of generating a new one. The :id parameter is the vehicle ID (Malambi API vehicle ID).',
   })
   @ApiResponse({ status: 200, description: 'QR code generated successfully' })
   @ApiResponse({ status: 403, description: 'Access denied. Admin or manager role required.' })
@@ -251,46 +324,27 @@ export class VehiclesController {
     vehicleId: number;
     vehicle: Vehicle;
   }> {
-    // Try to find vehicle by internal ID first, then by thirdPartyId
-    let vehicle: Vehicle;
+    // Find vehicle by ID (Malambi API vehicle ID)
     const numericId = Number(id);
     
     if (isNaN(numericId)) {
       throw new BadRequestException(`Invalid vehicle ID: ${id}`);
     }
 
-    // Convert accid to number for accountId (do this once before try block)
+    // Convert accid to number for accountId
     const accountIdNum = Number(credentials.accid);
     if (isNaN(accountIdNum) || accountIdNum <= 0) {
       throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
     }
 
-    try {
-      // First, try to find by internal database ID
-      vehicle = await this.vehiclesService.findOneById(numericId, {
-        accountId: accountIdNum,
-      });
-    } catch (error) {
-      // If not found by ID, try to find by thirdPartyId
-      if (error instanceof NotFoundException) {
-        try {
-          vehicle = await this.vehiclesService.findOneBy(
-            { thirdPartyId: numericId },
-            { accountId: accountIdNum },
-          );
-        } catch (secondError) {
-          throw new NotFoundException(
-            `Vehicle not found with ID ${id} (tried both internal ID and thirdPartyId)`,
-          );
-        }
-      } else {
-        throw error;
-      }
-    }
+    // Find vehicle by ID
+    const vehicle = await this.vehiclesService.findOneById(numericId, {
+      accountId: accountIdNum,
+    });
 
     // Generate QR code
     const qrCodeResult = await this.qrCodeService.generateQrCode(
-      vehicle.thirdPartyId,
+      vehicle.id,
       accountIdNum,
     );
 
@@ -304,7 +358,7 @@ export class VehiclesController {
   @Roles('admin', 'manager')
   @ApiOperation({
     summary: 'Regenerate QR code for a vehicle',
-    description: 'Regenerates (replaces) the QR code for a vehicle. Only users with admin or manager role can regenerate QR codes. The :id parameter can be either the internal database ID or the thirdPartyId (vehicleId from Malambi API).',
+    description: 'Regenerates (replaces) the QR code for a vehicle. Only users with admin or manager role can regenerate QR codes. The :id parameter is the vehicle ID (Malambi API vehicle ID).',
   })
   @ApiResponse({ status: 200, description: 'QR code regenerated successfully' })
   @ApiResponse({ status: 403, description: 'Access denied. Admin or manager role required.' })
@@ -318,62 +372,34 @@ export class VehiclesController {
     vehicleId: number;
     vehicle: Vehicle;
   }> {
-    // Try to find vehicle by internal ID first, then by thirdPartyId
-    let vehicle: Vehicle;
+    // Find vehicle by ID (Malambi API vehicle ID)
     const numericId = Number(id);
     
     if (isNaN(numericId)) {
       throw new BadRequestException(`Invalid vehicle ID: ${id}`);
     }
 
-    // Convert accid to number for accountId (do this once before try block)
+    // Convert accid to number for accountId
     const accountIdNum = Number(credentials.accid);
     if (isNaN(accountIdNum) || accountIdNum <= 0) {
       throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
     }
 
-    try {
-      // First, try to find by internal database ID
-      vehicle = await this.vehiclesService.findOneById(numericId, {
-        accountId: accountIdNum,
-      });
-    } catch (error) {
-      // If not found by ID, try to find by thirdPartyId
-      if (error instanceof NotFoundException) {
-        try {
-          vehicle = await this.vehiclesService.findOneBy(
-            { thirdPartyId: numericId },
-            { accountId: accountIdNum },
-          );
-        } catch (secondError) {
-          throw new NotFoundException(
-            `Vehicle not found with ID ${id} (tried both internal ID and thirdPartyId)`,
-          );
-        }
-      } else {
-        throw error;
-      }
-    }
+    // Find vehicle by ID
+    const vehicle = await this.vehiclesService.findOneById(numericId, {
+      accountId: accountIdNum,
+    });
 
     // Regenerate QR code
     const qrCodeResult = await this.qrCodeService.regenerateQrCode(
-      vehicle.thirdPartyId,
+      vehicle.id,
       accountIdNum,
     );
 
-    // Get updated vehicle (use the same lookup method)
-    let updatedVehicle: Vehicle;
-    try {
-      updatedVehicle = await this.vehiclesService.findOneById(vehicle.id, {
-        accountId: accountIdNum,
-      });
-    } catch {
-      // Fallback to thirdPartyId if needed
-      updatedVehicle = await this.vehiclesService.findOneBy(
-        { thirdPartyId: vehicle.thirdPartyId },
-        { accountId: accountIdNum },
-      );
-    }
+    // Get updated vehicle
+    const updatedVehicle = await this.vehiclesService.findOneById(vehicle.id, {
+      accountId: accountIdNum,
+    });
 
     return {
       ...qrCodeResult,
@@ -381,12 +407,111 @@ export class VehiclesController {
     };
   }
 
-  @Delete(':id')
+  @Post('qr-codes/bulk')
+  @Roles('admin', 'manager')
   @ApiOperation({
-    summary: 'Remove a vehicle from the system by ID',
-    description: 'Removes a vehicle from the database by its internal ID (serial integer).',
+    summary: 'Bulk generate QR codes for multiple vehicles',
+    description: 'Generates QR codes for multiple vehicles in a single request. Only users with admin or manager role can bulk generate QR codes. Vehicles that already have QR codes will return their existing QR codes. Returns a summary of successful, failed, and skipped operations.',
   })
-  async remove(
+  @ApiBody({ type: BulkQrCodeDto })
+  @ApiResponse({ status: 200, description: 'Bulk QR code generation completed' })
+  @ApiResponse({ status: 403, description: 'Access denied. Admin or manager role required.' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  async bulkGenerateQrCodes(
+    @Body() bulkQrCodeDto: BulkQrCodeDto,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<{
+    success: Array<{
+      vehicleId: number;
+      qrCodeDataUrl: string;
+      qrCodeString: string;
+    }>;
+    failed: Array<{
+      vehicleId: number;
+      error: string;
+    }>;
+    skipped: Array<{
+      vehicleId: number;
+      reason: string;
+    }>;
+    summary: {
+      total: number;
+      successCount: number;
+      failedCount: number;
+      skippedCount: number;
+    };
+  }> {
+    // Convert accid to number for accountId
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+
+    if (!bulkQrCodeDto.vehicleIds || bulkQrCodeDto.vehicleIds.length === 0) {
+      throw new BadRequestException('At least one vehicle ID is required');
+    }
+
+    return this.qrCodeService.bulkGenerateQrCodes(bulkQrCodeDto.vehicleIds, accountIdNum);
+  }
+
+  @Delete(':id/qr-code')
+  @Roles('admin', 'manager')
+  @ApiOperation({
+    summary: 'Delete QR code for a vehicle',
+    description: 'Deletes the QR code for a vehicle. Only users with admin or manager role can delete QR codes. The :id parameter is the vehicle ID (Malambi API vehicle ID / thirdPartyId).',
+  })
+  @ApiResponse({ status: 200, description: 'QR code deleted successfully' })
+  @ApiResponse({ status: 403, description: 'Access denied. Admin or manager role required.' })
+  @ApiResponse({ status: 404, description: 'Vehicle or QR code not found' })
+  @ApiResponse({ status: 400, description: 'Invalid account ID or vehicle ID' })
+  async deleteQrCode(
+    @Param('id') id: string,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<typeof schema.qrCodes.$inferSelect> {
+    // Find vehicle by ID (Malambi API vehicle ID / thirdPartyId)
+    const numericId = Number(id);
+    
+    if (isNaN(numericId)) {
+      throw new BadRequestException(`Invalid vehicle ID: ${id}`);
+    }
+
+    // Convert accid to number for accountId
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+
+    return this.qrCodeService.deleteQrCode(numericId, accountIdNum);
+  }
+
+  @Delete('group/:id')
+  @ApiOperation({
+    summary: 'Delete vehicle group',
+    description: 'Deletes a vehicle group from the database by its internal ID (serial integer). All vehicles in this group will have their groupId set to null before the group is deleted.',
+  })
+  @ApiResponse({ status: 200, description: 'Vehicle group deleted successfully' })
+  @ApiResponse({ status: 404, description: 'Vehicle group not found' })
+  @ApiResponse({ status: 400, description: 'Invalid account ID or group ID' })
+  async deleteVehicleGroup(
+    @Param('id') id: string,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<typeof schema.vehicleGroups.$inferSelect> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    return this.vehiclesService.removeGroup(Number(id), accountIdNum);
+  }
+
+  @Delete('vehicle/:id')
+  @ApiOperation({
+    summary: 'Delete vehicle',
+    description: 'Deletes a vehicle from the database by its internal ID (serial integer). This permanently removes the vehicle record.',
+  })
+  @ApiResponse({ status: 200, description: 'Vehicle deleted successfully' })
+  @ApiResponse({ status: 404, description: 'Vehicle not found' })
+  @ApiResponse({ status: 400, description: 'Invalid account ID or vehicle ID' })
+  async deleteVehicle(
     @Param('id') id: string,
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<Vehicle> {

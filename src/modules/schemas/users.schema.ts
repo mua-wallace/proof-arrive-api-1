@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, varchar, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, varchar, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { baseColumns } from './base.schema';
 
 // User roles enum
@@ -32,5 +32,6 @@ export const users = pgTable('users', {
   roleIdx: index('idx_users_role').on(table.role),
   lastLoginAtIdx: index('idx_users_last_login_at').on(table.lastLoginAt),
   accountAccidIdx: index('idx_users_account_accid').on(table.accountId, table.accid), // Composite index for accountId + accid queries
+  accidSubidUnique: uniqueIndex('uq_users_accid_subid').on(table.accid, table.subid), // Unique accid+subid combination per user
 }));
 

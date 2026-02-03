@@ -62,14 +62,14 @@ export class AuthService {
       throw new UnauthorizedException('Invalid user credentials: invalid account IDs');
     }
     
-    // Check if user exists in database
-    // accountId is mandatory for multi-tenant isolation
-    const userExists = await this.usersSyncService.userExists(accidStr);
-    
+    // Check if this specific user (accid+subid) exists in database
+    // Each login creates/syncs one user per accid+subid, so list shows all users who have logged in
+    const userExists = await this.usersSyncService.userExistsByAccidAndSubid(accidStr, subidStr);
+
     if (!userExists) {
       // User doesn't exist, trigger background sync job with full user data
       // Center seeding will happen automatically in the queue processor after user sync
-      await this.queueService.add('user-sync', 'sync-user', { 
+      await this.queueService.add('user-sync', 'sync-user', {
         userData: {
           accid: accidStr,
           subid: subidStr,
@@ -84,12 +84,12 @@ export class AuthService {
           expire: user.expire || '0',
           k_p: user.k_p || '',
           email: user.email, // Optional email from Malambi API
-        }
+        },
       });
     } else {
-      // User exists, update lastLoginAt
+      // User exists, update lastLoginAt for this user (accid+subid)
       try {
-        await this.usersSyncService.updateLastLogin(accidStr);
+        await this.usersSyncService.updateLastLogin(accidStr, subidStr);
       } catch (error: any) {
         // Log but don't fail login if updateLastLogin fails
         const errorCode = error?.code;

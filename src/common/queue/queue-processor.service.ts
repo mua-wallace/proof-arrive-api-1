@@ -88,12 +88,15 @@ export class QueueProcessorService implements OnModuleInit {
         return;
       }
 
-      // Check if user already exists before syncing
-      const userExists = await this.usersSyncService.userExists(jobData.userData.accid);
-      
+      // Check if this user (accid+subid) already exists before syncing
+      const userExists = await this.usersSyncService.userExistsByAccidAndSubid(
+        jobData.userData.accid,
+        jobData.userData.subid,
+      );
+
       // Sync user (this will only create if user doesn't exist)
       await this.usersSyncService.syncUser(jobData.userData);
-      
+
       // If user was newly created, seed default centers for their accountId
       if (!userExists) {
         const accountId = Number(jobData.userData.accid);

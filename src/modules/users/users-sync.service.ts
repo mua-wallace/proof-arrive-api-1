@@ -44,16 +44,19 @@ export class UsersSyncService {
       // Multiple users/agents can belong to the same account
       const accountIdNum = Number(accidStr);
       
-      // Check if user already exists - only check by accid (not accountId)
-      // Multiple users can have the same accountId, but accid should be unique per user
-      // Use sql template to explicitly cast the parameter as text for accid
+      // Check if user already exists by accid AND subid (not accountId)
+      // Multiple users can have the same accountId, but accid+subid combination should be unique per user
+      // Use sql template to explicitly cast the parameters as text for accid and subid
       let existingUser: any[] = [];
       try {
         existingUser = await this.dbConnection
           .select()
           .from(schema.users)
           .where(
-            sql`${schema.users.accid} = ${accidStr}::text`,
+            and(
+              sql`${schema.users.accid} = ${accidStr}::text`,
+              sql`${schema.users.subid} = ${subidStr}::text`,
+            ),
           )
           .limit(1);
       } catch (error: any) {
@@ -84,7 +87,10 @@ export class UsersSyncService {
             })
             .from(schema.users)
             .where(
-              sql`${schema.users.accid} = ${accidStr}::text`,
+              and(
+                sql`${schema.users.accid} = ${accidStr}::text`,
+                sql`${schema.users.subid} = ${subidStr}::text`,
+              ),
             )
             .limit(1);
         } else {
@@ -93,6 +99,7 @@ export class UsersSyncService {
       }
 
       if (existingUser.length > 0) {
+        this.logger.debug(`User with accid=${accidStr} and subid=${subidStr} already exists, skipping creation`);
         return;
       }
 
@@ -144,9 +151,20 @@ export class UsersSyncService {
           userRecord.email = userData.email || null;
           await this.dbConnection.insert(schema.users).values(userRecord).execute();
         } catch (insertError: any) {
-          // If insert still fails, fall back to raw SQL
-          const errorMessage = insertError instanceof Error ? insertError.message : String(insertError);
-          if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role') || errorMessage?.toLowerCase().includes('fullname')) {
+          // Handle unique constraint violation (duplicate accid+subid)
+          const errorCode = insertError?.code;
+          const errorMessage = insertError?.message || '';
+          
+          // PostgreSQL unique constraint violation code
+          if (errorCode === '23505' || errorMessage.includes('unique constraint') || errorMessage.includes('duplicate key') || errorMessage.includes('uq_users_accid_subid')) {
+            // User already exists (accid+subid combination), skip silently (idempotent operation)
+            this.logger.debug(`User with accid=${accidStr} and subid=${subidStr} already exists, skipping`);
+            return;
+          }
+          
+          // If insert still fails due to missing columns, fall back to raw SQL
+          const errorMessageLower = errorMessage.toLowerCase();
+          if (errorMessageLower.includes('email') || errorMessageLower.includes('role') || errorMessageLower.includes('fullname')) {
             this.logger.warn('email/role/fullname columns missing, using raw SQL insert. Run migration 0005_add_user_fields.sql');
             await this.insertUserWithRawSql(userRecord, accountIdNum);
           } else {
@@ -156,7 +174,22 @@ export class UsersSyncService {
       } else {
         // Columns don't exist, use Drizzle insert without email/role/fullname
         this.logger.warn('email/role/fullname columns missing, inserting user without these fields using Drizzle. Run migration 0005_add_user_fields.sql');
-        await this.insertUserWithRawSql(userRecord, accountIdNum);
+        try {
+          await this.insertUserWithRawSql(userRecord, accountIdNum);
+        } catch (insertError: any) {
+          // Handle unique constraint violation (duplicate accid+subid)
+          const errorCode = insertError?.code;
+          const errorMessage = insertError?.message || '';
+          
+          // PostgreSQL unique constraint violation code
+          if (errorCode === '23505' || errorMessage.includes('unique constraint') || errorMessage.includes('duplicate key') || errorMessage.includes('uq_users_accid_subid')) {
+            // User already exists (accid+subid combination), skip silently (idempotent operation)
+            this.logger.debug(`User with accid=${accidStr} and subid=${subidStr} already exists, skipping`);
+            return;
+          }
+          
+          throw insertError;
+        }
       }
     } catch (error) {
       this.logger.error(`Error syncing user:`, error instanceof Error ? error.stack : error);
@@ -241,21 +274,63 @@ export class UsersSyncService {
 
   /**
    * Update lastLoginAt timestamp for existing user
-   * Updates by accid only (not accountId) - multiple users can have same accountId
+   * Updates by accid AND subid so we update the correct user (one user per accid+subid)
    */
-  async updateLastLogin(accid: string | number): Promise<void> {
+  async updateLastLogin(accid: string | number, subid: string | number): Promise<void> {
     const accidStr = String(accid);
-    
+    const subidStr = String(subid);
+
     await this.dbConnection
       .update(schema.users)
-      .set({ 
+      .set({
         lastLoginAt: new Date(),
         updatedAt: new Date(),
       })
       .where(
-        sql`${schema.users.accid} = ${accidStr}::text`,
+        and(
+          sql`${schema.users.accid} = ${accidStr}::text`,
+          sql`${schema.users.subid} = ${subidStr}::text`,
+        ),
       )
       .execute();
+  }
+
+  /**
+   * Check if user exists in database by accid AND subid
+   * Use this to decide whether to sync on login (each accid+subid is one user)
+   */
+  async userExistsByAccidAndSubid(accid: string | number, subid: string | number): Promise<boolean> {
+    const accidStr = String(accid);
+    const subidStr = String(subid);
+    try {
+      const user = await this.dbConnection
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            sql`${schema.users.accid} = ${accidStr}::text`,
+            sql`${schema.users.subid} = ${subidStr}::text`,
+          ),
+        )
+        .limit(1);
+      return user.length > 0;
+    } catch (error: any) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role')) {
+        const user = await this.dbConnection
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(
+            and(
+              sql`${schema.users.accid} = ${accidStr}::text`,
+              sql`${schema.users.subid} = ${subidStr}::text`,
+            ),
+          )
+          .limit(1);
+        return user.length > 0;
+      }
+      throw error;
+    }
   }
 
   /**

@@ -29,6 +29,20 @@
       "when": 1768380848691,
       "tag": "0003_fine_alice",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1738584000000,
+      "tag": "0010_create_vehicle_groups_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1738584000001,
+      "tag": "0011_add_unique_constraint_users_accid_subid",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, Logger, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger, InternalServerErrorException, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { VehiclesSyncService } from './vehicles-sync.service';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
@@ -6,6 +6,7 @@ import { PaginateQuery, PaginateResult, BaseEntity } from '@common/interfaces';
 import { BaseService } from '@common/services/base.service';
 import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
+import { VehicleGroupDto, VehicleDto } from './dto/vehicle-group.dto';
 
 type Vehicle = typeof schema.vehicles.$inferSelect & BaseEntity;
 
@@ -172,6 +173,9 @@ export class VehiclesService extends BaseService<Vehicle> {
           }
           if (options.include.includes('qrCodes')) {
             withRelations.qrCode = true;
+          }
+          if (options.include.includes('group')) {
+            withRelations.group = true;
           }
         }
 
@@ -678,6 +682,235 @@ export class VehiclesService extends BaseService<Vehicle> {
   }
 
   /**
+   * List vehicle groups from Malambi API (tree structure, optionally for a given node)
+   * Supports pagination, filtering, and searching
+   */
+  async listVehicleGroups(
+    token: string,
+    accId: string,
+    subId: string,
+    node = 'root',
+    query?: PaginateQuery,
+  ): Promise<VehicleGroupDto[] | PaginateResult<VehicleGroupDto>> {
+    if (!token || !accId || !subId) {
+      throw new UnauthorizedException(
+        'Unauthorized. Please make sure you are logged in correctly',
+      );
+    }
+
+    try {
+      // Fetch all groups from API
+      const allGroups = await this.malambiApi.listVehicleGroups(token, accId, subId, node);
+
+      // If no pagination/filtering requested, return as-is
+      if (!query || (!query.search && !query.page && !query.limit && !query.sortBy)) {
+        return allGroups;
+      }
+
+      // Apply filtering and searching
+      let filteredGroups = [...allGroups];
+
+      // Apply search if provided
+      if (query.search && query.searchBy && query.searchBy.length > 0) {
+        const searchTerm = query.search.toLowerCase();
+        filteredGroups = filteredGroups.filter((group) => {
+          return query.searchBy!.some((field) => {
+            switch (field) {
+              case 'groupName':
+                return group.groupName?.toLowerCase().includes(searchTerm);
+              case 'groupId':
+                return group.groupId?.toString().includes(searchTerm);
+              default:
+                return false;
+            }
+          });
+        });
+      }
+
+      // Apply sorting
+      if (query.sortBy && query.sortBy.length > 0) {
+        filteredGroups.sort((a, b) => {
+          for (const [field, direction] of query.sortBy!) {
+            let comparison = 0;
+            switch (field) {
+              case 'groupId':
+                comparison = a.groupId - b.groupId;
+                break;
+              case 'groupName':
+                comparison = (a.groupName || '').localeCompare(b.groupName || '');
+                break;
+              case 'total':
+                comparison = a.total - b.total;
+                break;
+              default:
+                continue;
+            }
+            if (comparison !== 0) {
+              return direction === 'DESC' ? -comparison : comparison;
+            }
+          }
+          return 0;
+        });
+      } else {
+        // Default sort by groupName ASC
+        filteredGroups.sort((a, b) => (a.groupName || '').localeCompare(b.groupName || ''));
+      }
+
+      // Calculate pagination
+      const page = query.page || 1;
+      const limit = query.limit || 100;
+      const totalItems = filteredGroups.length;
+      const totalPages = Math.ceil(totalItems / limit);
+      const offset = (page - 1) * limit;
+      const paginatedGroups = filteredGroups.slice(offset, offset + limit);
+
+      // Build pagination result
+      const result: PaginateResult<VehicleGroupDto> = {
+        data: paginatedGroups,
+        meta: {
+          itemsPerPage: limit,
+          totalItems,
+          currentPage: page,
+          totalPages,
+          sortBy: query.sortBy || [],
+          search: query.search,
+          searchBy: query.searchBy,
+        },
+        links: {
+          first: page > 1 ? `?page=1&limit=${limit}` : undefined,
+          previous: page > 1 ? `?page=${page - 1}&limit=${limit}` : undefined,
+          current: `?page=${page}&limit=${limit}`,
+          next: page < totalPages ? `?page=${page + 1}&limit=${limit}` : undefined,
+          last: page < totalPages ? `?page=${totalPages}&limit=${limit}` : undefined,
+        },
+      };
+
+      return result;
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to list vehicle groups: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      if (error instanceof UnauthorizedException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to list vehicle groups: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Bulk sync vehicles from vehicle groups
+   * Processes all vehicles from the groups and triggers background sync jobs for vehicles that don't exist
+   */
+  async bulkSyncVehiclesFromGroups(
+    groups: VehicleGroupDto[],
+    accountId: number,
+  ) {
+    if (!groups || groups.length === 0) {
+      throw new BadRequestException('No groups provided for bulk sync');
+    }
+
+    if (!accountId || accountId <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${accountId}`);
+    }
+
+    try {
+      return await this.vehiclesSyncService.bulkSyncVehiclesFromGroups(groups, accountId);
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to bulk sync vehicles from groups: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      if (error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to bulk sync vehicles: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Get all vehicle groups with their associated vehicles from the database
+   * @param accountId - Account ID for multi-tenancy
+   * @returns Array of groups with their vehicles
+   */
+  async getAllGroupsWithVehicles(accountId: number): Promise<VehicleGroupDto[]> {
+    if (!accountId || accountId <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${accountId}`);
+    }
+
+    try {
+      // Query all groups for this account
+      const groups = await this.dbConnection
+        .select()
+        .from(schema.vehicleGroups)
+        .where(eq(schema.vehicleGroups.accountId, accountId))
+        .orderBy(asc(schema.vehicleGroups.groupName));
+
+      if (groups.length === 0) {
+        return [];
+      }
+
+      // Get all group IDs
+      const groupIds = groups.map((g) => g.id);
+
+      // Query all vehicles for these groups
+      const vehicles = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(
+          and(
+            eq(schema.vehicles.accountId, accountId),
+            inArray(schema.vehicles.groupId, groupIds),
+          ),
+        );
+
+      // Group vehicles by groupId
+      const vehiclesByGroupId = new Map<number, typeof vehicles>();
+      for (const vehicle of vehicles) {
+        if (vehicle.groupId) {
+          if (!vehiclesByGroupId.has(vehicle.groupId)) {
+            vehiclesByGroupId.set(vehicle.groupId, []);
+          }
+          vehiclesByGroupId.get(vehicle.groupId)!.push(vehicle);
+        }
+      }
+
+      // Transform to VehicleGroupDto format
+      return groups.map((group) => {
+        const groupVehicles = vehiclesByGroupId.get(group.id) || [];
+        return {
+          groupId: group.groupId, // Malambi API group ID
+          groupName: group.groupName,
+          total: groupVehicles.length,
+          vehicles: groupVehicles.map((vehicle): VehicleDto => ({
+            id: vehicle.id, // Local database ID (serial integer)
+            thirdPartyId: vehicle.thirdPartyId,
+            accountId: vehicle.accountId,
+            plate: vehicle.plate,
+            model: vehicle.model ?? undefined,
+            brand: vehicle.brand ?? undefined,
+            year: vehicle.year ?? undefined,
+            tag2: vehicle.tag2 ?? undefined,
+            isActive: vehicle.isActive ?? undefined,
+            lastSyncedAt: vehicle.lastSyncedAt ?? undefined,
+            createdAt: vehicle.createdAt ?? undefined,
+            updatedAt: vehicle.updatedAt ?? undefined,
+            // Exclude groupId from vehicle response as requested
+          })),
+        };
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to get groups with vehicles for accountId ${accountId}: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      throw new InternalServerErrorException(
+        `Failed to get groups with vehicles: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
    * Override BaseService.remove to handle number IDs (serial) instead of string IDs (UUID)
    */
   async remove(id: number | string, accountId?: number): Promise<Vehicle> {
@@ -707,6 +940,86 @@ export class VehiclesService extends BaseService<Vehicle> {
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
         `Failed to remove vehicle: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Delete a vehicle group by ID
+   * @param id - The group's database ID (serial integer)
+   * @param accountId - Account ID for multi-tenancy
+   * @returns The deleted group
+   */
+  async removeGroup(id: number | string, accountId: number): Promise<typeof schema.vehicleGroups.$inferSelect> {
+    const numericId = typeof id === 'string' ? Number(id) : id;
+
+    if (!numericId || isNaN(numericId)) {
+      throw new NotFoundException(`Invalid group ID: ${id}`);
+    }
+
+    if (!accountId || accountId <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${accountId}`);
+    }
+
+    try {
+      // First check if group exists and belongs to the account
+      const [group] = await this.dbConnection
+        .select()
+        .from(schema.vehicleGroups)
+        .where(
+          and(
+            eq(schema.vehicleGroups.id, numericId),
+            eq(schema.vehicleGroups.accountId, accountId),
+          ),
+        )
+        .limit(1);
+
+      if (!group) {
+        throw new NotFoundException(`Vehicle group with ID ${id} not found for this account`);
+      }
+
+      // Check if group has vehicles (optional: prevent deletion if vehicles exist)
+      const [vehiclesCount] = await this.dbConnection
+        .select({ count: count() })
+        .from(schema.vehicles)
+        .where(
+          and(
+            eq(schema.vehicles.groupId, numericId),
+            eq(schema.vehicles.accountId, accountId),
+          ),
+        );
+
+      if (vehiclesCount.count > 0) {
+        // Set vehicles' groupId to null before deleting group (cascade behavior)
+        await this.dbConnection
+          .update(schema.vehicles)
+          .set({ groupId: null })
+          .where(
+            and(
+              eq(schema.vehicles.groupId, numericId),
+              eq(schema.vehicles.accountId, accountId),
+            ),
+          )
+          .execute();
+      }
+
+      // Delete the group
+      await this.dbConnection
+        .delete(schema.vehicleGroups)
+        .where(
+          and(
+            eq(schema.vehicleGroups.id, numericId),
+            eq(schema.vehicleGroups.accountId, accountId),
+          ),
+        )
+        .execute();
+
+      return group;
+    } catch (error: any) {
+      this.logger.error(`Failed to remove vehicle group with id=${numericId}: ${error?.message || 'Unknown error'}`, error?.stack);
+      if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to remove vehicle group: ${error?.message || 'Unknown error occurred'}`,
       );
     }
   }

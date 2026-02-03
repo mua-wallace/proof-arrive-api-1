@@ -357,4 +357,258 @@ export class QrCodeService {
       );
     }
   }
+
+  /**
+   * Bulk generate QR codes for multiple vehicles
+   * @param vehicleIds - Array of vehicle thirdPartyIds
+   * @param accountId - The account ID for multi-tenancy
+   * @returns Results with success, failed, and skipped counts
+   */
+  async bulkGenerateQrCodes(
+    vehicleIds: number[],
+    accountId: number,
+  ): Promise<{
+    success: Array<{
+      vehicleId: number;
+      qrCodeDataUrl: string;
+      qrCodeString: string;
+    }>;
+    failed: Array<{
+      vehicleId: number;
+      error: string;
+    }>;
+    skipped: Array<{
+      vehicleId: number;
+      reason: string;
+    }>;
+    summary: {
+      total: number;
+      successCount: number;
+      failedCount: number;
+      skippedCount: number;
+    };
+  }> {
+    const results = {
+      success: [] as Array<{
+        vehicleId: number;
+        qrCodeDataUrl: string;
+        qrCodeString: string;
+      }>,
+      failed: [] as Array<{
+        vehicleId: number;
+        error: string;
+      }>,
+      skipped: [] as Array<{
+        vehicleId: number;
+        reason: string;
+      }>,
+    };
+
+    if (!vehicleIds || vehicleIds.length === 0) {
+      throw new BadRequestException('At least one vehicle ID is required');
+    }
+
+    // Validate all vehicle IDs are numbers
+    const validVehicleIds = vehicleIds.filter((id) => {
+      const numId = Number(id);
+      return !isNaN(numId) && numId > 0;
+    });
+
+    if (validVehicleIds.length === 0) {
+      throw new BadRequestException('No valid vehicle IDs provided');
+    }
+
+    // Process each vehicle ID
+    for (const vehicleId of validVehicleIds) {
+      try {
+        // Check if vehicle exists
+        const [vehicle] = await this.dbConnection
+          .select()
+          .from(schema.vehicles)
+          .where(
+            and(
+              eq(schema.vehicles.thirdPartyId, vehicleId),
+              eq(schema.vehicles.accountId, accountId),
+            ),
+          )
+          .limit(1);
+
+        if (!vehicle) {
+          results.skipped.push({
+            vehicleId,
+            reason: `Vehicle with ID ${vehicleId} not found for this account`,
+          });
+          continue;
+        }
+
+        // Check if QR code already exists
+        const [existingQr] = await this.dbConnection
+          .select()
+          .from(schema.qrCodes)
+          .where(
+            and(
+              eq(schema.qrCodes.vehicleThirdPartyId, vehicle.thirdPartyId),
+              eq(schema.qrCodes.accountId, accountId),
+            ),
+          )
+          .limit(1);
+
+        if (existingQr) {
+          // Decrypt and return existing QR code
+          let decryptedQrCode: string;
+          try {
+            if (this.encryptionService.isEncrypted(existingQr.qrCode)) {
+              decryptedQrCode = this.encryptionService.decrypt(existingQr.qrCode);
+            } else {
+              decryptedQrCode = existingQr.qrCode;
+              // Re-encrypt and update for security
+              const encryptedQrCode = this.encryptionService.encrypt(decryptedQrCode);
+              await this.dbConnection
+                .update(schema.qrCodes)
+                .set({
+                  qrCode: encryptedQrCode,
+                  updatedAt: new Date(),
+                })
+                .where(eq(schema.qrCodes.id, existingQr.id))
+                .execute();
+            }
+          } catch (error) {
+            this.logger.warn(`Failed to decrypt existing QR code for vehicle ${vehicleId}, regenerating...`);
+            decryptedQrCode = String(vehicleId);
+            const encryptedQrCode = this.encryptionService.encrypt(decryptedQrCode);
+            await this.dbConnection
+              .update(schema.qrCodes)
+              .set({
+                qrCode: encryptedQrCode,
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.qrCodes.id, existingQr.id))
+              .execute();
+          }
+
+          const qrCodeDataUrl = await QRCode.toDataURL(decryptedQrCode, {
+            errorCorrectionLevel: 'M',
+            width: 300,
+            margin: 1,
+          });
+
+          results.success.push({
+            vehicleId: vehicle.thirdPartyId,
+            qrCodeDataUrl,
+            qrCodeString: decryptedQrCode,
+          });
+          continue;
+        }
+
+        // Generate new QR code
+        const qrCodeString = String(vehicleId);
+        const encryptedQrCode = this.encryptionService.encrypt(qrCodeString);
+
+        const qrCodeDataUrl = await QRCode.toDataURL(qrCodeString, {
+          errorCorrectionLevel: 'M',
+          width: 300,
+          margin: 1,
+        });
+
+        await this.dbConnection
+          .insert(schema.qrCodes)
+          .values({
+            accountId,
+            vehicleThirdPartyId: vehicle.thirdPartyId,
+            qrCode: encryptedQrCode,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .execute();
+
+        this.logger.log(`Generated QR code for vehicle ${vehicleId} (accountId: ${accountId})`);
+
+        results.success.push({
+          vehicleId: vehicle.thirdPartyId,
+          qrCodeDataUrl,
+          qrCodeString,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Error generating QR code for vehicle ${vehicleId}:`,
+          error instanceof Error ? error.stack : error,
+        );
+        results.failed.push({
+          vehicleId,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    return {
+      ...results,
+      summary: {
+        total: validVehicleIds.length,
+        successCount: results.success.length,
+        failedCount: results.failed.length,
+        skippedCount: results.skipped.length,
+      },
+    };
+  }
+
+  /**
+   * Delete QR code for a vehicle
+   * @param vehicleId - The vehicle's thirdPartyId
+   * @param accountId - The account ID for multi-tenancy
+   * @returns The deleted QR code record
+   */
+  async deleteQrCode(vehicleId: number, accountId: number): Promise<typeof schema.qrCodes.$inferSelect> {
+    try {
+      // Find vehicle and verify it belongs to the account
+      const [vehicle] = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(
+          and(
+            eq(schema.vehicles.thirdPartyId, vehicleId),
+            eq(schema.vehicles.accountId, accountId),
+          ),
+        )
+        .limit(1);
+
+      if (!vehicle) {
+        throw new NotFoundException(`Vehicle with ID ${vehicleId} not found for this account`);
+      }
+
+      // Find QR code
+      const [qrCode] = await this.dbConnection
+        .select()
+        .from(schema.qrCodes)
+        .where(
+          and(
+            eq(schema.qrCodes.vehicleThirdPartyId, vehicle.thirdPartyId),
+            eq(schema.qrCodes.accountId, accountId),
+          ),
+        )
+        .limit(1);
+
+      if (!qrCode) {
+        throw new NotFoundException(`QR code not found for vehicle with ID ${vehicleId}`);
+      }
+
+      // Delete the QR code
+      await this.dbConnection
+        .delete(schema.qrCodes)
+        .where(eq(schema.qrCodes.id, qrCode.id))
+        .execute();
+
+      this.logger.log(`Deleted QR code for vehicle ${vehicleId} (accountId: ${accountId})`);
+
+      return qrCode;
+    } catch (error) {
+      this.logger.error(
+        `Error deleting QR code for vehicle ${vehicleId}:`,
+        error instanceof Error ? error.stack : error,
+      );
+      if (error instanceof NotFoundException) throw error;
+      throw new BadRequestException(
+        `Failed to delete QR code: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+  }
 }
