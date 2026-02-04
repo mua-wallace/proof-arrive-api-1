@@ -7,6 +7,9 @@ import { BaseService } from '@common/services/base.service';
 import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 import { VehicleGroupDto, VehicleDto } from './dto/vehicle-group.dto';
+import { QrCodeService } from './qr-code.service';
+import { EncryptionService } from '@common/services/encryption.service';
+import * as QRCode from 'qrcode';
 
 type Vehicle = typeof schema.vehicles.$inferSelect & BaseEntity;
 
@@ -20,6 +23,8 @@ export class VehiclesService extends BaseService<Vehicle> {
     db: any,
     private readonly vehiclesSyncService: VehiclesSyncService,
     private readonly malambiApi: MalambiApiService,
+    private readonly qrCodeService: QrCodeService,
+    private readonly encryptionService: EncryptionService,
   ) {
     // Note: vehicles table uses serial ID and no deletedAt, so we pass it but override methods
     super(db, schema.vehicles as any);
@@ -831,9 +836,13 @@ export class VehiclesService extends BaseService<Vehicle> {
   /**
    * Get all vehicle groups with their associated vehicles from the database
    * @param accountId - Account ID for multi-tenancy
+   * @param options - Optional include relations (e.g., qrCodes)
    * @returns Array of groups with their vehicles
    */
-  async getAllGroupsWithVehicles(accountId: number): Promise<VehicleGroupDto[]> {
+  async getAllGroupsWithVehicles(
+    accountId: number,
+    options?: { include?: string[] },
+  ): Promise<VehicleGroupDto[]> {
     if (!accountId || accountId <= 0) {
       throw new BadRequestException(`Invalid account ID: ${accountId}`);
     }
@@ -864,6 +873,104 @@ export class VehiclesService extends BaseService<Vehicle> {
           ),
         );
 
+      // Fetch QR codes only if requested via include parameter
+      const qrCodesMap = new Map<number, { qrCodeDataUrl: string; qrCodeString: string }>();
+      const shouldIncludeQrCodes = options?.include?.includes('qrCodes');
+
+      if (shouldIncludeQrCodes && vehicles.length > 0) {
+        try {
+          const vehicleThirdPartyIds = vehicles.map((v) => v.thirdPartyId);
+
+          // Try to use Drizzle relational query API first (similar to findAll)
+          try {
+            const vehicleIds = vehicles.map((v) => v.id);
+            const vehiclesWithQrCodes = await this.dbConnection.query.vehicles.findMany({
+              where: (vehicles: any, { inArray: inArrayFn }: any) => inArrayFn(vehicles.id, vehicleIds),
+              with: {
+                qrCode: true,
+              },
+            });
+
+            // Process QR codes from relation data
+            for (const vehicleWithQrCode of vehiclesWithQrCodes) {
+              if (vehicleWithQrCode.qrCode) {
+                try {
+                  // Decrypt QR code
+                  let decryptedQrCode: string;
+                  if (this.encryptionService.isEncrypted(vehicleWithQrCode.qrCode.qrCode)) {
+                    decryptedQrCode = this.encryptionService.decrypt(vehicleWithQrCode.qrCode.qrCode);
+                  } else {
+                    decryptedQrCode = vehicleWithQrCode.qrCode.qrCode;
+                  }
+
+                  // Generate QR code data URL
+                  const qrCodeDataUrl = await QRCode.toDataURL(decryptedQrCode, {
+                    errorCorrectionLevel: 'M',
+                    width: 300,
+                    margin: 1,
+                  });
+
+                  qrCodesMap.set(vehicleWithQrCode.thirdPartyId, {
+                    qrCodeDataUrl,
+                    qrCodeString: decryptedQrCode,
+                  });
+                } catch (qrError) {
+                  this.logger.warn(
+                    `Failed to process QR code for vehicle ${vehicleWithQrCode.thirdPartyId}: ${qrError instanceof Error ? qrError.message : 'Unknown error'}`,
+                  );
+                }
+              }
+            }
+          } catch (relError: any) {
+            // Fallback to manual query if relational query fails
+            this.logger.debug('Relational query failed, falling back to manual QR code fetch');
+            const qrCodes = await this.dbConnection
+              .select()
+              .from(schema.qrCodes)
+              .where(
+                and(
+                  eq(schema.qrCodes.accountId, accountId),
+                  inArray(schema.qrCodes.vehicleThirdPartyId, vehicleThirdPartyIds),
+                ),
+              );
+
+            // Process QR codes: decrypt and generate data URLs in bulk
+            for (const qrCodeRecord of qrCodes) {
+              try {
+                // Decrypt QR code
+                let decryptedQrCode: string;
+                if (this.encryptionService.isEncrypted(qrCodeRecord.qrCode)) {
+                  decryptedQrCode = this.encryptionService.decrypt(qrCodeRecord.qrCode);
+                } else {
+                  decryptedQrCode = qrCodeRecord.qrCode;
+                }
+
+                // Generate QR code data URL
+                const qrCodeDataUrl = await QRCode.toDataURL(decryptedQrCode, {
+                  errorCorrectionLevel: 'M',
+                  width: 300,
+                  margin: 1,
+                });
+
+                qrCodesMap.set(qrCodeRecord.vehicleThirdPartyId, {
+                  qrCodeDataUrl,
+                  qrCodeString: decryptedQrCode,
+                });
+              } catch (qrError) {
+                this.logger.warn(
+                  `Failed to process QR code for vehicle ${qrCodeRecord.vehicleThirdPartyId}: ${qrError instanceof Error ? qrError.message : 'Unknown error'}`,
+                );
+              }
+            }
+          }
+        } catch (qrFetchError) {
+          this.logger.warn(
+            `Failed to fetch QR codes for vehicles: ${qrFetchError instanceof Error ? qrFetchError.message : 'Unknown error'}`,
+          );
+          // Continue without QR codes
+        }
+      }
+
       // Group vehicles by groupId
       const vehiclesByGroupId = new Map<number, typeof vehicles>();
       for (const vehicle of vehicles) {
@@ -875,28 +982,38 @@ export class VehiclesService extends BaseService<Vehicle> {
         }
       }
 
-      // Transform to VehicleGroupDto format
+      // Transform to VehicleGroupDto format with QR codes
       return groups.map((group) => {
         const groupVehicles = vehiclesByGroupId.get(group.id) || [];
         return {
           groupId: group.groupId, // Malambi API group ID
           groupName: group.groupName,
           total: groupVehicles.length,
-          vehicles: groupVehicles.map((vehicle): VehicleDto => ({
-            id: vehicle.id, // Local database ID (serial integer)
-            thirdPartyId: vehicle.thirdPartyId,
-            accountId: vehicle.accountId,
-            plate: vehicle.plate,
-            model: vehicle.model ?? undefined,
-            brand: vehicle.brand ?? undefined,
-            year: vehicle.year ?? undefined,
-            tag2: vehicle.tag2 ?? undefined,
-            isActive: vehicle.isActive ?? undefined,
-            lastSyncedAt: vehicle.lastSyncedAt ?? undefined,
-            createdAt: vehicle.createdAt ?? undefined,
-            updatedAt: vehicle.updatedAt ?? undefined,
-            // Exclude groupId from vehicle response as requested
-          })),
+          vehicles: groupVehicles.map((vehicle): VehicleDto => {
+            const qrCode = qrCodesMap.get(vehicle.thirdPartyId);
+            return {
+              id: vehicle.id, // Local database ID (serial integer)
+              thirdPartyId: vehicle.thirdPartyId,
+              accountId: vehicle.accountId,
+              plate: vehicle.plate,
+              model: vehicle.model ?? undefined,
+              brand: vehicle.brand ?? undefined,
+              year: vehicle.year ?? undefined,
+              tag2: vehicle.tag2 ?? undefined,
+              isActive: vehicle.isActive ?? undefined,
+              lastSyncedAt: vehicle.lastSyncedAt ?? undefined,
+              createdAt: vehicle.createdAt ?? undefined,
+              updatedAt: vehicle.updatedAt ?? undefined,
+              // Include QR codes only if requested
+              ...(shouldIncludeQrCodes && qrCode
+                ? {
+                    qrCodeDataUrl: qrCode.qrCodeDataUrl,
+                    qrCodeString: qrCode.qrCodeString,
+                  }
+                : {}),
+              // Exclude groupId from vehicle response as requested
+            };
+          }),
         };
       });
     } catch (error: any) {

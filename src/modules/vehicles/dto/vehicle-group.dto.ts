@@ -47,6 +47,14 @@ export class VehicleDto {
   @ApiPropertyOptional()
   updatedAt?: Date;
 
+  @ApiProperty({ example: 'data:image/png;base64,iVBORw0KGgoAAAANS...', required: false })
+  @ApiPropertyOptional()
+  qrCodeDataUrl?: string;
+
+  @ApiProperty({ example: '16982', required: false })
+  @ApiPropertyOptional()
+  qrCodeString?: string;
+
   // Note: groupId is excluded from VehicleDto when returned in groups context
 }
 

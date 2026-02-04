@@ -145,18 +145,27 @@ export class VehiclesController {
   @Get('groups/database')
   @ApiOperation({
     summary: 'Get all vehicle groups with their vehicles from database',
-    description: 'Retrieves all vehicle groups that have been synced to the local database along with their associated vehicles. Returns groups ordered by name.',
+    description: 'Retrieves all vehicle groups that have been synced to the local database along with their associated vehicles. Returns groups ordered by name. Supports optional relation loading (qrCodes).',
   })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (qrCodes)' })
   @ApiResponse({ status: 200, description: 'List of vehicle groups with their vehicles', type: [VehicleGroupDto] })
   async getAllGroupsWithVehicles(
-    @CurrentUserCredentials() credentials: Credentials,
+    @Query('include') include?: string,
+    @CurrentUserCredentials() credentials?: Credentials,
   ): Promise<VehicleGroupDto[]> {
-    const accountIdNum = Number(credentials.accid);
-    if (isNaN(accountIdNum) || accountIdNum <= 0) {
-      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    const accountIdNum = credentials ? Number(credentials.accid) : undefined;
+    if (accountIdNum !== undefined && (isNaN(accountIdNum) || accountIdNum <= 0)) {
+      throw new BadRequestException(`Invalid account ID: ${credentials?.accid}`);
+    }
+    if (!accountIdNum) {
+      throw new BadRequestException('Account ID is required');
     }
 
-    return this.vehiclesService.getAllGroupsWithVehicles(accountIdNum);
+    const options = {
+      include: include ? include.split(',') : undefined,
+    };
+
+    return this.vehiclesService.getAllGroupsWithVehicles(accountIdNum, options);
   }
 
   @Get('find')
