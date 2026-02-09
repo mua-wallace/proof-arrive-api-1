@@ -8,7 +8,7 @@ import { users } from './users.schema';
 import { arrivals } from './arrivals.schema';
 import { exits } from './exits.schema';
 import { processingStages } from './processing-stages.schema';
-import { incomingVehicles } from './incoming-vehicles.schema';
+import { vehicleStatusHistory } from './vehicle-status-history.schema';
 
 // Centers Relations
 export const centersRelations = relations(centers, ({ one, many }) => ({
@@ -21,14 +21,12 @@ export const centersRelations = relations(centers, ({ one, many }) => ({
   arrivals: many(arrivals),
   // One center can have many exits
   exits: many(exits),
-  // One center can be a destination for many incoming vehicles
-  incomingVehiclesAsDestination: many(incomingVehicles, {
-    relationName: 'destinationCenter',
+  // One center can have many vehicles currently located there
+  currentVehicles: many(vehicles, {
+    relationName: 'currentCenter',
   }),
-  // One center can be a source for many incoming vehicles
-  incomingVehiclesAsSource: many(incomingVehicles, {
-    relationName: 'sourceCenter',
-  }),
+  // One center can appear in many vehicle status history records
+  vehicleStatusHistory: many(vehicleStatusHistory),
 }));
 
 // Vehicle Groups Relations
@@ -50,8 +48,14 @@ export const vehiclesRelations = relations(vehicles, ({ one, many }) => ({
   arrivals: many(arrivals),
   // One vehicle can have many exits
   exits: many(exits),
-  // One vehicle can have many incoming vehicle records
-  incomingVehicles: many(incomingVehicles),
+  // One vehicle has a current center (where it's currently located)
+  currentCenter: one(centers, {
+    fields: [vehicles.currentCenterId],
+    references: [centers.id],
+    relationName: 'currentCenter',
+  }),
+  // One vehicle can have many status history records
+  statusHistory: many(vehicleStatusHistory),
 }));
 
 // QR Codes Relations
@@ -77,8 +81,6 @@ export const usersRelations = relations(users, ({ many }) => ({
   createdExits: many(exits, {
     relationName: 'createdBy',
   }),
-  // One user can create many incoming vehicles
-  createdIncomingVehicles: many(incomingVehicles),
 }));
 
 // Arrivals Relations
@@ -137,11 +139,6 @@ export const exitsRelations = relations(exits, ({ one, many }) => ({
     references: [centers.geozoneId],
     relationName: 'destinationCenter',
   }),
-  // One exit can have one incoming vehicle record
-  incomingVehicle: one(incomingVehicles, {
-    fields: [exits.id],
-    references: [incomingVehicles.exitId],
-  }),
 }));
 
 // Processing Stages Relations
@@ -153,34 +150,17 @@ export const processingStagesRelations = relations(processingStages, ({ one }) =
   }),
 }));
 
-// Incoming Vehicles Relations
-export const incomingVehiclesRelations = relations(incomingVehicles, ({ one }) => ({
-  // One incoming vehicle record belongs to one exit
-  exit: one(exits, {
-    fields: [incomingVehicles.exitId],
-    references: [exits.id],
-  }),
-  // One incoming vehicle record belongs to one vehicle
+// Vehicle Status History Relations
+export const vehicleStatusHistoryRelations = relations(vehicleStatusHistory, ({ one }) => ({
+  // One status history record belongs to one vehicle
   vehicle: one(vehicles, {
-    fields: [incomingVehicles.vehicleId],
-    references: [vehicles.thirdPartyId],
+    fields: [vehicleStatusHistory.vehicleId],
+    references: [vehicles.id],
   }),
-  // One incoming vehicle record has one destination center
-  destinationCenter: one(centers, {
-    fields: [incomingVehicles.destinationCenterId],
+  // One status history record can reference one center (where vehicle was/is located)
+  center: one(centers, {
+    fields: [vehicleStatusHistory.centerId],
     references: [centers.id],
-    relationName: 'destinationCenter',
-  }),
-  // One incoming vehicle record has one source center
-  sourceCenter: one(centers, {
-    fields: [incomingVehicles.sourceCenterId],
-    references: [centers.id],
-    relationName: 'sourceCenter',
-  }),
-  // One incoming vehicle record was created by one user
-  creator: one(users, {
-    fields: [incomingVehicles.createdBy],
-    references: [users.accid],
   }),
 }));
 

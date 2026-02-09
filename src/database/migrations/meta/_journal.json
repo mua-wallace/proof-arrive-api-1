@@ -43,6 +43,13 @@
       "when": 1738584000001,
       "tag": "0011_add_unique_constraint_users_accid_subid",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1738584000002,
+      "tag": "0012_add_vehicle_status_tracking",
+      "breakpoints": true
     }
   ]
 }

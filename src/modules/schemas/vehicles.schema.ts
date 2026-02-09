@@ -1,5 +1,6 @@
 import { pgTable, integer, varchar, timestamp, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { baseColumnsSerial } from './base.schema';
+import { centers } from './centers.schema';
 
 // Vehicles
 export const vehicles = pgTable('vehicles', {
@@ -13,11 +14,16 @@ export const vehicles = pgTable('vehicles', {
   groupId: integer('group_id'), // References vehicle_groups.id (FK handled in relations)
   isActive: boolean('is_active').default(true),
   lastSyncedAt: timestamp('last_synced_at'),
+  // Current status and location tracking
+  currentStatus: varchar('current_status', { length: 50 }).default('available'), // Current operational status (VehicleStatus enum: available, in_garage, in_transit, in_processing, at_center, unavailable)
+  currentCenterId: integer('current_center_id'), // References centers.id - current center where vehicle is located (nullable for in_transit)
 }, (table) => ({
   accountIdx: index('idx_vehicles_account').on(table.accountId),
   plateIdx: index('idx_vehicles_plate').on(table.plate),
   thirdPartyIdx: index('idx_vehicles_third_party').on(table.thirdPartyId),
   accountThirdPartyUnique: uniqueIndex('uq_vehicles_account_third_party').on(table.accountId, table.thirdPartyId), // Unique thirdPartyId per account
   groupIdx: index('idx_vehicles_group').on(table.groupId),
+  statusIdx: index('idx_vehicles_status').on(table.currentStatus),
+  centerIdx: index('idx_vehicles_current_center').on(table.currentCenterId),
 }));
 

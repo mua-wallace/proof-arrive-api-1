@@ -51,7 +51,7 @@ export class FilterCentersDto {
   sortBy?: string;
 
   @ApiPropertyOptional({
-    description: 'Comma-separated relations to include (geozone, arrivals, exits, incomingVehicles)',
+    description: 'Comma-separated relations to include (geozone, arrivals, exits)',
   })
   @IsOptional()
   @IsString()

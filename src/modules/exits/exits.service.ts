@@ -119,9 +119,6 @@ export class ExitsService extends BaseService<Exit> {
         if (options.include.includes('destinationCenter')) {
           withRelations.destinationCenter = true;
         }
-        if (options.include.includes('incomingVehicle')) {
-          withRelations.incomingVehicle = true;
-        }
       }
       
       // Automatically include destinationCenter relation when filtering by destinationCenterId
@@ -273,9 +270,6 @@ export class ExitsService extends BaseService<Exit> {
         }
         if (options.include.includes('destinationCenter')) {
           withRelations.destinationCenter = true;
-        }
-        if (options.include.includes('incomingVehicle')) {
-          withRelations.incomingVehicle = true;
         }
       }
 

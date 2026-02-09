@@ -40,17 +40,6 @@ export class ReportsService {
         .from(schema.exits)
         .where(and(...conditions.exits));
 
-      // Incoming vehicles in transit
-      const inTransitCount = await this.db
-        .select({ count: count() })
-        .from(schema.incomingVehicles)
-        .where(
-          and(
-            ...conditions.incoming,
-            eq(schema.incomingVehicles.status, 'in_transit'),
-          ),
-        );
-
       // Arrivals by status
       const arrivalsByStatus = await this.db
         .select({
@@ -71,21 +60,10 @@ export class ReportsService {
         .where(and(...conditions.exits))
         .groupBy(schema.exits.exitType);
 
-      // Incoming vehicles by status
-      const incomingByStatus = await this.db
-        .select({
-          status: schema.incomingVehicles.status,
-          count: count(),
-        })
-        .from(schema.incomingVehicles)
-        .where(and(...conditions.incoming))
-        .groupBy(schema.incomingVehicles.status);
-
       return {
         summary: {
           totalArrivals: Number(arrivalsCount[0]?.count || 0),
           totalExits: Number(exitsCount[0]?.count || 0),
-          inTransit: Number(inTransitCount[0]?.count || 0),
         },
         arrivalsByStatus: arrivalsByStatus.map((item) => ({
           status: item.status,
@@ -93,10 +71,6 @@ export class ReportsService {
         })),
         exitsByType: exitsByType.map((item) => ({
           exitType: item.exitType,
-          count: Number(item.count),
-        })),
-        incomingByStatus: incomingByStatus.map((item) => ({
-          status: item.status,
           count: Number(item.count),
         })),
       };
@@ -265,97 +239,6 @@ export class ReportsService {
   }
 
   /**
-   * Get incoming vehicle analytics
-   */
-  async getIncomingVehicleAnalytics(query: ReportQueryDto = {}) {
-    
-    try {
-      const conditions = this.buildDateConditions(query);
-
-      // Incoming vehicles by status
-      const incomingByStatus = await this.db
-        .select({
-          status: schema.incomingVehicles.status,
-          count: count(),
-        })
-        .from(schema.incomingVehicles)
-        .where(and(...conditions.incoming))
-        .groupBy(schema.incomingVehicles.status);
-
-      // Incoming vehicles by destination center
-      const incomingByDestination = await this.db
-        .select({
-          destinationCenterId: schema.incomingVehicles.destinationCenterId,
-          count: count(),
-        })
-        .from(schema.incomingVehicles)
-        .where(and(...conditions.incoming))
-        .groupBy(schema.incomingVehicles.destinationCenterId);
-
-      // Get center details
-      const centerIds = incomingByDestination.map((item) => item.destinationCenterId);
-      const centers = centerIds.length > 0
-        ? await this.db
-            .select()
-            .from(schema.centers)
-            .where(inArray(schema.centers.id, centerIds))
-        : [];
-
-      const centerMap = new Map(centers.map((c) => [c.id, c]));
-
-      // Transit time analysis (for completed arrivals)
-      const transitTimes = await this.db
-        .select({
-          id: schema.incomingVehicles.id,
-          estimatedArrival: schema.incomingVehicles.estimatedArrival,
-          actualArrival: schema.incomingVehicles.actualArrival,
-          distanceKm: schema.incomingVehicles.distanceKm,
-        })
-        .from(schema.incomingVehicles)
-        .where(
-          and(
-            ...conditions.incoming,
-            eq(schema.incomingVehicles.status, 'arrived'),
-            sql`${schema.incomingVehicles.actualArrival} IS NOT NULL`,
-            sql`${schema.incomingVehicles.estimatedArrival} IS NOT NULL`,
-          ),
-        );
-
-      const transitTimeStats = this.calculateTransitTimeStats(transitTimes);
-
-      // Average distance
-      const avgDistance = await this.db
-        .select({
-          avg: sql<number>`AVG(${schema.incomingVehicles.distanceKm})`,
-        })
-        .from(schema.incomingVehicles)
-        .where(
-          and(
-            ...conditions.incoming,
-            sql`${schema.incomingVehicles.distanceKm} IS NOT NULL`,
-          ),
-        );
-
-      return {
-        byStatus: incomingByStatus.map((item) => ({
-          status: item.status,
-          count: Number(item.count),
-        })),
-        byDestination: incomingByDestination.map((item) => ({
-          destinationCenterId: item.destinationCenterId,
-          center: centerMap.get(item.destinationCenterId) || null,
-          count: Number(item.count),
-        })),
-        transitTimeStats,
-        averageDistance: avgDistance[0]?.avg ? Number(avgDistance[0].avg) : null,
-      };
-    } catch (error: any) {
-      this.logger.error(`Error generating incoming vehicle analytics: ${error.message}`, error.stack);
-      throw new InternalServerErrorException('Failed to generate incoming vehicle analytics');
-    }
-  }
-
-  /**
    * Get processing stage analytics
    */
   async getProcessingStageAnalytics(query: ReportQueryDto = {}) {
@@ -486,23 +369,11 @@ export class ReportsService {
               ),
             );
 
-          // Incoming vehicles as destination
-          const incomingCount = await this.db
-            .select({ count: count() })
-            .from(schema.incomingVehicles)
-            .where(
-              and(
-                eq(schema.incomingVehicles.destinationCenterId, center.id),
-                ...conditions.incoming.filter((c) => !c.toString().includes('destination_center_id')),
-              ),
-            );
-
           return {
             center,
             metrics: {
               arrivals: Number(arrivalsCount[0]?.count || 0),
               exits: Number(exitsCount[0]?.count || 0),
-              incomingVehicles: Number(incomingCount[0]?.count || 0),
               netFlow: Number(arrivalsCount[0]?.count || 0) - Number(exitsCount[0]?.count || 0),
             },
           };
@@ -561,23 +432,11 @@ export class ReportsService {
               ),
             );
 
-          // Incoming vehicles count
-          const incomingCount = await this.db
-            .select({ count: count() })
-            .from(schema.incomingVehicles)
-            .where(
-              and(
-                eq(schema.incomingVehicles.vehicleId, vehicle.id),
-                ...conditions.incoming.filter((c) => !c.toString().includes('vehicle_id')),
-              ),
-            );
-
           return {
             vehicle,
             activity: {
               arrivals: Number(arrivalsCount[0]?.count || 0),
               exits: Number(exitsCount[0]?.count || 0),
-              incomingVehicles: Number(incomingCount[0]?.count || 0),
               totalMovements: Number(arrivalsCount[0]?.count || 0) + Number(exitsCount[0]?.count || 0),
             },
           };
@@ -670,25 +529,21 @@ export class ReportsService {
     const conditions: {
       arrivals: SQL[];
       exits: SQL[];
-      incoming: SQL[];
     } = {
       arrivals: [],
       exits: [],
-      incoming: [],
     };
 
     if (query.startDate) {
       const startDate = new Date(query.startDate);
       conditions.arrivals.push(gte(schema.arrivals.arrivedAt, startDate));
       conditions.exits.push(gte(schema.exits.exitedAt, startDate));
-      conditions.incoming.push(gte(schema.incomingVehicles.createdAt, startDate));
     }
 
     if (query.endDate) {
       const endDate = new Date(query.endDate);
       conditions.arrivals.push(lte(schema.arrivals.arrivedAt, endDate));
       conditions.exits.push(lte(schema.exits.exitedAt, endDate));
-      conditions.incoming.push(lte(schema.incomingVehicles.createdAt, endDate));
     }
 
     if (query.centerId) {
@@ -699,7 +554,6 @@ export class ReportsService {
     if (query.vehicleId) {
       conditions.arrivals.push(eq(schema.arrivals.vehicleId, query.vehicleId));
       conditions.exits.push(eq(schema.exits.vehicleId, query.vehicleId));
-      conditions.incoming.push(eq(schema.incomingVehicles.vehicleId, query.vehicleId));
     }
 
     if (query.agentId) {

@@ -62,7 +62,7 @@ export class ExitsController {
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (vehicle, center, agent, destinationCenter, incomingVehicle)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (vehicle, center, agent, destinationCenter)' })
   @ApiResponse({ status: 200, description: 'List of exits retrieved successfully' })
   async findAll(
     @Query() filterDto: FilterExitsDto,
@@ -96,7 +96,7 @@ export class ExitsController {
     summary: 'Get exit details',
     description: 'Retrieves detailed information about a specific exit by its ID.',
   })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (vehicle, center, agent, destinationCenter, incomingVehicle)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (vehicle, center, agent, destinationCenter)' })
   @ApiResponse({ status: 200, description: 'Exit details retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Exit not found' })
   async findOneById(

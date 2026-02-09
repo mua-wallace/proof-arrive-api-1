@@ -77,7 +77,6 @@ async function bootstrap() {
       '## Key Features\n\n' +
       '- **Vehicle Arrival Tracking**: Record and track vehicle arrivals at centers with QR code scanning, GPS coordinates, and processing stages\n' +
       '- **Exit Management**: Track vehicle exits from centers with destination information and exit types\n' +
-      '- **Incoming Vehicle Operations**: Manage vehicles in transit between centers with status tracking and arrival estimates\n' +
       '- **Processing Stages**: Track multi-stage processing workflows for arrivals (e.g., unloading, inspection, etc.)\n' +
       '- **Data Synchronization**: Automatic background job processing to sync users, vehicles, and centers from Malambi API\n' +
       '- **Audit Trail**: All records include `createdBy` fields to track which user performed each action\n\n' +
@@ -110,9 +109,7 @@ async function bootstrap() {
       '3. Update processing stage status (`PUT /api/v1/arrivals/:id/process/:stageId`)\n' +
       '4. Update arrival status (`PUT /api/v1/arrivals/:id/status`)\n\n' +
       '### Exit Workflow\n' +
-      '1. Create exit record when vehicle leaves a center (`POST /api/v1/exits`)\n' +
-      '2. Optionally create incoming vehicle record for inter-center transfers (`POST /api/v1/incoming`)\n' +
-      '3. Update incoming vehicle status and arrival times as needed (`PUT /api/v1/incoming/:id`)\n\n' +
+      '1. Create exit record when vehicle leaves a center (`POST /api/v1/exits`)\n\n' +
       '## Pagination & Filtering\n\n' +
       'Most list endpoints support:\n' +
       '- **Pagination**: `page` (default: 1) and `limit` (default: 100) query parameters\n' +
@@ -140,7 +137,6 @@ async function bootstrap() {
         .addTag('Vehicles', 'API for managing vehicles (synced from Malambi)')
         .addTag('Arrivals', 'API for tracking vehicle arrivals at centers')
         .addTag('Exits', 'API for tracking vehicle exits from centers')
-        .addTag('Incoming Vehicles', 'API for managing vehicles in transit between centers')
         .addTag('Reports', 'API for generating and managing reports')
         .addBearerAuth(
           {

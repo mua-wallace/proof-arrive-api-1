@@ -7,6 +7,7 @@ import { BaseService } from '@common/services/base.service';
 import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 import { VehicleGroupDto, VehicleDto } from './dto/vehicle-group.dto';
+import { UpdateVehicleStatusDto, VehicleStatus } from './dto';
 import { QrCodeService } from './qr-code.service';
 import { EncryptionService } from '@common/services/encryption.service';
 import * as QRCode from 'qrcode';
@@ -172,9 +173,6 @@ export class VehiclesService extends BaseService<Vehicle> {
           }
           if (options.include.includes('exits')) {
             withRelations.exits = true;
-          }
-          if (options.include.includes('incomingVehicles')) {
-            withRelations.incomingVehicles = true;
           }
           if (options.include.includes('qrCodes')) {
             withRelations.qrCode = true;
@@ -463,9 +461,6 @@ export class VehiclesService extends BaseService<Vehicle> {
         }
         if (options.include.includes('exits')) {
           withRelations.exits = true;
-        }
-        if (options.include.includes('incomingVehicles')) {
-          withRelations.incomingVehicles = true;
         }
       }
 
@@ -1137,6 +1132,425 @@ export class VehiclesService extends BaseService<Vehicle> {
       if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
       throw new InternalServerErrorException(
         `Failed to remove vehicle group: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Update vehicle status and optionally center location
+   * Automatically logs the change to vehicle_status_history
+   * @param vehicleId - Vehicle ID (internal database ID or thirdPartyId)
+   * @param updateDto - Status update data
+   * @param accountId - Account ID for multi-tenancy
+   * @param changedBy - User who made the change (accid)
+   * @returns Updated vehicle
+   */
+  async updateVehicleStatus(
+    vehicleId: number | string,
+    updateDto: UpdateVehicleStatusDto,
+    accountId: number,
+    changedBy?: string,
+  ): Promise<Vehicle> {
+    const numericId = typeof vehicleId === 'string' ? Number(vehicleId) : vehicleId;
+
+    if (!numericId || isNaN(numericId)) {
+      throw new NotFoundException(`Invalid vehicle ID: ${vehicleId}`);
+    }
+
+    if (!accountId || accountId <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${accountId}`);
+    }
+
+    try {
+      // First, find the vehicle - try by internal ID first, then by thirdPartyId
+      let vehicle: any;
+      const [vehicleById] = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(
+          and(
+            eq(schema.vehicles.id, numericId),
+            eq(schema.vehicles.accountId, accountId),
+          ),
+        )
+        .limit(1);
+
+      if (vehicleById) {
+        vehicle = vehicleById;
+      } else {
+        // Try by thirdPartyId
+        const [vehicleByThirdPartyId] = await this.dbConnection
+          .select()
+          .from(schema.vehicles)
+          .where(
+            and(
+              eq(schema.vehicles.thirdPartyId, numericId),
+              eq(schema.vehicles.accountId, accountId),
+            ),
+          )
+          .limit(1);
+
+        if (!vehicleByThirdPartyId) {
+          throw new NotFoundException(`Vehicle with ID ${vehicleId} not found for this account`);
+        }
+        vehicle = vehicleByThirdPartyId;
+      }
+
+      // Validate center if provided
+      let centerIdToSet: number | null = null;
+      if (updateDto.centerId !== undefined && updateDto.centerId !== null) {
+        // Verify center exists and belongs to account
+        const [center] = await this.dbConnection
+          .select()
+          .from(schema.centers)
+          .where(
+            and(
+              eq(schema.centers.id, updateDto.centerId),
+              eq(schema.centers.accountId, accountId),
+            ),
+          )
+          .limit(1);
+
+        if (!center) {
+          throw new NotFoundException(`Center with ID ${updateDto.centerId} not found for this account`);
+        }
+
+        centerIdToSet = updateDto.centerId;
+      } else {
+        // For statuses that require a center, throw error if not provided
+        if (
+          updateDto.status === VehicleStatus.AT_CENTER ||
+          updateDto.status === VehicleStatus.IN_PROCESSING ||
+          updateDto.status === VehicleStatus.IN_GARAGE
+        ) {
+          throw new BadRequestException(
+            `Center ID is required for status: ${updateDto.status}`,
+          );
+        }
+        // For in_transit and available, center can be null
+        if (updateDto.status === VehicleStatus.IN_TRANSIT || updateDto.status === VehicleStatus.AVAILABLE) {
+          centerIdToSet = null;
+        }
+      }
+
+      // Check if status is actually changing
+      const statusChanged = vehicle.currentStatus !== updateDto.status;
+      const centerChanged = vehicle.currentCenterId !== centerIdToSet;
+
+      if (!statusChanged && !centerChanged) {
+        // No change, return current vehicle
+        this.logger.log(`Vehicle ${vehicle.id} status and center unchanged, skipping update`);
+        return vehicle as Vehicle;
+      }
+
+      // Update vehicle status and center
+      const [updatedVehicle] = await this.dbConnection
+        .update(schema.vehicles)
+        .set({
+          currentStatus: updateDto.status,
+          currentCenterId: centerIdToSet,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.vehicles.id, vehicle.id),
+            eq(schema.vehicles.accountId, accountId),
+          ),
+        )
+        .returning();
+
+      // Log status change to history
+      await this.logStatusChange(
+        vehicle.id,
+        updateDto.status,
+        centerIdToSet,
+        accountId,
+        changedBy,
+        updateDto.notes,
+      );
+
+      this.logger.log(
+        `Vehicle ${vehicle.id} status updated: ${vehicle.currentStatus} -> ${updateDto.status}, center: ${vehicle.currentCenterId} -> ${centerIdToSet}`,
+      );
+
+      return updatedVehicle as Vehicle;
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to update vehicle status for id=${vehicleId}: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to update vehicle status: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Get vehicle status history
+   * @param vehicleId - Vehicle ID (internal database ID or thirdPartyId)
+   * @param accountId - Account ID for multi-tenancy
+   * @param limit - Maximum number of history records to return (default: 100)
+   * @returns Array of status history records
+   */
+  async getVehicleStatusHistory(
+    vehicleId: number | string,
+    accountId: number,
+    limit: number = 100,
+  ): Promise<Array<typeof schema.vehicleStatusHistory.$inferSelect>> {
+    const numericId = typeof vehicleId === 'string' ? Number(vehicleId) : vehicleId;
+
+    if (!numericId || isNaN(numericId)) {
+      throw new NotFoundException(`Invalid vehicle ID: ${vehicleId}`);
+    }
+
+    if (!accountId || accountId <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${accountId}`);
+    }
+
+    try {
+      // First, find the vehicle to get its internal ID
+      let vehicle: any;
+      const [vehicleById] = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(
+          and(
+            eq(schema.vehicles.id, numericId),
+            eq(schema.vehicles.accountId, accountId),
+          ),
+        )
+        .limit(1);
+
+      if (vehicleById) {
+        vehicle = vehicleById;
+      } else {
+        // Try by thirdPartyId
+        const [vehicleByThirdPartyId] = await this.dbConnection
+          .select()
+          .from(schema.vehicles)
+          .where(
+            and(
+              eq(schema.vehicles.thirdPartyId, numericId),
+              eq(schema.vehicles.accountId, accountId),
+            ),
+          )
+          .limit(1);
+
+        if (!vehicleByThirdPartyId) {
+          throw new NotFoundException(`Vehicle with ID ${vehicleId} not found for this account`);
+        }
+        vehicle = vehicleByThirdPartyId;
+      }
+
+      // Get status history
+      const history = await this.dbConnection
+        .select()
+        .from(schema.vehicleStatusHistory)
+        .where(
+          and(
+            eq(schema.vehicleStatusHistory.vehicleId, vehicle.id),
+            eq(schema.vehicleStatusHistory.accountId, accountId),
+          ),
+        )
+        .orderBy(desc(schema.vehicleStatusHistory.changedAt))
+        .limit(limit);
+
+      return history;
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to get vehicle status history for id=${vehicleId}: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to get vehicle status history: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Get vehicles by status
+   * Useful for dashboard queries
+   * @param status - Vehicle status to filter by
+   * @param accountId - Account ID for multi-tenancy
+   * @param options - Optional include relations
+   * @returns Array of vehicles with the specified status
+   */
+  async getVehiclesByStatus(
+    status: VehicleStatus,
+    accountId: number,
+    options?: { include?: string[] },
+  ): Promise<Vehicle[]> {
+    if (!accountId || accountId <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${accountId}`);
+    }
+
+    try {
+      const conditions: SQL[] = [
+        eq(schema.vehicles.accountId, accountId),
+        eq(schema.vehicles.currentStatus, status),
+      ];
+
+      const vehicles = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(and(...conditions))
+        .orderBy(asc(schema.vehicles.plate));
+
+      return vehicles as Vehicle[];
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to get vehicles by status ${status}: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      throw new InternalServerErrorException(
+        `Failed to get vehicles by status: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Get vehicles by center
+   * Useful for dashboard queries showing vehicles at a specific center
+   * @param centerId - Center ID (internal database ID)
+   * @param accountId - Account ID for multi-tenancy
+   * @param options - Optional include relations
+   * @returns Array of vehicles at the specified center
+   */
+  async getVehiclesByCenter(
+    centerId: number,
+    accountId: number,
+    options?: { include?: string[] },
+  ): Promise<Vehicle[]> {
+    if (!accountId || accountId <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${accountId}`);
+    }
+
+    if (!centerId || centerId <= 0) {
+      throw new BadRequestException(`Invalid center ID: ${centerId}`);
+    }
+
+    try {
+      // Verify center exists and belongs to account
+      const [center] = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(
+          and(
+            eq(schema.centers.id, centerId),
+            eq(schema.centers.accountId, accountId),
+          ),
+        )
+        .limit(1);
+
+      if (!center) {
+        throw new NotFoundException(`Center with ID ${centerId} not found for this account`);
+      }
+
+      const conditions: SQL[] = [
+        eq(schema.vehicles.accountId, accountId),
+        eq(schema.vehicles.currentCenterId, centerId),
+      ];
+
+      const vehicles = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(and(...conditions))
+        .orderBy(asc(schema.vehicles.plate));
+
+      return vehicles as Vehicle[];
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to get vehicles by center ${centerId}: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to get vehicles by center: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Get vehicles grouped by status
+   * Useful for dashboard summary
+   * @param accountId - Account ID for multi-tenancy
+   * @returns Object with status as keys and vehicle counts as values
+   */
+  async getVehiclesByStatusSummary(accountId: number): Promise<Record<VehicleStatus, number>> {
+    if (!accountId || accountId <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${accountId}`);
+    }
+
+    try {
+      const vehicles = await this.dbConnection
+        .select({
+          status: schema.vehicles.currentStatus,
+          count: count(),
+        })
+        .from(schema.vehicles)
+        .where(eq(schema.vehicles.accountId, accountId))
+        .groupBy(schema.vehicles.currentStatus);
+
+      // Initialize all statuses with 0
+      const summary: Record<VehicleStatus, number> = {
+        [VehicleStatus.AVAILABLE]: 0,
+        [VehicleStatus.IN_GARAGE]: 0,
+        [VehicleStatus.IN_TRANSIT]: 0,
+        [VehicleStatus.IN_PROCESSING]: 0,
+        [VehicleStatus.AT_CENTER]: 0,
+        [VehicleStatus.UNAVAILABLE]: 0,
+      };
+
+      // Fill in actual counts
+      vehicles.forEach((item: any) => {
+        if (item.status && Object.values(VehicleStatus).includes(item.status as VehicleStatus)) {
+          summary[item.status as VehicleStatus] = Number(item.count || 0);
+        }
+      });
+
+      return summary;
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to get vehicles by status summary: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      throw new InternalServerErrorException(
+        `Failed to get vehicles by status summary: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Helper method to log status changes to vehicle_status_history
+   * @private
+   */
+  private async logStatusChange(
+    vehicleId: number,
+    status: VehicleStatus,
+    centerId: number | null,
+    accountId: number,
+    changedBy?: string,
+    notes?: string,
+  ): Promise<void> {
+    try {
+      await this.dbConnection
+        .insert(schema.vehicleStatusHistory)
+        .values({
+          vehicleId,
+          status,
+          centerId,
+          accountId,
+          changedBy: changedBy || null,
+          notes: notes || null,
+          changedAt: new Date(),
+        });
+    } catch (error: any) {
+      // Log error but don't fail the status update
+      this.logger.error(
+        `Failed to log status change for vehicle ${vehicleId}: ${error?.message || 'Unknown error'}`,
+        error?.stack,
       );
     }
   }

@@ -46,15 +46,7 @@ export class ReportsController {
     return this.reportsService.getExitAnalytics(query);
   }
 
-  @Get('incoming-vehicles')
-  @ApiOperation({
-    summary: 'Get incoming vehicle analytics',
-    description:
-      'Returns detailed analytics about incoming vehicles including status breakdowns, destination centers, transit time statistics, and average distances.',
-  })
-  async getIncomingVehicleAnalytics(@Query() query: ReportQueryDto) {
-    return this.reportsService.getIncomingVehicleAnalytics(query);
-  }
+  // Incoming vehicles endpoint removed - not useful
 
   @Get('processing-stages')
   @ApiOperation({
@@ -70,7 +62,7 @@ export class ReportsController {
   @ApiOperation({
     summary: 'Get center performance metrics',
     description:
-      'Returns performance metrics for centers including arrivals, exits, incoming vehicles, and net flow calculations.',
+      'Returns performance metrics for centers including arrivals, exits, and net flow calculations.',
   })
   async getCenterPerformance(@Query() query: ReportQueryDto) {
     return this.reportsService.getCenterPerformance(query);
@@ -80,7 +72,7 @@ export class ReportsController {
   @ApiOperation({
     summary: 'Get vehicle activity report',
     description:
-      'Returns activity metrics for vehicles including arrivals, exits, incoming vehicles, and total movements.',
+      'Returns activity metrics for vehicles including arrivals, exits, and total movements.',
   })
   async getVehicleActivity(@Query() query: ReportQueryDto) {
     return this.reportsService.getVehicleActivity(query);

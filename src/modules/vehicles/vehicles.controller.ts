@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Delete, Query, Param, Body, BadRequestException, NotFoundException, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Query, Param, Body, BadRequestException, NotFoundException, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { VehiclesService } from './vehicles.service';
 import { QrCodeService } from './qr-code.service';
@@ -6,7 +6,7 @@ import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-cr
 import { Roles } from '@modules/auth/decorators/roles.decorator';
 import { RolesGuard } from '@modules/auth/guards/roles.guard';
 import { Credentials, PaginateQuery, PaginateResult } from '@common/interfaces';
-import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto } from './dto';
+import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto, UpdateVehicleStatusDto, VehicleStatus } from './dto';
 import * as schema from '@modules/schemas';
 
 type Vehicle = typeof schema.vehicles.$inferSelect;
@@ -24,14 +24,14 @@ export class VehiclesController {
   @Get()
   @ApiOperation({
     summary: 'List all synced vehicles in the system with filtering and pagination',
-    description: 'Retrieves a paginated list of vehicles that have been synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (arrivals, exits, incomingVehicles, qrCodes, group).',
+    description: 'Retrieves a paginated list of vehicles that have been synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (arrivals, exits, qrCodes, group).',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles, qrCodes, group)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, qrCodes, group)' })
   async findAll(
     @Query() filterDto: FilterVehiclesDto,
     @CurrentUserCredentials() credentials: Credentials,
@@ -269,12 +269,73 @@ export class VehiclesController {
     };
   }
 
+  @Get('by-status/:status')
+  @ApiOperation({
+    summary: 'Get vehicles by status',
+    description: 'Retrieves all vehicles with a specific status. Useful for dashboard queries (e.g., all available vehicles, all vehicles in transit).',
+  })
+  @ApiResponse({ status: 200, description: 'Vehicles retrieved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid status or account ID' })
+  async getVehiclesByStatus(
+    @Param('status') status: VehicleStatus,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<Vehicle[]> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    if (!Object.values(VehicleStatus).includes(status)) {
+      throw new BadRequestException(`Invalid vehicle status: ${status}`);
+    }
+    return this.vehiclesService.getVehiclesByStatus(status, accountIdNum);
+  }
+
+  @Get('by-center/:centerId')
+  @ApiOperation({
+    summary: 'Get vehicles by center',
+    description: 'Retrieves all vehicles currently located at a specific center. Useful for dashboard queries showing vehicles at a specific location.',
+  })
+  @ApiResponse({ status: 200, description: 'Vehicles retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Center not found' })
+  @ApiResponse({ status: 400, description: 'Invalid center ID or account ID' })
+  async getVehiclesByCenter(
+    @Param('centerId') centerId: string,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<Vehicle[]> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    const centerIdNum = Number(centerId);
+    if (isNaN(centerIdNum) || centerIdNum <= 0) {
+      throw new BadRequestException(`Invalid center ID: ${centerId}`);
+    }
+    return this.vehiclesService.getVehiclesByCenter(centerIdNum, accountIdNum);
+  }
+
+  @Get('status-summary')
+  @ApiOperation({
+    summary: 'Get vehicles status summary',
+    description: 'Retrieves a summary of vehicle counts grouped by status. Useful for dashboard statistics showing how many vehicles are in each status.',
+  })
+  @ApiResponse({ status: 200, description: 'Status summary retrieved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid account ID' })
+  async getVehiclesStatusSummary(
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<Record<VehicleStatus, number>> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    return this.vehiclesService.getVehiclesByStatusSummary(accountIdNum);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get vehicle details by ID',
     description: 'Provides access to view the details of a specific vehicle by its internal ID (serial integer).',
   })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, incomingVehicles)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, qrCodes, group)' })
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,
@@ -291,6 +352,30 @@ export class VehiclesController {
       accountId: accountIdNum, // Multi-tenant: filter by account ID
     };
     return this.vehiclesService.findOneById(Number(id), options);
+  }
+
+  @Get(':id/status-history')
+  @ApiOperation({
+    summary: 'Get vehicle status history',
+    description: 'Retrieves the status change history for a vehicle, ordered by most recent first. The vehicle can be identified by its internal ID or thirdPartyId.',
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Maximum number of history records to return (default: 100)' })
+  @ApiResponse({ status: 200, description: 'Vehicle status history retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Vehicle not found' })
+  async getVehicleStatusHistory(
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+    @CurrentUserCredentials() credentials?: Credentials,
+  ): Promise<Array<typeof schema.vehicleStatusHistory.$inferSelect>> {
+    if (!credentials) {
+      throw new BadRequestException('Authentication required');
+    }
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    const limitNum = limit ? Number(limit) : 100;
+    return this.vehiclesService.getVehicleStatusHistory(Number(id), accountIdNum, limitNum);
   }
 
   @Post('sync')
@@ -530,6 +615,31 @@ export class VehiclesController {
       throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
     }
     return this.vehiclesService.remove(Number(id), accountIdNum);
+  }
+
+  @Put(':id/status')
+  @ApiOperation({
+    summary: 'Update vehicle status',
+    description: 'Updates the current status and optionally the center location of a vehicle. Automatically logs the change to vehicle status history. Center ID is required for statuses that require a location (at_center, in_processing, in_garage).',
+  })
+  @ApiResponse({ status: 200, description: 'Vehicle status updated successfully' })
+  @ApiResponse({ status: 404, description: 'Vehicle or center not found' })
+  @ApiResponse({ status: 400, description: 'Invalid status or missing required center ID' })
+  async updateVehicleStatus(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateVehicleStatusDto,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<Vehicle> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    return this.vehiclesService.updateVehicleStatus(
+      Number(id),
+      updateDto,
+      accountIdNum,
+      credentials.accid.toString(),
+    );
   }
 }
 

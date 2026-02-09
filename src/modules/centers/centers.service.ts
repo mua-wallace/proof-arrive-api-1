@@ -99,10 +99,6 @@ export class CentersService extends BaseService<Center> {
         if (options.include.includes('exits')) {
           withRelations.exits = true;
         }
-        if (options.include.includes('incomingVehicles')) {
-          withRelations.incomingVehiclesAsDestination = true;
-          withRelations.incomingVehiclesAsSource = true;
-        }
       }
 
       // Get paginated results with relations
@@ -204,10 +200,6 @@ export class CentersService extends BaseService<Center> {
         }
         if (options.include.includes('exits')) {
           withRelations.exits = true;
-        }
-        if (options.include.includes('incomingVehicles')) {
-          withRelations.incomingVehiclesAsDestination = true;
-          withRelations.incomingVehiclesAsSource = true;
         }
       }
 
