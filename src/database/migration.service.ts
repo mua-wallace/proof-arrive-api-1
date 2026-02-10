@@ -40,6 +40,9 @@ export class MigrationService implements OnModuleInit {
     try {
       this.logger.log('Running database migrations automatically...');
       
+      // First, check if critical user columns exist (migration 0005)
+      await this.ensureUserMigration0005(dbConfig);
+      
       // Find the migration script path
       const migrationScriptPath = this.findMigrationScript();
       
@@ -83,6 +86,104 @@ export class MigrationService implements OnModuleInit {
       if (error.stderr) {
         this.logger.debug(`Migration stderr: ${error.stderr}`);
       }
+    }
+  }
+
+  /**
+   * Ensure migration 0005_add_user_fields.sql has run (adds email, role, fullname columns)
+   * This is critical for user operations to work correctly
+   */
+  private async ensureUserMigration0005(dbConfig: any): Promise<void> {
+    try {
+      const { Client } = require('pg');
+      const client = new Client({
+        host: dbConfig.host,
+        port: dbConfig.port || 5432,
+        user: dbConfig.username || 'postgres',
+        password: dbConfig.password || '',
+        database: dbConfig.name,
+      });
+
+      await client.connect();
+      
+      // Check if email/role/fullname columns exist
+      const checkResult = await client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema='public' 
+        AND table_name='users' 
+        AND column_name IN ('email', 'role', 'fullname')
+      `);
+      
+      const foundColumns = checkResult.rows.map((r: any) => r.column_name);
+      const missing = ['email', 'role', 'fullname'].filter(c => !foundColumns.includes(c));
+      
+      if (missing.length > 0) {
+        this.logger.warn(`Missing user columns detected: ${missing.join(', ')}. Running migration 0005_add_user_fields.sql...`);
+        
+        // Run migration 0005
+        const { readFileSync } = require('fs');
+        const { join } = require('path');
+        const migrationPath = join(process.cwd(), 'src/database/migrations/0005_add_user_fields.sql');
+        
+        // Try alternative paths
+        const possiblePaths = [
+          migrationPath,
+          join(__dirname, '../../database/migrations/0005_add_user_fields.sql'),
+          join(__dirname, '../../../src/database/migrations/0005_add_user_fields.sql'),
+          '/usr/src/app/src/database/migrations/0005_add_user_fields.sql',
+        ];
+        
+        let migrationContent: string | null = null;
+        for (const path of possiblePaths) {
+          try {
+            const { existsSync } = require('fs');
+            if (existsSync(path)) {
+              migrationContent = readFileSync(path, 'utf8');
+              this.logger.log(`Found migration file at: ${path}`);
+              break;
+            }
+          } catch (e) {
+            // Try next path
+          }
+        }
+        
+        if (!migrationContent) {
+          this.logger.error('Migration 0005_add_user_fields.sql not found. Please run migrations manually.');
+          await client.end();
+          return;
+        }
+        
+        // Split by statement-breakpoint and execute
+        const statements = migrationContent.split('--> statement-breakpoint')
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0 && !s.startsWith('-- Migration:') && !s.startsWith('-- Generated'));
+        
+        for (const statement of statements) {
+          if (statement && !statement.startsWith('--')) {
+            try {
+              await client.query(statement);
+            } catch (err: any) {
+              // Ignore 'already exists' errors
+              const errMsg = err.message.toLowerCase();
+              if (!errMsg.includes('already exists') && 
+                  !errMsg.includes('duplicate') &&
+                  !(errMsg.includes('does not exist') && errMsg.includes('column'))) {
+                this.logger.warn(`Migration statement warning: ${err.message.split('\n')[0]}`);
+              }
+            }
+          }
+        }
+        
+        this.logger.log('✅ Migration 0005_add_user_fields.sql completed');
+      } else {
+        this.logger.debug('✓ User columns (email, role, fullname) already exist');
+      }
+      
+      await client.end();
+    } catch (error: any) {
+      this.logger.warn(`Could not check/run migration 0005: ${error.message}`);
+      // Don't throw - let the main migration script handle it
     }
   }
 

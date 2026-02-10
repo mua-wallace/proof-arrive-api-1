@@ -93,6 +93,9 @@ export class CentersService extends BaseService<Center> {
         if (options.include.includes('geozone')) {
           withRelations.geozone = true;
         }
+        if (options.include.includes('vehicles')) {
+          withRelations.vehicles = true;
+        }
         if (options.include.includes('arrivals')) {
           withRelations.arrivals = true;
         }
@@ -194,6 +197,9 @@ export class CentersService extends BaseService<Center> {
       if (options?.include) {
         if (options.include.includes('geozone')) {
           withRelations.geozone = true;
+        }
+        if (options.include.includes('vehicles')) {
+          withRelations.vehicles = true;
         }
         if (options.include.includes('arrivals')) {
           withRelations.arrivals = true;
@@ -381,6 +387,179 @@ export class CentersService extends BaseService<Center> {
         `Failed to get centers from API: ${error?.message || 'Unknown error occurred'}`,
       );
     }
+  }
+
+  /**
+   * List centers from Malambi API with pagination, filtering, and searching
+   * Supports pagination, filtering, and searching
+   */
+  async listCenters(
+    token: string,
+    accId: string,
+    subId: string,
+    query?: PaginateQuery,
+    apiOptions?: {
+      limit?: number;
+      regionid?: number;
+      filtertype?: number;
+    },
+  ): Promise<any[] | PaginateResult<any>> {
+    if (!token || !accId || !subId) {
+      throw new UnauthorizedException(
+        'Unauthorized. Please make sure you are logged in correctly',
+      );
+    }
+
+    try {
+      // Fetch all centers from API
+      const response = await this.malambiApi.getCenters(token, accId, subId, apiOptions);
+      
+      if (!response.success || !Array.isArray(response.rows)) {
+        throw new NotFoundException('No centers found from Malambi API');
+      }
+
+      const allCenters = response.rows;
+
+      // If no pagination/filtering requested, return as-is
+      if (!query || (!query.search && !query.page && !query.limit && !query.sortBy)) {
+        return allCenters;
+      }
+
+      // Apply filtering and searching
+      let filteredCenters = [...allCenters];
+
+      // Apply search if provided
+      if (query.search && query.searchBy && query.searchBy.length > 0) {
+        const searchTerm = query.search.toLowerCase();
+        filteredCenters = filteredCenters.filter((center) => {
+          return query.searchBy!.some((field) => {
+            switch (field) {
+              case 'name':
+                return center.name?.toLowerCase().includes(searchTerm);
+              case 'fullname':
+                return center.fullname?.toLowerCase().includes(searchTerm);
+              case 'manager':
+                return center.manager?.toLowerCase().includes(searchTerm);
+              case 'geozone':
+                return center.geozone?.toLowerCase().includes(searchTerm);
+              case 'groupname':
+                return center.groupname?.toLowerCase().includes(searchTerm);
+              case 'id':
+                return center.id?.toString().includes(searchTerm);
+              case 'siteid':
+                return center.siteid?.toString().includes(searchTerm);
+              case 'gzone_id':
+              case 'geozoneId':
+                return center.gzone_id?.toString().includes(searchTerm);
+              default:
+                return false;
+            }
+          });
+        });
+      }
+
+      // Apply sorting
+      if (query.sortBy && query.sortBy.length > 0) {
+        filteredCenters.sort((a, b) => {
+          for (const [field, direction] of query.sortBy!) {
+            let comparison = 0;
+            switch (field) {
+              case 'id':
+                comparison = (a.id || 0) - (b.id || 0);
+                break;
+              case 'siteid':
+                comparison = (a.siteid || 0) - (b.siteid || 0);
+                break;
+              case 'name':
+                comparison = (a.name || '').localeCompare(b.name || '');
+                break;
+              case 'fullname':
+                comparison = (a.fullname || '').localeCompare(b.fullname || '');
+                break;
+              case 'manager':
+                comparison = (a.manager || '').localeCompare(b.manager || '');
+                break;
+              case 'geozone':
+                comparison = (a.geozone || '').localeCompare(b.geozone || '');
+                break;
+              case 'groupname':
+                comparison = (a.groupname || '').localeCompare(b.groupname || '');
+                break;
+              case 'gzone_id':
+              case 'geozoneId':
+                comparison = (a.gzone_id || 0) - (b.gzone_id || 0);
+                break;
+              default:
+                continue;
+            }
+            if (comparison !== 0) {
+              return direction === 'DESC' ? -comparison : comparison;
+            }
+          }
+          return 0;
+        });
+      } else {
+        // Default sort by name ASC
+        filteredCenters.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      }
+
+      // Calculate pagination
+      const page = query.page || 1;
+      const limit = query.limit || 100;
+      const totalItems = filteredCenters.length;
+      const totalPages = Math.ceil(totalItems / limit);
+      const offset = (page - 1) * limit;
+      const paginatedCenters = filteredCenters.slice(offset, offset + limit);
+
+      // Build pagination result
+      const result: PaginateResult<any> = {
+        data: paginatedCenters,
+        meta: {
+          itemsPerPage: limit,
+          totalItems,
+          currentPage: page,
+          totalPages,
+          sortBy: query.sortBy || [],
+          search: query.search,
+          searchBy: query.searchBy,
+        },
+        links: {
+          first: page > 1 ? `?page=1&limit=${limit}` : undefined,
+          previous: page > 1 ? `?page=${page - 1}&limit=${limit}` : undefined,
+          current: `?page=${page}&limit=${limit}`,
+          next: page < totalPages ? `?page=${page + 1}&limit=${limit}` : undefined,
+          last: page < totalPages ? `?page=${totalPages}&limit=${limit}` : undefined,
+        },
+      };
+
+      return result;
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to list centers: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      if (error instanceof NotFoundException || error instanceof UnauthorizedException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to list centers: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Bulk sync centers from API response
+   * Processes all centers and triggers background sync jobs for centers that don't exist
+   */
+  async bulkSyncCenters(
+    centers: any[],
+    accountId: number,
+  ): Promise<{
+    totalCenters: number;
+    synced: number;
+    skipped: number;
+    errors: number;
+    message: string;
+  }> {
+    return await this.centersSyncService.bulkSyncCenters(centers, accountId);
   }
 }
 

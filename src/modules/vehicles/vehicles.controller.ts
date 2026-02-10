@@ -6,7 +6,7 @@ import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-cr
 import { Roles } from '@modules/auth/decorators/roles.decorator';
 import { RolesGuard } from '@modules/auth/guards/roles.guard';
 import { Credentials, PaginateQuery, PaginateResult } from '@common/interfaces';
-import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto, UpdateVehicleStatusDto, VehicleStatus } from './dto';
+import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto, UpdateVehicleStatusDto, UpdateVehicleAssignmentDto, VehicleStatus } from './dto';
 import * as schema from '@modules/schemas';
 
 type Vehicle = typeof schema.vehicles.$inferSelect;
@@ -639,6 +639,29 @@ export class VehiclesController {
       updateDto,
       accountIdNum,
       credentials.accid.toString(),
+    );
+  }
+
+  @Put(':id/assignment')
+  @ApiOperation({
+    summary: 'Update vehicle center assignment',
+    description: 'Updates the center assignment for a vehicle. A vehicle can be assigned to one center (or none). This is separate from currentCenterId which tracks the vehicle\'s current location. Set centerId to null to remove assignment.',
+  })
+  @ApiResponse({ status: 200, description: 'Vehicle center assignment updated successfully' })
+  @ApiResponse({ status: 404, description: 'Vehicle or center not found' })
+  async updateVehicleAssignment(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateVehicleAssignmentDto,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<Vehicle> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    return this.vehiclesService.updateVehicleAssignment(
+      Number(id),
+      updateDto,
+      accountIdNum,
     );
   }
 }

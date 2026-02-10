@@ -105,8 +105,11 @@ export class UsersSyncService {
 
       // Insert user with data from Malambi API login response
       // accountId is mandatory - derived from accid for multi-tenancy
+      // Note: id uses subid value (not auto-generated)
       // Handle missing email/role columns gracefully by using Drizzle ORM with explicit columns
+      const subidNum = Number(subidStr);
       const userRecord: any = {
+        id: subidNum, // Use subid as id value (converted to integer)
         accountId: accountIdNum, // Multi-tenant: account ID (derived from accid)
         accid: accidStr,
         subid: subidStr,
@@ -198,78 +201,249 @@ export class UsersSyncService {
   }
 
   /**
-   * Insert user using Drizzle ORM (when email/role/fullname columns don't exist)
+   * Insert user using Drizzle API (when email/role/fullname columns don't exist)
+   * Checks if user exists first to avoid duplicates and errors
    */
   private async insertUserWithRawSql(userRecord: any, accountId: number): Promise<void> {
-    // Build insert object with only columns that exist (excluding email, role, fullname)
-    const insertData: any = {};
+    // Note: id uses subid value (converted to integer)
+    const subidNum = Number(userRecord.subid);
     
-    // Map userRecord fields to schema columns, excluding email/role/fullname
-    if (userRecord.accountId !== undefined) insertData.accountId = userRecord.accountId;
-    if (userRecord.accid !== undefined) insertData.accid = userRecord.accid;
-    if (userRecord.subid !== undefined) insertData.subid = userRecord.subid;
-    if (userRecord.token !== undefined) insertData.token = userRecord.token;
-    if (userRecord.session !== undefined) insertData.session = userRecord.session;
-    if (userRecord.username !== undefined) insertData.username = userRecord.username;
-    if (userRecord.company !== undefined) insertData.company = userRecord.company;
-    if (userRecord.k_u !== undefined) insertData.k_u = userRecord.k_u;
-    if (userRecord.pid !== undefined) insertData.pid = userRecord.pid;
-    if (userRecord.partner !== undefined) insertData.partner = userRecord.partner;
-    if (userRecord.k_k !== undefined) insertData.k_k = userRecord.k_k;
-    if (userRecord.expire !== undefined) insertData.expire = userRecord.expire;
-    if (userRecord.k_p !== undefined) insertData.k_p = userRecord.k_p;
-    if (userRecord.lastLoginAt !== undefined) insertData.lastLoginAt = userRecord.lastLoginAt;
-    
-    // Use Drizzle's insert with explicit column selection
-    // Build select object to only include columns that exist
-    const insertValues: any = {};
-    
-    // Add columns that definitely exist (base columns)
-    if (schema.users.accountId && insertData.accountId !== undefined) {
-      insertValues.accountId = insertData.accountId;
-    }
-    if (schema.users.accid && insertData.accid !== undefined) {
-      insertValues.accid = insertData.accid;
-    }
-    if (schema.users.subid && insertData.subid !== undefined) {
-      insertValues.subid = insertData.subid;
-    }
-    if (schema.users.token && insertData.token !== undefined) {
-      insertValues.token = insertData.token;
-    }
-    if (schema.users.session && insertData.session !== undefined) {
-      insertValues.session = insertData.session;
-    }
-    if (schema.users.username && insertData.username !== undefined) {
-      insertValues.username = insertData.username;
-    }
-    if (schema.users.company && insertData.company !== undefined) {
-      insertValues.company = insertData.company;
-    }
-    if (schema.users.k_u && insertData.k_u !== undefined) {
-      insertValues.k_u = insertData.k_u;
-    }
-    if (schema.users.pid && insertData.pid !== undefined) {
-      insertValues.pid = insertData.pid;
-    }
-    if (schema.users.partner && insertData.partner !== undefined) {
-      insertValues.partner = insertData.partner;
-    }
-    if (schema.users.k_k && insertData.k_k !== undefined) {
-      insertValues.k_k = insertData.k_k;
-    }
-    if (schema.users.expire && insertData.expire !== undefined) {
-      insertValues.expire = insertData.expire;
-    }
-    if (schema.users.k_p && insertData.k_p !== undefined) {
-      insertValues.k_p = insertData.k_p;
-    }
-    if (schema.users.lastLoginAt && insertData.lastLoginAt !== undefined) {
-      insertValues.lastLoginAt = insertData.lastLoginAt;
+    // First, check if user already exists by id (which equals subid after migration 0015)
+    // Or by (accid, subid) if migration 0015 hasn't run yet
+    try {
+      // Try checking by id first using Drizzle select API (more reliable)
+      const existingById = await this.dbConnection
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.id, subidNum))
+        .limit(1);
+      
+      if (existingById && existingById.length > 0) {
+        this.logger.debug(`User with id=${subidNum} (subid=${userRecord.subid}) already exists, skipping`);
+        return;
+      }
+    } catch (checkError: any) {
+      // If id column doesn't exist or is wrong type, try checking by (accid, subid)
+      const checkErrorMessage = checkError instanceof Error ? checkError.message : String(checkError);
+      if (checkErrorMessage.includes('column') || checkErrorMessage.includes('does not exist') || checkErrorMessage.includes('data type')) {
+        // Try checking by accid and subid instead using Drizzle select API
+        try {
+          const existingByAccidSubid = await this.dbConnection
+            .select({ id: schema.users.id })
+            .from(schema.users)
+            .where(
+              and(
+                eq(schema.users.accid, String(userRecord.accid)),
+                eq(schema.users.subid, String(userRecord.subid))
+              )
+            )
+            .limit(1);
+          
+          if (existingByAccidSubid && existingByAccidSubid.length > 0) {
+            this.logger.debug(`User with accid=${userRecord.accid}, subid=${userRecord.subid} already exists, skipping`);
+            return;
+          }
+        } catch (checkError2: any) {
+          // If check fails, log warning but continue with insert attempt
+          this.logger.warn(`Could not check for existing user: ${checkError2.message}`);
+        }
+      } else {
+        // Some other error checking by id, log and continue
+        this.logger.warn(`Error checking user existence by id: ${checkErrorMessage}`);
+      }
     }
     
-    // Use Drizzle insert - it will handle missing columns gracefully
-    await this.dbConnection.insert(schema.users).values(insertValues).execute();
+    // User doesn't exist, proceed with insert using Drizzle API
+    // Build insert object excluding email/role/fullname columns
+    const insertData: any = {
+      id: subidNum,
+      accountId: userRecord.accountId,
+      accid: userRecord.accid,
+      subid: userRecord.subid,
+      token: userRecord.token || '',
+      session: userRecord.session || '',
+      username: userRecord.username || `user_${userRecord.accid}`,
+      company: userRecord.company || '',
+      k_u: userRecord.k_u || '',
+      pid: userRecord.pid || '',
+      partner: userRecord.partner || '0',
+      k_k: userRecord.k_k || '',
+      expire: userRecord.expire || '0',
+      k_p: userRecord.k_p || '',
+      lastLoginAt: userRecord.lastLoginAt || new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    
+    // Explicitly exclude email/role/fullname to avoid errors if columns don't exist
+    // These fields are not included in insertData
+    
+    try {
+      await this.dbConnection
+        .insert(schema.users)
+        .values(insertData)
+        .execute();
+      
+      this.logger.debug(`User with id=${subidNum} (accid=${userRecord.accid}, subid=${userRecord.subid}) inserted successfully`);
+    } catch (insertError: any) {
+      // Extract error information - Drizzle wraps PostgreSQL errors
+      const errorMessage = insertError instanceof Error ? insertError.message : String(insertError);
+      const errorCode = insertError?.code || (insertError as any)?.cause?.code || (insertError as any)?.originalError?.code;
+      
+      // Check error message for PostgreSQL error patterns
+      const errorMessageLower = errorMessage.toLowerCase();
+      const isUniqueViolation = 
+        errorCode === '23505' || 
+        errorMessageLower.includes('unique constraint') || 
+        errorMessageLower.includes('duplicate key') ||
+        errorMessageLower.includes('duplicate key value') ||
+        errorMessageLower.includes('violates unique constraint') ||
+        errorMessageLower.includes('already exists');
+      
+      // If it's a unique violation, user was inserted between check and insert (race condition)
+      // Or user already exists - this is fine
+      if (isUniqueViolation) {
+        this.logger.debug(`User with id=${subidNum} already exists (detected via error: ${errorCode || 'unknown'}), skipping`);
+        return;
+      }
+      
+      // If error is about missing columns (email/role/fullname), Drizzle tried to include them
+      // This happens because Drizzle includes all schema columns even if we don't specify them
+      // Try to trigger migration 0005 automatically, then retry insert
+      if (errorMessageLower.includes('email') || errorMessageLower.includes('role') || errorMessageLower.includes('fullname') || (errorMessageLower.includes('column') && errorMessageLower.includes('does not exist'))) {
+        // Check if this is actually a unique violation wrapped in a column error
+        if (isUniqueViolation) {
+          this.logger.debug(`User with id=${subidNum} already exists (detected via unique violation with column error), skipping`);
+          return;
+        }
+        
+        // Missing columns detected - try to run migration 0005 automatically
+        this.logger.warn(`Insert failed due to missing columns (email/role/fullname). Attempting to run migration 0005 automatically...`);
+        
+        try {
+          // Try to run migration 0005 using the database connection
+          const { Client } = require('pg');
+          const { readFileSync } = require('fs');
+          const { join } = require('path');
+          
+          // Get database config from environment
+          const dbConfig = {
+            host: process.env.DATABASE_HOST,
+            port: parseInt(process.env.DATABASE_PORT || '5432'),
+            user: process.env.DATABASE_USERNAME || 'postgres',
+            password: process.env.DATABASE_PASSWORD,
+            database: process.env.DATABASE_NAME,
+          };
+          
+          const migrationClient = new Client(dbConfig);
+          await migrationClient.connect();
+          
+          // Find migration file
+          const possiblePaths = [
+            join(process.cwd(), 'src/database/migrations/0005_add_user_fields.sql'),
+            join(__dirname, '../../database/migrations/0005_add_user_fields.sql'),
+            '/usr/src/app/src/database/migrations/0005_add_user_fields.sql',
+          ];
+          
+          let migrationContent: string | null = null;
+          for (const path of possiblePaths) {
+            try {
+              const { existsSync } = require('fs');
+              if (existsSync(path)) {
+                migrationContent = readFileSync(path, 'utf8');
+                break;
+              }
+            } catch (e) {
+              // Try next path
+            }
+          }
+          
+          if (migrationContent) {
+            // Execute migration statements
+            const statements = migrationContent.split('--> statement-breakpoint')
+              .map((s: string) => s.trim())
+              .filter((s: string) => s.length > 0 && !s.startsWith('-- Migration:') && !s.startsWith('-- Generated'));
+            
+            for (const statement of statements) {
+              if (statement && !statement.startsWith('--')) {
+                try {
+                  await migrationClient.query(statement);
+                } catch (migErr: any) {
+                  // Ignore 'already exists' errors
+                  const migErrMsg = migErr.message.toLowerCase();
+                  if (!migErrMsg.includes('already exists') && 
+                      !migErrMsg.includes('duplicate') &&
+                      !(migErrMsg.includes('does not exist') && migErrMsg.includes('column'))) {
+                    // Log but continue
+                    this.logger.debug(`Migration statement warning: ${migErr.message.split('\n')[0]}`);
+                  }
+                }
+              }
+            }
+            
+            this.logger.log('✅ Migration 0005_add_user_fields.sql executed automatically');
+            await migrationClient.end();
+            
+            // Retry the insert after migration
+            try {
+              await this.dbConnection
+                .insert(schema.users)
+                .values(insertData)
+                .execute();
+              this.logger.debug(`User with id=${subidNum} inserted successfully after running migration 0005`);
+              return;
+            } catch (retryError: any) {
+              // If retry still fails, check if user exists
+              const retryErrorMsg = retryError instanceof Error ? retryError.message : String(retryError);
+              if (retryErrorMsg.toLowerCase().includes('unique') || retryErrorMsg.toLowerCase().includes('duplicate')) {
+                this.logger.debug(`User with id=${subidNum} already exists (after migration), skipping`);
+                return;
+              }
+              throw retryError;
+            }
+          } else {
+            await migrationClient.end();
+            this.logger.error('Migration 0005_add_user_fields.sql file not found. Please run migrations manually.');
+          }
+        } catch (migError: any) {
+          this.logger.error(`Failed to run migration 0005 automatically: ${migError.message}`);
+        }
+        
+        // Double-check if user exists (race condition or schema mismatch)
+        try {
+          const doubleCheck = await this.dbConnection
+            .select({ id: schema.users.id })
+            .from(schema.users)
+            .where(eq(schema.users.id, subidNum))
+            .limit(1);
+          
+          if (doubleCheck && doubleCheck.length > 0) {
+            this.logger.debug(`User with id=${subidNum} exists (verified after column error), skipping`);
+            return;
+          }
+        } catch (checkErr: any) {
+          // Check failed, but that's okay - we'll skip the insert anyway
+          this.logger.debug(`Could not verify user existence after column error: ${checkErr.message}`);
+        }
+        
+        // Skip insert - columns don't exist and migration couldn't run
+        this.logger.warn(`Skipping user insert due to missing columns. Migration 0005 needs to be run manually.`);
+        return;
+      }
+      
+      // Real error - log full details and throw
+      this.logger.error(`Failed to insert user. Error code: ${errorCode || 'unknown'}, Message: ${errorMessage}`, insertError instanceof Error ? insertError.stack : undefined);
+      
+      // Try to extract more details from nested error objects
+      if ((insertError as any)?.cause) {
+        this.logger.error(`Nested error cause:`, (insertError as any).cause);
+      }
+      if ((insertError as any)?.originalError) {
+        this.logger.error(`Original error:`, (insertError as any).originalError);
+      }
+      
+      throw insertError;
+    }
   }
 
   /**

@@ -40,11 +40,14 @@ export class ReportQueryDto {
   vehicleId?: number;
 
   @ApiPropertyOptional({
-    description: 'Filter by agent/user accid',
-    example: '12345',
+    description: 'Filter by agent/user id (subid)',
+    example: 12345,
   })
   @IsOptional()
-  agentId?: string;
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  agentId?: number;
 
   @ApiPropertyOptional({
     description: 'Group by period: day, week, month',

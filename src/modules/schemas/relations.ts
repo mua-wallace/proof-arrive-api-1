@@ -21,6 +21,10 @@ export const centersRelations = relations(centers, ({ one, many }) => ({
   arrivals: many(arrivals),
   // One center can have many exits
   exits: many(exits),
+  // One center can have many vehicles assigned to it
+  vehicles: many(vehicles, {
+    relationName: 'assignedCenter',
+  }),
   // One center can have many vehicles currently located there
   currentVehicles: many(vehicles, {
     relationName: 'currentCenter',
@@ -41,6 +45,12 @@ export const vehiclesRelations = relations(vehicles, ({ one, many }) => ({
   group: one(vehicleGroups, {
     fields: [vehicles.groupId],
     references: [vehicleGroups.id],
+  }),
+  // One vehicle is assigned to one center (optional, can be updated manually)
+  assignedCenter: one(centers, {
+    fields: [vehicles.centerId],
+    references: [centers.id],
+    relationName: 'assignedCenter',
   }),
   // One vehicle has at most one QR code (1:1)
   qrCode: one(qrCodes),
@@ -98,12 +108,12 @@ export const arrivalsRelations = relations(arrivals, ({ one, many }) => ({
   // One arrival belongs to one agent (user)
   agent: one(users, {
     fields: [arrivals.agentId],
-    references: [users.accid],
+    references: [users.id],
   }),
   // One arrival was created by one user
   creator: one(users, {
     fields: [arrivals.createdBy],
-    references: [users.accid],
+    references: [users.id],
     relationName: 'createdBy',
   }),
   // One arrival can have many processing stages
@@ -125,12 +135,12 @@ export const exitsRelations = relations(exits, ({ one, many }) => ({
   // One exit belongs to one agent (user)
   agent: one(users, {
     fields: [exits.agentId],
-    references: [users.accid],
+    references: [users.id],
   }),
   // One exit was created by one user
   creator: one(users, {
     fields: [exits.createdBy],
-    references: [users.accid],
+    references: [users.id],
     relationName: 'createdBy',
   }),
   // One exit can have an optional destination center (using geozoneId as FK)

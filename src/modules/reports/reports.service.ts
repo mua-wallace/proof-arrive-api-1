@@ -479,7 +479,8 @@ export class ReportsService {
         .groupBy(schema.exits.agentId);
 
       // Combine and aggregate
-      const agentMap = new Map<string, { arrivals: number; exits: number }>();
+      // Note: agentId is now integer (users.id equals subid)
+      const agentMap = new Map<number, { arrivals: number; exits: number }>();
 
       arrivalAgents.forEach((item) => {
         agentMap.set(item.agentId, {
@@ -497,15 +498,16 @@ export class ReportsService {
       });
 
       // Get user details
+      // Note: agentId is now users.id (subid), not accid
       const agentIds = Array.from(agentMap.keys());
       const users = agentIds.length > 0
         ? await this.db
             .select()
             .from(schema.users)
-            .where(inArray(schema.users.accid, agentIds))
+            .where(inArray(schema.users.id, agentIds))
         : [];
 
-      const userMap = new Map(users.map((u) => [u.accid, u]));
+      const userMap = new Map(users.map((u) => [u.id, u]));
 
       return Array.from(agentMap.entries()).map(([agentId, activity]) => ({
         agentId,
@@ -557,8 +559,9 @@ export class ReportsService {
     }
 
     if (query.agentId) {
-      conditions.arrivals.push(eq(schema.arrivals.agentId, query.agentId));
-      conditions.exits.push(eq(schema.exits.agentId, query.agentId));
+      // agentId is now integer (users.id equals subid)
+      conditions.arrivals.push(eq(schema.arrivals.agentId, Number(query.agentId)));
+      conditions.exits.push(eq(schema.exits.agentId, Number(query.agentId)));
     }
 
     return conditions;

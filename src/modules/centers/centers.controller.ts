@@ -1,9 +1,9 @@
 import { Controller, Post, Get, Query, Param, BadRequestException } from '@nestjs/common';
-import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { CentersService } from './centers.service';
 import { CentersSeederService } from './centers-seeder.service';
 import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-credentials.decorator';
-import { Credentials, PaginateResult } from '@common/interfaces';
+import { Credentials, PaginateResult, PaginateQuery } from '@common/interfaces';
 import { FilterCentersDto } from './dto';
 import * as schema from '@modules/schemas';
 
@@ -28,7 +28,7 @@ export class CentersController {
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, arrivals, exits)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, vehicles, arrivals, exits)' })
   async findAll(
     @Query() filterDto: FilterCentersDto,
     @CurrentUserCredentials() credentials: Credentials,
@@ -62,28 +62,76 @@ export class CentersController {
 
   @Get('from-api')
   @ApiOperation({
-    summary: 'Get all centers from Malambi API',
-    description: 'This endpoint fetches all centers from the Malambi API without saving them to the database.',
+    summary: 'Get centers from Malambi API with filtering and pagination',
+    description: 'Retrieves centers from the Malambi API with support for pagination, filtering, searching, and sorting. Optional query param "sync" (default: false) to bulk sync centers to local database.',
   })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Maximum number of centers to fetch (default: 1000)' })
-  @ApiQuery({ name: 'regionid', required: false, type: Number, description: 'Region ID filter (default: -1 for all regions)' })
-  @ApiQuery({ name: 'filtertype', required: false, type: Number, description: 'Filter type (default: 1)' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
+  @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
+  @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
+  @ApiQuery({ name: 'sync', required: false, type: Boolean, description: 'Bulk sync centers to local database (default: false)' })
+  @ApiQuery({ name: 'regionid', required: false, type: Number, description: 'Region ID filter for API (default: -1 for all regions)' })
+  @ApiQuery({ name: 'filtertype', required: false, type: Number, description: 'Filter type for API (default: 1)' })
+  @ApiResponse({ status: 200, description: 'List of centers from Malambi API (paginated or array format)' })
   async getAllCentersFromApi(
+    @Query() filterDto: FilterCentersDto,
     @CurrentUserCredentials() credentials: Credentials,
-    @Query('limit') limit?: number,
     @Query('regionid') regionid?: number,
     @Query('filtertype') filtertype?: number,
-  ) {
-    return this.centersService.getAllCentersFromApi(
+  ): Promise<any[] | PaginateResult<any> | { centers: any[] | PaginateResult<any>; syncResult: any }> {
+    // Build pagination query
+    const query: PaginateQuery = {
+      page: filterDto.page ?? 1,
+      limit: filterDto.limit ?? 100,
+      search: filterDto.search,
+      searchBy: filterDto.searchBy ? filterDto.searchBy.split(',') : undefined,
+      sortBy: filterDto.sortBy
+        ? (filterDto.sortBy.split(',').map((s) => {
+            const [field, direction] = s.split(':');
+            return [field, (direction || 'ASC').toUpperCase()] as [string, 'ASC' | 'DESC'];
+          }) as [string, 'ASC' | 'DESC'][])
+        : undefined,
+    };
+
+    // API options for fetching centers (use higher limit to fetch all, then paginate locally)
+    const apiOptions = {
+      limit: 1000, // Fetch up to 1000 centers from API, then paginate locally
+      regionid: regionid ? Number(regionid) : undefined,
+      filtertype: filtertype ? Number(filtertype) : undefined,
+    };
+
+    // Fetch centers with pagination/filtering
+    const centersResult = await this.centersService.listCenters(
       credentials.token,
       credentials.accid.toString(),
       credentials.subid.toString(),
-      {
-        limit: limit ? Number(limit) : undefined,
-        regionid: regionid ? Number(regionid) : undefined,
-        filtertype: filtertype ? Number(filtertype) : undefined,
-      },
+      query,
+      apiOptions,
     );
+
+    // If sync parameter is true, trigger bulk sync
+    // Handle both boolean and string values from query params
+    const shouldSync = filterDto.sync === true || 
+                       filterDto.sync === 'true' || 
+                       filterDto.sync === '1';
+    if (shouldSync) {
+      const accountIdNum = Number(credentials.accid);
+      if (isNaN(accountIdNum) || accountIdNum <= 0) {
+        throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+      }
+
+      // Extract centers array from result (could be array or PaginateResult)
+      const centersArray = Array.isArray(centersResult) ? centersResult : centersResult.data;
+      
+      const syncResult = await this.centersService.bulkSyncCenters(centersArray, accountIdNum);
+      return {
+        centers: centersResult,
+        syncResult,
+      };
+    }
+
+    return centersResult;
   }
 
   @Get('default')
@@ -103,7 +151,7 @@ export class CentersController {
     summary: 'Get center details by ID',
     description: 'Provides access to view the details of a specific center by its internal ID (serial integer).',
   })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, arrivals, exits)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, vehicles, arrivals, exits)' })
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,

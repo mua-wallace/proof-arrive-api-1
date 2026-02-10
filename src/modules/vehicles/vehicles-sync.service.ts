@@ -53,7 +53,10 @@ export class VehiclesSyncService {
       }
 
       // Insert vehicle with data from Malambi API
+      // Note: id uses thirdPartyId value (not auto-generated)
+      // centerId is set to null initially - can be assigned manually later
       const vehicleRecord = {
+        id: thirdPartyId, // Use thirdPartyId as id value
         accountId: accountId, // Multi-tenant: account ID
         thirdPartyId,
         plate: vehicleData.plate || `PLATE_${thirdPartyId}`,
@@ -62,6 +65,7 @@ export class VehiclesSyncService {
         year: vehicleData.year || null,
         tag2: vehicleData.tag2 || null,
         groupId: vehicleData.groupId || null,
+        centerId: null, // Initially null - can be assigned manually later
         isActive: true,
         lastSyncedAt: new Date(),
       };

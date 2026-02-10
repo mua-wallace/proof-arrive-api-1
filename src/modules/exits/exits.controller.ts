@@ -47,7 +47,8 @@ export class ExitsController {
     @Body() createDto: CreateExitDto,
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<Exit> {
-    return this.exitsService.createExit(createDto, credentials.accid.toString(), credentials.accid);
+    // Use subid as agentId (users.id equals subid)
+    return this.exitsService.createExit(createDto, credentials.subid, credentials.accid);
   }
 
   @Get()
