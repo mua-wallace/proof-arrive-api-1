@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { MalambiBaseApiService } from '@common/services/malambi-base-api.service';
@@ -20,6 +20,8 @@ export interface MalambiUser {
   k_p?: string;
   [key: string]: any;
 }
+
+import { transformVehicleGroups, VehicleGroupDto } from '@modules/vehicles/dto';
 
 interface LoginResponse {
   success: boolean;
@@ -69,19 +71,17 @@ export class MalambiApiService extends MalambiBaseApiService {
       MalambiBaseApiService.FORM_HEADERS,
     );
 
+    this.logger.debug('Login response:', data);
+
     if (data?.success !== true) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Log the raw API response for debugging
-    this.logger.debug(`Malambi API login response: accid=${data.accid} (${typeof data.accid}), subid=${data.subid} (${typeof data.subid})`);
-    
     // Ensure accid and subid are valid
     const accid = data.accid?.toString() || '';
     const subid = data.subid?.toString() || '';
     
     if (!accid || !subid) {
-      this.logger.error(`Missing accid or subid in API response: accid="${accid}", subid="${subid}", full response:`, JSON.stringify(data, null, 2));
       throw new UnauthorizedException('Invalid credentials: missing account information');
     }
     
@@ -149,11 +149,179 @@ export class MalambiApiService extends MalambiBaseApiService {
 
       return Array.isArray(response) && response[0]?.[0] === 1;
     } catch (error) {
-      this.logger.error(
-        `Session validation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        error instanceof Error ? error.stack : undefined,
-      );
       return false;
     }
+  }
+
+  /**
+   * Get centers list from Malambi API
+   */
+  async getCenters(
+    token: string,
+    accId: string,
+    subId: string,
+    options?: {
+      limit?: number;
+      regionid?: number;
+      filtertype?: number;
+    },
+  ): Promise<{
+    success: boolean;
+    totalCount: number;
+    rows: Array<{
+      id: number;
+      siteid: number;
+      name: string;
+      fullname?: string;
+      geozone?: string;
+      gzone_id?: number;
+      manager?: string;
+      groupid?: number;
+      groupname?: string;
+      sitetype?: number;
+      distance?: number;
+      time1?: string;
+      time2?: string;
+      saturday?: string;
+      sunday?: string;
+      breakstart?: string;
+      breakstop?: string;
+      timeoutin?: number;
+      timeoutin_str?: string;
+      timeoutin_muros?: number;
+      timeoutin_muros_str?: string;
+      [key: string]: any;
+    }>;
+  }> {
+    const params = {
+      plug: 'Sites',
+      package: 'tripsanalyzer',
+      full: '1',
+      task: 'list',
+      filtertype: options?.filtertype?.toString() || '1',
+      limit: options?.limit?.toString() || '1000',
+      regionid: options?.regionid?.toString() || '-1',
+    };
+
+    const response = await this.makeApiCall<{
+      success: boolean;
+      totalCount: number;
+      rows: any[];
+    }>(
+      'GET',
+      params,
+      undefined,
+      undefined,
+      { token, accId, subId },
+      { includeDc: true },
+    );
+
+    return {
+      success: response.success || false,
+      totalCount: response.totalCount || 0,
+      rows: response.rows || [],
+    };
+  }
+
+  /**
+   * Get vehicle detail from Malambi API
+   */
+  async getVehicleDetail(
+    token: string,
+    accId: string,
+    subId: string,
+    vehicleId: string,
+  ): Promise<{
+    id: number;
+    plate: string;
+    model?: string;
+    brand?: string;
+    year?: number;
+    tag2?: string;
+    groupId?: number;
+  }> {
+    const data = await this.makeApiCall<any>(
+      'GET',
+      {
+        frm: 'VehiclesSetting',
+        task: 'load',
+        select: 'vehicle',
+        id: vehicleId,
+      },
+      undefined,
+      undefined,
+      { token, accId, subId },
+    );
+
+    if (!data) {
+      throw new NotFoundException(`Vehicle not found, id: ${vehicleId}`);
+    }
+
+    return this.transformVehicleDetail(data);
+  }
+
+  /**
+   * List vehicle groups from Malambi API (tree structure, optionally for a given node)
+   */
+  async listVehicleGroups(
+    token: string,
+    accId: string,
+    subId: string,
+    node = 'root',
+  ): Promise<VehicleGroupDto[]> {
+    if (!token || !accId || !subId) {
+      throw new UnauthorizedException(
+        'Unauthorized, Please make sure you are logged in correctly',
+      );
+    }
+
+    try {
+      const raw = await this.makeApiCall<any>(
+        'GET',
+        { frm: 'VehiclesSetting', task: 'list', select: 'groups', node },
+        undefined,
+        undefined,
+        { token, accId, subId },
+      );
+      const rawGroups = Array.isArray(raw) ? raw : raw?.rows ?? raw?.data ?? [];
+      return transformVehicleGroups(rawGroups);
+    } catch (error: any) {
+      throw new InternalServerErrorException(
+        `Failed to list vehicle groups: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Transform vehicle detail from Malambi API response
+   */
+  private transformVehicleDetail(raw: any): {
+    id: number;
+    plate: string;
+    model?: string;
+    brand?: string;
+    year?: number;
+    tag2?: string;
+    groupId?: number;
+  } {
+    const row = raw?.rows?.[0];
+    if (!row) {
+      throw new Error('Invalid vehicle data from API');
+    }
+
+    // Keep CLN, remove parentheses and trim extra spaces
+    const plate = row.tag
+      ?.replace(/\(.*?\)/g, '') // remove text inside parentheses
+      .trim() || '';
+
+    return {
+      id: row.id,
+      plate,
+      model: row.model,
+      brand: row.brand,
+      year: row.year,
+      tag2: row.tag2,
+      groupId: row.groupid,
+    };
   }
 }

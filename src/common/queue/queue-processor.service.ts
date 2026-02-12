@@ -3,6 +3,7 @@ import { QueueService } from './queue.service';
 import { UsersSyncService } from '@modules/users/users-sync.service';
 import { VehiclesSyncService } from '@modules/vehicles/vehicles-sync.service';
 import { CentersSyncService } from '@modules/centers/centers-sync.service';
+import { CentersSeederService } from '@modules/centers/centers-seeder.service';
 
 @Injectable()
 export class QueueProcessorService implements OnModuleInit {
@@ -14,6 +15,7 @@ export class QueueProcessorService implements OnModuleInit {
     private readonly usersSyncService: UsersSyncService,
     private readonly vehiclesSyncService: VehiclesSyncService,
     private readonly centersSyncService: CentersSyncService,
+    private readonly centersSeederService: CentersSeederService,
   ) {}
 
   onModuleInit() {
@@ -30,7 +32,6 @@ export class QueueProcessorService implements OnModuleInit {
     }
 
     this.isProcessing = true;
-    this.logger.log('Queue processor started');
 
     // Process jobs continuously
     while (this.isProcessing) {
@@ -64,9 +65,51 @@ export class QueueProcessorService implements OnModuleInit {
     }
 
     try {
-      const { accid, subid } = job.data as { accid: number; subid: number };
-      await this.usersSyncService.syncUser(accid, subid);
-      this.logger.debug(`User sync job completed: accid=${accid}`);
+      const jobData = job.data as { 
+        userData: {
+          accid: string;
+          subid: string;
+          token: string;
+          session: string;
+          username: string;
+          company: string;
+          k_u: string;
+          pid: string;
+          partner: string;
+          k_k: string;
+          expire: string;
+          k_p: string;
+          email?: string; // Optional email field
+        };
+      };
+      
+      if (!jobData.userData) {
+        this.logger.error('Invalid user sync job data: missing userData');
+        return;
+      }
+
+      // Check if this user (accid+subid) already exists before syncing
+      const userExists = await this.usersSyncService.userExistsByAccidAndSubid(
+        jobData.userData.accid,
+        jobData.userData.subid,
+      );
+
+      // Sync user (this will only create if user doesn't exist)
+      await this.usersSyncService.syncUser(jobData.userData);
+
+      // If user was newly created, seed default centers for their accountId
+      if (!userExists) {
+        const accountId = Number(jobData.userData.accid);
+        if (accountId > 0) {
+          // Seed default centers for this account in the background (non-blocking)
+          this.centersSeederService.seedDefaultCentersForAccount(accountId).catch((error) => {
+            this.logger.error(
+              `Error seeding default centers for accountId ${accountId} after user sync:`,
+              error instanceof Error ? error.stack : error,
+            );
+          });
+        }
+      }
     } catch (error) {
       this.logger.error(`Error processing user sync job:`, error instanceof Error ? error.stack : error);
     }
@@ -82,9 +125,33 @@ export class QueueProcessorService implements OnModuleInit {
     }
 
     try {
-      const { thirdPartyId } = job.data as { thirdPartyId: number };
-      await this.vehiclesSyncService.syncVehicle(thirdPartyId);
-      this.logger.debug(`Vehicle sync job completed: thirdPartyId=${thirdPartyId}`);
+      const jobData = job.data as {
+        vehicleData?: {
+          id: number;
+          plate: string;
+          model?: string;
+          brand?: string;
+          year?: number;
+          tag2?: string;
+          groupId?: number;
+        };
+        accountId?: number;
+        thirdPartyId?: number;
+      };
+      
+      if (jobData.vehicleData) {
+        if (!jobData.accountId) {
+          this.logger.error('Invalid vehicle sync job data: missing accountId');
+          return;
+        }
+        await this.vehiclesSyncService.syncVehicle(jobData.vehicleData, jobData.accountId);
+      } else if (jobData.thirdPartyId) {
+        // Legacy support: if only thirdPartyId is provided, we would need to fetch vehicle data from Malambi API
+        // For now, log an error as we need full vehicle data
+        this.logger.error('Invalid vehicle sync job data: missing vehicleData. Full vehicle data is required.');
+      } else {
+        this.logger.error('Invalid vehicle sync job data: missing vehicleData or thirdPartyId');
+      }
     } catch (error) {
       this.logger.error(`Error processing vehicle sync job:`, error instanceof Error ? error.stack : error);
     }
@@ -100,9 +167,48 @@ export class QueueProcessorService implements OnModuleInit {
     }
 
     try {
-      const { centerId, centerName } = job.data as { centerId: number; centerName?: string };
-      await this.centersSyncService.syncCenter(centerId, centerName);
-      this.logger.debug(`Center sync job completed: centerId=${centerId}`);
+      const jobData = job.data as {
+        centerData?: {
+          id: number;
+          siteid: number;
+          name: string;
+          fullname?: string;
+          geozone?: string;
+          gzone_id?: number;
+          manager?: string;
+          groupid?: number;
+          groupname?: string;
+          sitetype?: number;
+          distance?: number;
+          time1?: string;
+          time2?: string;
+          saturday?: string;
+          sunday?: string;
+          breakstart?: string;
+          breakstop?: string;
+          timeoutin?: number;
+          timeoutin_str?: string;
+          timeoutin_muros?: number;
+          timeoutin_muros_str?: string;
+        };
+        accountId?: number;
+        thirdPartyId?: number;
+        siteid?: number;
+      };
+      
+      if (jobData.centerData) {
+        if (!jobData.accountId) {
+          this.logger.error('Invalid center sync job data: missing accountId');
+          return;
+        }
+        await this.centersSyncService.syncCenter(jobData.centerData, jobData.accountId);
+      } else if (jobData.thirdPartyId || jobData.siteid) {
+        // If only IDs are provided, we would need to fetch center data from Malambi API
+        // For now, log an error as we need full center data
+        this.logger.error('Invalid center sync job data: missing centerData. Full center data is required.');
+      } else {
+        this.logger.error('Invalid center sync job data: missing centerData or IDs');
+      }
     } catch (error) {
       this.logger.error(`Error processing center sync job:`, error instanceof Error ? error.stack : error);
     }
@@ -113,7 +219,7 @@ export class QueueProcessorService implements OnModuleInit {
    */
   stopProcessing(): void {
     this.isProcessing = false;
-    this.logger.log('Queue processor stopped');
   }
 }
+
 

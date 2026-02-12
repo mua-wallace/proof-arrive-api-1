@@ -41,40 +41,37 @@ export class AuthController {
   @Public()
   @Post('login')
   @UseGuards(LocalAuthGuard)
-  @ApiOperation({ summary: 'Login user' })
+  @ApiOperation({
+    summary: 'Login user',
+    description: 'Authenticates a user with Malambi credentials and returns JWT access and refresh tokens. If the user does not exist in the local database, a background sync job is triggered to fetch and save their data.',
+  })
   @ApiBody({ type: LoginRequest })
   async login(
     @Body() loginDto: LoginRequest,
     @CurrentUser() user: MalambiUser,
   ) {
-    this.logger.log(`User ${user.username} is attempting to log in`);
     return this.authService.login(user);
   }
 
   @Public()
   @Post('refresh-token')
-  @ApiOperation({ summary: 'Refresh access token' })
+  @ApiOperation({
+    summary: 'Refresh access token',
+    description: 'Generates new access and refresh tokens using a valid refresh token. The old refresh token is invalidated (token rotation) for security. The refresh token must not be expired and must exist in the database.',
+  })
   @ApiBody({ type: RefreshTokenRequest })
   async refresh(
     @Body() body: RefreshTokenRequest,
   ) {
-    // Refresh token JWT contains all needed info (token, accid, subid)
-    // Credentials are optional and only used as fallback
-    const credentials: Credentials = {
-      token: body.acc_token || '',
-      accid: body.acc_id ? Number(body.acc_id) : 0,
-      subid: body.acc_sid ? Number(body.acc_sid) : 0,
-    };
-    
-    return this.authService.refreshToken(
-      credentials,
-      body.refreshToken,
-    );
+    return this.authService.refreshToken(body.refreshToken);
   }
 
   @Post('logout')
   @ApiBearerAuth('bearer')
-  @ApiOperation({ summary: 'Logout user' })
+  @ApiOperation({
+    summary: 'Logout user',
+    description: 'Invalidates the current refresh token, effectively logging out the user. The access token will remain valid until it expires, but the refresh token cannot be used to obtain new access tokens.',
+  })
   async logout(
     @CurrentUserCredentials() credentials: Credentials,
   ) {
@@ -83,14 +80,20 @@ export class AuthController {
 
   @Public()
   @Get('check')
-  @ApiOperation({ summary: 'Check authentication status' })
+  @ApiOperation({
+    summary: 'Check authentication status',
+    description: 'Public endpoint that checks if the provided JWT token (if any) is valid and returns the authentication status. Does not require authentication.',
+  })
   async checkAuth(@Req() req: Request) {
     return await this.authService.checkAuthFromRequest(req);
   }
 
   @Get('profile')
   @ApiBearerAuth('bearer')
-  @ApiOperation({ summary: 'Get current user profile' })
+  @ApiOperation({
+    summary: 'Get current user profile',
+    description: 'Retrieves the profile information of the currently authenticated user from the request object. Requires a valid JWT access token.',
+  })
   async profile(@Req() req: Request) {
     return req.user;
   }

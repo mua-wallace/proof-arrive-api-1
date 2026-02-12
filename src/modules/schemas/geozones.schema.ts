@@ -9,6 +9,7 @@ export const geozones = pgTable('geozones', {
   centerId: integer('center_id'), // Reference handled at application level to avoid circular dependency
   radiusMeters: integer('radius_meters'),
 }, (table) => ({
+  accountIdx: index('idx_geozones_account').on(table.accountId),
   centerIdx: index('idx_geozones_center').on(table.centerId),
 }));
 

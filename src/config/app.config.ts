@@ -24,21 +24,23 @@ export default () => ({
   },
   jwt: {
     accessToken: {
-      secret: process.env.JWT_ACCESS_TOKEN_SECRET || process.env.JWT_SECRET || 'your-access-token-secret-change-in-production',
-      expiration: process.env.JWT_ACCESS_TOKEN_EXPIRATION || '3600000', // 1 hour in ms
+      secret: process.env.JWT_ACCESS_TOKEN_SECRET,
+      expiration: process.env.JWT_ACCESS_TOKEN_EXPIRATION,
     },
     refreshToken: {
-      secret: process.env.JWT_REFRESH_TOKEN_SECRET || process.env.JWT_REFRESH_SECRET || 'your-refresh-token-secret-change-in-production',
-      expiration: process.env.JWT_REFRESH_TOKEN_EXPIRATION || '259200000', // 3 days in ms
+      secret: process.env.JWT_REFRESH_TOKEN_SECRET,
+      expiration: process.env.JWT_REFRESH_TOKEN_EXPIRATION,
     },
     refreshTokenExpirationDays: parseInt(process.env.JWT_REFRESH_TOKEN_EXPIRATION_DAYS || '3', 10),
   },
   malambi: {
     malambiBaseUrl:
-      process.env.MALAMBI_API_BASE_URL || 'https://malambi.net/Helper',
+      process.env.MALAMBI_API_BASE_URL,
     malambiBaseUrlGeo:
-      process.env.MALAMBI_API_BASE_URL_GEOZONE ||
-      'https://fm7.malambi.net/Helper',
+      process.env.MALAMBI_API_BASE_URL_GEOZONE,
+  },
+  qrCode: {
+    encryptionKey: process.env.QR_CODE_ENCRYPTION_KEY,
   },
 });
 

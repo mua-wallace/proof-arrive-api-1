@@ -17,6 +17,7 @@ import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service
 import { Credentials } from '@common/interfaces';
 import { QueueService } from '@common/queue/queue.service';
 import { UsersSyncService } from '@modules/users/users-sync.service';
+import { CentersSeederService } from '@modules/centers/centers-seeder.service';
 
 // Temporary user type from Malambi API login response
 interface MalambiUser {
@@ -40,19 +41,17 @@ export class AuthService {
     private readonly malambiApi: MalambiApiService,
     private readonly queueService: QueueService,
     private readonly usersSyncService: UsersSyncService,
+    private readonly centersSeederService: CentersSeederService,
     @Inject(DATABASE_CONNECTION)
     private readonly dbConnection: PostgresJsDatabase<typeof schema>,
   ) {}
 
   async login(user: MalambiUser): Promise<any> {
-    this.logger.debug(`Login attempt for user: accid=${user.accid}, subid=${user.subid}, type: accid=${typeof user.accid}, subid=${typeof user.subid}`);
-    
     // Convert accid and subid to numbers, handling empty strings and invalid values
     const accidStr = String(user.accid || '').trim();
     const subidStr = String(user.subid || '').trim();
     
     if (!accidStr || !subidStr) {
-      this.logger.error(`Missing accid or subid: accid="${accidStr}", subid="${subidStr}"`);
       throw new UnauthorizedException('Invalid user credentials: missing account information');
     }
     
@@ -60,31 +59,92 @@ export class AuthService {
     const subid = Number(subidStr);
     
     if (isNaN(accid) || isNaN(subid) || accid <= 0 || subid <= 0) {
-      this.logger.error(`Invalid user credentials: accid="${accidStr}" (${accid}), subid="${subidStr}" (${subid})`);
       throw new UnauthorizedException('Invalid user credentials: invalid account IDs');
     }
     
-    this.logger.debug(`Valid credentials: accid=${accid}, subid=${subid}`);
-    
-    // Check if user exists in database, if not trigger background sync job
-    const userExists = await this.usersSyncService.userExists(accid);
+    // Check if this specific user (accid+subid) exists in database
+    // Each login creates/syncs one user per accid+subid, so list shows all users who have logged in
+    const userExists = await this.usersSyncService.userExistsByAccidAndSubid(accidStr, subidStr);
+
     if (!userExists) {
-      this.logger.debug(`User ${accid} not found in database, triggering sync job`);
-      await this.queueService.add('user-sync', 'sync-user', { accid, subid });
+      // User doesn't exist, trigger background sync job with full user data
+      // Center seeding will happen automatically in the queue processor after user sync
+      await this.queueService.add('user-sync', 'sync-user', {
+        userData: {
+          accid: accidStr,
+          subid: subidStr,
+          token: user.token,
+          session: user.session,
+          username: user.username,
+          company: user.company || '',
+          k_u: user.k_u || '',
+          pid: user.pid || '',
+          partner: user.partner || '0',
+          k_k: user.k_k || '',
+          expire: user.expire || '0',
+          k_p: user.k_p || '',
+          email: user.email, // Optional email from Malambi API
+        },
+      });
+    } else {
+      // User exists, update lastLoginAt for this user (accid+subid)
+      try {
+        await this.usersSyncService.updateLastLogin(accidStr, subidStr);
+      } catch (error: any) {
+        // Log but don't fail login if updateLastLogin fails
+        const errorCode = error?.code;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorString = String(error).toLowerCase();
+        
+        // Check multiple patterns for "column does not exist" error
+        const isAccountIdError = 
+          (errorCode === '42703') ||
+          errorMessage?.toLowerCase().includes('account_id') ||
+          errorString.includes('account_id') ||
+          (errorMessage?.includes('column') && errorMessage?.includes('account_id')) ||
+          (errorString.includes('column') && errorString.includes('account_id'));
+        
+        if (isAccountIdError) {
+          this.logger.warn(
+            `account_id column missing during updateLastLogin (accid=${accidStr}). ` +
+            `Login will continue but lastLoginAt won't be updated. Run migrations to add account_id column.`
+          );
+        } else {
+          this.logger.error(`Error updating lastLoginAt (accid=${accidStr}):`, error);
+          // Don't throw - allow login to continue
+        }
+      }
+      
+      // Ensure default centers exist for this account (non-blocking, runs in background)
+      // This handles cases where centers weren't seeded before (e.g., existing users)
+      this.centersSeederService.seedDefaultCentersForAccount(accid).catch((error) => {
+        this.logger.error(
+          `Error seeding default centers for accountId ${accid} during login:`,
+          error instanceof Error ? error.stack : error,
+        );
+      });
     }
     
     const { accessToken, refreshToken } = await this.generateUserTokens(
       user.token,
+      
       accid,
       subid,
     );
 
     return {
-      accid: user.accid,
-      subid: user.subid,
-      username: user.loginusername || user.username,
-      fullName: user.username,
-      company: user.company,
+      accid: accidStr,
+      subid: subidStr,
+      token: user.token,
+      session: user.session,
+      username: user.username,
+      company: user.company || '',
+      k_u: user.k_u || '',
+      pid: user.pid || '',
+      partner: user.partner || '0',
+      k_k: user.k_k || '',
+      expire: user.expire || '0',
+      k_p: user.k_p || '',
       accessToken,
       refreshToken,
     };
@@ -120,8 +180,6 @@ export class AuthService {
       },
     );
 
-    this.logger.debug(`Generating tokens for user: accid=${accid}, subid=${subid}`);
-
     // ✅ Persist refresh token record
     await this.storeRefreshToken(refreshtoken, accid, subid);
 
@@ -129,7 +187,6 @@ export class AuthService {
   }
 
   async storeRefreshToken(token: string, accid: number, subid: number) {
-    this.logger.debug(`Storing refresh token for user: accid=${accid}, subid=${subid}`);
     // calc expiry date, 3 days from now
     try {
       const expirationRefreshTokenDays = Number(
@@ -157,56 +214,35 @@ export class AuthService {
     }
   }
 
-  // Verify the refresh token locally
-  async refreshToken(
-    credentials: Credentials,
-    refreshToken: string,
-  ) {
-    try {
-      if (!refreshToken) {
-        throw new UnauthorizedException('Missing refresh token');
-      }
+  /**
+   * Refresh access token using a valid refresh token
+   * Implements token rotation: invalidates the old refresh token and issues a new one
+   */
+  async refreshToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+    if (!refreshToken) {
+      throw new UnauthorizedException('Missing refresh token');
+    }
 
-      // Decode the refresh token to get accid, subid, refreshtoken, and token
+    try {
+      // 1. Verify and decode the refresh token JWT
       const decoded = this.jwtService.verify(refreshToken, {
         secret: this.configService.getOrThrow<string>('jwt.refreshToken.secret'),
       }) as { refreshtoken: string; accid: number; subid: number; token?: string };
 
-      // Use accid and subid from the decoded token, not from credentials
-      const accid = decoded.accid;
-      const subid = decoded.subid;
-      const refreshtoken = decoded.refreshtoken;
-      // Get Malambi token from decoded token (preferred) or from credentials
-      const token = decoded.token || credentials.token || '';
+      const { refreshtoken, accid, subid, token } = decoded;
 
-      if (!accid || !subid || isNaN(accid) || isNaN(subid)) {
+      // Validate decoded payload
+      if (!accid || !subid || isNaN(accid) || isNaN(subid) || !refreshtoken) {
         throw new UnauthorizedException('Invalid token payload');
       }
 
-      // 2️⃣ Clean up expired refresh tokens for this user
-      await this.dbConnection.delete(schema.refreshTokens).where(
-        and(
-          eq(schema.refreshTokens.accid, accid),
-          eq(schema.refreshTokens.subid, subid),
-          lt(schema.refreshTokens.expiryDate, new Date()), // only expired
-        ),
-      );
+      // Malambi token is required for access token to work with middleware
+      if (!token) {
+        throw new UnauthorizedException('Malambi token missing from refresh token');
+      }
 
-      // Optional: log remaining valid tokens
-      const remainingTokens = await this.dbConnection
-        .select()
-        .from(schema.refreshTokens)
-        .where(
-          and(
-            eq(schema.refreshTokens.accid, accid),
-            eq(schema.refreshTokens.subid, subid),
-          ),
-        );
-
-      this.logger.debug(`Remaining refresh tokens for accid=${accid}, subid=${subid}: ${remainingTokens.length}`);
-
-      // 3️⃣ Find a valid refresh token
-      const validTokenRecord = await this.dbConnection
+      // 2. Verify the refresh token exists in database and is not expired
+      const [tokenRecord] = await this.dbConnection
         .select()
         .from(schema.refreshTokens)
         .where(
@@ -214,30 +250,49 @@ export class AuthService {
             eq(schema.refreshTokens.token, refreshtoken),
             eq(schema.refreshTokens.accid, accid),
             eq(schema.refreshTokens.subid, subid),
-            gt(schema.refreshTokens.expiryDate, new Date()), // must not be expired
+            gt(schema.refreshTokens.expiryDate, new Date()),
           ),
         )
         .limit(1);
 
-      this.logger.debug(`Valid token record found: ${validTokenRecord.length > 0}`);
-
-      if (!validTokenRecord || validTokenRecord.length === 0) {
+      if (!tokenRecord) {
         throw new UnauthorizedException('Invalid or expired refresh token');
       }
 
-      // 4️⃣ Generate new access/refresh tokens
+      // 3. Invalidate the old refresh token (token rotation for security)
+      await this.dbConnection
+        .delete(schema.refreshTokens)
+        .where(eq(schema.refreshTokens.token, refreshtoken));
+
+      // 4. Clean up any expired tokens for this user (housekeeping)
+      await this.dbConnection
+        .delete(schema.refreshTokens)
+        .where(
+          and(
+            eq(schema.refreshTokens.accid, accid),
+            eq(schema.refreshTokens.subid, subid),
+            lt(schema.refreshTokens.expiryDate, new Date()),
+          ),
+        );
+
+      // 5. Generate new access and refresh tokens
       // Use the Malambi token from the decoded refresh token
-      const { accessToken, refreshToken: newRefreshToken } = await this.generateUserTokens(token, accid, subid);
+      const { accessToken, refreshToken: newRefreshToken } = await this.generateUserTokens(
+        token,
+        accid,
+        subid,
+      );
 
       return {
-        success: true,
-        message: 'Tokens refreshed successfully',
         accessToken,
         refreshToken: newRefreshToken,
       };
     } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       this.logger.error('Refresh token error:', error instanceof Error ? error.stack : error);
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Invalid or expired refresh token');
     }
   }
 
@@ -246,11 +301,9 @@ export class AuthService {
     credentials: Credentials,
   ): Promise<{ success: boolean; message: string }> {
     const { token, accid, subid } = credentials;
-    this.logger.debug(`Logging out user: accid=${accid}, subid=${subid}`);
     
     // Validate credentials
     if (!token || !accid || !subid || isNaN(accid) || isNaN(subid)) {
-      this.logger.warn(`Invalid credentials for logout: token=${token ? 'present' : 'missing'}, accid=${accid}, subid=${subid}`);
       return { success: false, message: 'Invalid user credentials' };
     }
     
@@ -269,9 +322,7 @@ export class AuthService {
               eq(schema.refreshTokens.subid, subid),
             ),
           );
-        this.logger.debug(`Cleared refresh tokens for user: accid=${accid}, subid=${subid}`);
       } catch (dbError) {
-        this.logger.error('Error clearing refresh tokens:', dbError instanceof Error ? dbError.stack : dbError);
         // Continue even if clearing tokens fails
       }
       
@@ -281,7 +332,6 @@ export class AuthService {
         return { success: false, message: 'Logout failed on remote API' };
       }
     } catch (error) {
-      this.logger.error('Logout error in service:', error instanceof Error ? error.stack : error);
       // Even if Malambi logout fails, try to clear our refresh tokens
       try {
         await this.dbConnection

@@ -11,7 +11,6 @@ export interface QueueJob<T = any> {
 export class QueueService {
   private readonly logger = new Logger(QueueService.name);
   private readonly queues: Map<string, QueueJob[]> = new Map();
-  private processing = false;
 
   /**
    * Add a job to the queue
@@ -33,56 +32,6 @@ export class QueueService {
     
     // Sort by priority (higher priority first)
     queue.sort((a, b) => (b.priority || 0) - (a.priority || 0));
-
-    this.logger.debug(`Job added to queue ${queueName}: ${jobType} (${job.id})`);
-
-    // Start processing if not already processing
-    if (!this.processing) {
-      this.processQueues();
-    }
-  }
-
-  /**
-   * Process all queues
-   */
-  private async processQueues(): Promise<void> {
-    if (this.processing) {
-      return;
-    }
-
-    this.processing = true;
-
-    while (this.hasJobs()) {
-      for (const [queueName, jobs] of this.queues.entries()) {
-        if (jobs.length > 0) {
-          const job = jobs.shift()!;
-          try {
-            this.logger.debug(`Processing job from ${queueName}: ${job.type} (${job.id})`);
-            // Jobs will be processed by their respective processors
-            // This is just a simple queue - actual processing happens in sync services
-          } catch (error) {
-            this.logger.error(`Error processing job ${job.id}:`, error);
-          }
-        }
-      }
-
-      // Small delay to prevent CPU spinning
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    this.processing = false;
-  }
-
-  /**
-   * Check if there are any jobs in any queue
-   */
-  private hasJobs(): boolean {
-    for (const jobs of this.queues.values()) {
-      if (jobs.length > 0) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /**
@@ -104,4 +53,5 @@ export class QueueService {
     return queue ? queue.length : 0;
   }
 }
+
 

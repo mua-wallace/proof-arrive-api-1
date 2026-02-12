@@ -1,0 +1,49 @@
+services:
+  proof-arrive-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: proof-arrive-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - proof-arrive-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: proof-arrive-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DATABASE_USERNAME}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+    ports:
+      - "${DATABASE_PORT}:${DATABASE_PORT}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - proof-arrive-network
+
+volumes:
+  postgres_data:
+
+networks:
+  proof-arrive-network:
+    driver: bridge
+

@@ -6,7 +6,6 @@ import { DatabaseModule } from '@database/database.module';
 import { VehiclesModule } from '@modules/vehicles/vehicles.module';
 import { ArrivalsModule } from '@modules/arrivals/arrivals.module';
 import { ExitsModule } from '@modules/exits/exits.module';
-import { IncomingModule } from '@modules/incoming/incoming.module';
 import { CentersModule } from '@modules/centers/centers.module';
 import { UsersModule } from '@modules/users/users.module';
 import { ReportsModule } from '@modules/reports/reports.module';
@@ -48,6 +47,7 @@ import { MalambiAuthMiddleware } from '@common/middleware/malambi-auth.middlewar
         JWT_REFRESH_TOKEN_EXPIRATION_DAYS: Joi.number().default(3),
         MALAMBI_API_BASE_URL: Joi.string().uri().optional(),
         MALAMBI_API_BASE_URL_GEOZONE: Joi.string().uri().optional(),
+        QR_CODE_ENCRYPTION_KEY: Joi.string().min(32).optional(),
       }),
     }),
     DatabaseModule,
@@ -56,7 +56,7 @@ import { MalambiAuthMiddleware } from '@common/middleware/malambi-auth.middlewar
     VehiclesModule,
     ArrivalsModule,
     ExitsModule,
-    IncomingModule,
+    // IncomingModule, // Removed - incoming vehicles endpoints not useful
     CentersModule,
     UsersModule,
     ReportsModule,

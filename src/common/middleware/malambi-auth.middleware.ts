@@ -76,7 +76,6 @@ export class MalambiAuthMiddleware implements NestMiddleware {
     }
 
     if (!accessToken) {
-      this.logger.warn(`Missing access token for path: ${req.path}`);
       throw new UnauthorizedException(
         'Unauthorized, Please make sure you are logged in correctly',
       );
@@ -103,7 +102,6 @@ export class MalambiAuthMiddleware implements NestMiddleware {
       const numericSubid = typeof subid === 'number' ? subid : Number(subid);
 
       if (isNaN(numericAccid) || isNaN(numericSubid)) {
-        this.logger.error(`Invalid accid or subid in decoded token: accid=${accid} (${typeof accid}), subid=${subid} (${typeof subid})`);
         throw new UnauthorizedException(
           'Unauthorized, Please make sure you are logged in correctly',
         );
@@ -115,13 +113,6 @@ export class MalambiAuthMiddleware implements NestMiddleware {
         acc_sid: numericSubid,
         session: session || '',
       };
-
-      this.logger.debug(`Set req.user for path ${req.path}:`, {
-        acc_id: numericAccid,
-        acc_sid: numericSubid,
-        acc_token: token ? `${token.substring(0, 10)}...` : 'missing',
-        session: session || 'missing',
-      });
 
       next();
     } catch {

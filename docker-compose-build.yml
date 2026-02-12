@@ -1,0 +1,9 @@
+# version: '3'
+services:
+  proof-arrive-api:
+    container_name: proof-arrive-api
+    image: ghcr.io/mua-wallace/proof-arrive-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
