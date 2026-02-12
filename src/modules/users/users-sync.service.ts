@@ -309,7 +309,7 @@ export class UsersSyncService {
       
       // If error is about missing columns (email/role/fullname), Drizzle tried to include them
       // This happens because Drizzle includes all schema columns even if we don't specify them
-      // Try to trigger migration 0005 automatically, then retry insert
+      // The migration should have run at startup, but if it hasn't, we need to wait for it or skip
       if (errorMessageLower.includes('email') || errorMessageLower.includes('role') || errorMessageLower.includes('fullname') || (errorMessageLower.includes('column') && errorMessageLower.includes('does not exist'))) {
         // Check if this is actually a unique violation wrapped in a column error
         if (isUniqueViolation) {
@@ -317,99 +317,14 @@ export class UsersSyncService {
           return;
         }
         
-        // Missing columns detected - try to run migration 0005 automatically
-        this.logger.warn(`Insert failed due to missing columns (email/role/fullname). Attempting to run migration 0005 automatically...`);
+        // Missing columns detected - migration 0005 hasn't run yet
+        // Since MigrationService runs migrations on startup, this shouldn't happen
+        // But if it does, we'll skip the insert and log a warning
+        this.logger.warn(`Insert failed due to missing columns (email/role/fullname). Migration 0005 needs to run first.`);
+        this.logger.warn(`Migration 0005 should run automatically on startup via MigrationService.`);
+        this.logger.warn(`If this persists, please restart the container or run: node scripts/run-migrations.js`);
         
-        try {
-          // Try to run migration 0005 using the database connection
-          const { Client } = require('pg');
-          const { readFileSync } = require('fs');
-          const { join } = require('path');
-          
-          // Get database config from environment
-          const dbConfig = {
-            host: process.env.DATABASE_HOST,
-            port: parseInt(process.env.DATABASE_PORT || '5432'),
-            user: process.env.DATABASE_USERNAME || 'postgres',
-            password: process.env.DATABASE_PASSWORD,
-            database: process.env.DATABASE_NAME,
-          };
-          
-          const migrationClient = new Client(dbConfig);
-          await migrationClient.connect();
-          
-          // Find migration file
-          const possiblePaths = [
-            join(process.cwd(), 'src/database/migrations/0005_add_user_fields.sql'),
-            join(__dirname, '../../database/migrations/0005_add_user_fields.sql'),
-            '/usr/src/app/src/database/migrations/0005_add_user_fields.sql',
-          ];
-          
-          let migrationContent: string | null = null;
-          for (const path of possiblePaths) {
-            try {
-              const { existsSync } = require('fs');
-              if (existsSync(path)) {
-                migrationContent = readFileSync(path, 'utf8');
-                break;
-              }
-            } catch (e) {
-              // Try next path
-            }
-          }
-          
-          if (migrationContent) {
-            // Execute migration statements
-            const statements = migrationContent.split('--> statement-breakpoint')
-              .map((s: string) => s.trim())
-              .filter((s: string) => s.length > 0 && !s.startsWith('-- Migration:') && !s.startsWith('-- Generated'));
-            
-            for (const statement of statements) {
-              if (statement && !statement.startsWith('--')) {
-                try {
-                  await migrationClient.query(statement);
-                } catch (migErr: any) {
-                  // Ignore 'already exists' errors
-                  const migErrMsg = migErr.message.toLowerCase();
-                  if (!migErrMsg.includes('already exists') && 
-                      !migErrMsg.includes('duplicate') &&
-                      !(migErrMsg.includes('does not exist') && migErrMsg.includes('column'))) {
-                    // Log but continue
-                    this.logger.debug(`Migration statement warning: ${migErr.message.split('\n')[0]}`);
-                  }
-                }
-              }
-            }
-            
-            this.logger.log('✅ Migration 0005_add_user_fields.sql executed automatically');
-            await migrationClient.end();
-            
-            // Retry the insert after migration
-            try {
-              await this.dbConnection
-                .insert(schema.users)
-                .values(insertData)
-                .execute();
-              this.logger.debug(`User with id=${subidNum} inserted successfully after running migration 0005`);
-              return;
-            } catch (retryError: any) {
-              // If retry still fails, check if user exists
-              const retryErrorMsg = retryError instanceof Error ? retryError.message : String(retryError);
-              if (retryErrorMsg.toLowerCase().includes('unique') || retryErrorMsg.toLowerCase().includes('duplicate')) {
-                this.logger.debug(`User with id=${subidNum} already exists (after migration), skipping`);
-                return;
-              }
-              throw retryError;
-            }
-          } else {
-            await migrationClient.end();
-            this.logger.error('Migration 0005_add_user_fields.sql file not found. Please run migrations manually.');
-          }
-        } catch (migError: any) {
-          this.logger.error(`Failed to run migration 0005 automatically: ${migError.message}`);
-        }
-        
-        // Double-check if user exists (race condition or schema mismatch)
+        // Double-check if user exists (might have been inserted by another process)
         try {
           const doubleCheck = await this.dbConnection
             .select({ id: schema.users.id })
@@ -422,12 +337,13 @@ export class UsersSyncService {
             return;
           }
         } catch (checkErr: any) {
-          // Check failed, but that's okay - we'll skip the insert anyway
-          this.logger.debug(`Could not verify user existence after column error: ${checkErr.message}`);
+          // Check failed - columns might not exist, so we can't query
+          this.logger.debug(`Could not verify user existence: ${checkErr.message}`);
         }
         
-        // Skip insert - columns don't exist and migration couldn't run
-        this.logger.warn(`Skipping user insert due to missing columns. Migration 0005 needs to be run manually.`);
+        // Skip insert - wait for migration to complete
+        // The user sync will retry on next queue processing cycle after migration runs
+        this.logger.warn(`Skipping user insert. Will retry after migration 0005 completes.`);
         return;
       }
       
