@@ -1,5 +1,6 @@
 import { pgTable, integer, varchar, timestamp, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { centers } from './centers.schema';
+import { VehicleStatus } from '@common/enums/vehicle-status.enum';
 
 // Vehicles
 // id column uses thirdPartyId value (not auto-generated)
@@ -19,8 +20,9 @@ export const vehicles = pgTable('vehicles', {
   isActive: boolean('is_active').default(true),
   lastSyncedAt: timestamp('last_synced_at'),
   // Current status and location tracking
-  currentStatus: varchar('current_status', { length: 50 }).default('available'), // Current operational status (VehicleStatus enum: available, in_garage, in_transit, in_processing, at_center, unavailable)
-  currentCenterId: integer('current_center_id'), // References centers.id (which equals thirdPartyId) - current center where vehicle is located (nullable for in_transit)
+  // Status is derived from latest trip event, not manually set
+  status: varchar('status', { length: 50 }).default(VehicleStatus.AVAILABLE), // VehicleStatus enum: AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING
+  currentCenterId: integer('current_center_id'), // References centers.id (which equals thirdPartyId) - current center where vehicle is located (nullable for IN_TRANSIT)
 }, (table) => ({
   accountIdx: index('idx_vehicles_account').on(table.accountId),
   plateIdx: index('idx_vehicles_plate').on(table.plate),
@@ -28,7 +30,7 @@ export const vehicles = pgTable('vehicles', {
   accountThirdPartyUnique: uniqueIndex('uq_vehicles_account_third_party').on(table.accountId, table.thirdPartyId), // Unique thirdPartyId per account
   groupIdx: index('idx_vehicles_group').on(table.groupId),
   centerAssignmentIdx: index('idx_vehicles_center_assignment').on(table.centerId),
-  statusIdx: index('idx_vehicles_status').on(table.currentStatus),
+  statusIdx: index('idx_vehicles_status').on(table.status),
   centerIdx: index('idx_vehicles_current_center').on(table.currentCenterId),
 }));
 

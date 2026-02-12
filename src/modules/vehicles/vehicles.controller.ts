@@ -6,7 +6,8 @@ import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-cr
 import { Roles } from '@modules/auth/decorators/roles.decorator';
 import { RolesGuard } from '@modules/auth/guards/roles.guard';
 import { Credentials, PaginateQuery, PaginateResult } from '@common/interfaces';
-import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto, UpdateVehicleStatusDto, UpdateVehicleAssignmentDto, VehicleStatus } from './dto';
+import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto, UpdateVehicleStatusDto, UpdateVehicleAssignmentDto } from './dto';
+import { VehicleStatus } from '@common/enums/vehicle-status.enum';
 import * as schema from '@modules/schemas';
 
 type Vehicle = typeof schema.vehicles.$inferSelect;

@@ -7,7 +7,8 @@ import { BaseService } from '@common/services/base.service';
 import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 import { VehicleGroupDto, VehicleDto } from './dto/vehicle-group.dto';
-import { UpdateVehicleStatusDto, UpdateVehicleAssignmentDto, VehicleStatus } from './dto';
+import { UpdateVehicleStatusDto, UpdateVehicleAssignmentDto } from './dto';
+import { VehicleStatus } from '@common/enums/vehicle-status.enum';
 import { QrCodeService } from './qr-code.service';
 import { EncryptionService } from '@common/services/encryption.service';
 import * as QRCode from 'qrcode';
@@ -1222,9 +1223,9 @@ export class VehiclesService extends BaseService<Vehicle> {
       } else {
         // For statuses that require a center, throw error if not provided
         if (
-          updateDto.status === VehicleStatus.AT_CENTER ||
-          updateDto.status === VehicleStatus.IN_PROCESSING ||
-          updateDto.status === VehicleStatus.IN_GARAGE
+          updateDto.status === VehicleStatus.WAITING_IN_QUEUE ||
+          updateDto.status === VehicleStatus.LOADING ||
+          updateDto.status === VehicleStatus.UNLOADING
         ) {
           throw new BadRequestException(
             `Center ID is required for status: ${updateDto.status}`,
@@ -1474,7 +1475,7 @@ export class VehiclesService extends BaseService<Vehicle> {
     try {
       const conditions: SQL[] = [
         eq(schema.vehicles.accountId, accountId),
-        eq(schema.vehicles.currentStatus, status),
+        eq(schema.vehicles.status, status),
       ];
 
       const vehicles = await this.dbConnection
@@ -1571,21 +1572,20 @@ export class VehiclesService extends BaseService<Vehicle> {
     try {
       const vehicles = await this.dbConnection
         .select({
-          status: schema.vehicles.currentStatus,
+          status: schema.vehicles.status,
           count: count(),
         })
         .from(schema.vehicles)
         .where(eq(schema.vehicles.accountId, accountId))
-        .groupBy(schema.vehicles.currentStatus);
+        .groupBy(schema.vehicles.status);
 
       // Initialize all statuses with 0
       const summary: Record<VehicleStatus, number> = {
         [VehicleStatus.AVAILABLE]: 0,
-        [VehicleStatus.IN_GARAGE]: 0,
         [VehicleStatus.IN_TRANSIT]: 0,
-        [VehicleStatus.IN_PROCESSING]: 0,
-        [VehicleStatus.AT_CENTER]: 0,
-        [VehicleStatus.UNAVAILABLE]: 0,
+        [VehicleStatus.WAITING_IN_QUEUE]: 0,
+        [VehicleStatus.LOADING]: 0,
+        [VehicleStatus.UNLOADING]: 0,
       };
 
       // Fill in actual counts
