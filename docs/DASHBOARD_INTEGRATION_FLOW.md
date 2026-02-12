@@ -263,7 +263,7 @@ async function startNextService(centerId, queueType) {
 
 ### 4. Vehicles View
 
-**Purpose**: Track vehicle status and location
+**Purpose**: Track vehicle status and location, manage vehicle center assignments
 
 **Endpoints Used**:
 - `GET /api/v1/vehicles` - List vehicles
@@ -271,6 +271,8 @@ async function startNextService(centerId, queueType) {
 - `GET /api/v1/vehicles/by-status/:status` - Vehicles by status
 - `GET /api/v1/vehicles/by-center/:centerId` - Vehicles at center
 - `GET /api/v1/vehicles/status-summary` - Status breakdown
+- `PUT /api/v1/vehicles/:id/assignment` - Update vehicle center assignment
+- `PUT /api/v1/vehicles/:id/status` - Update vehicle status and location
 
 **Filtering Options**:
 - `search`: Search by plate number, name
@@ -308,15 +310,170 @@ async function loadVehiclesAtCenter(centerId) {
   const response = await apiClient.get(`/vehicles/by-center/${centerId}`);
   return response.data;
 }
+
+// Update vehicle center assignment
+async function updateVehicleCenterAssignment(vehicleId, centerId) {
+  const response = await apiClient.put(`/vehicles/${vehicleId}/assignment`, {
+    centerId: centerId // Set to null to remove assignment
+  });
+  return response.data;
+}
+
+// Update vehicle status and location
+async function updateVehicleStatus(vehicleId, status, centerId = null, notes = null) {
+  const response = await apiClient.put(`/vehicles/${vehicleId}/status`, {
+    status: status,
+    centerId: centerId, // Required for WAITING_IN_QUEUE, LOADING, UNLOADING
+    notes: notes
+  });
+  return response.data;
+}
 ```
 
 **Display Components**:
-- Vehicles table/grid
+- Vehicles table/grid with columns:
+  - Plate number
+  - Model/Brand
+  - Current status
+  - Current center (location)
+  - Assigned center (assignment)
+  - Actions (View Details, Update Center, Update Status)
 - Status filter chips
 - Center filter dropdown
 - Search bar
-- Vehicle detail modal
+- Vehicle detail modal with:
+  - Full vehicle information
+  - Current trip details
+  - Update center assignment form
+  - Update status form
 - Status summary cards
+
+**Update Center Assignment Flow**:
+
+```javascript
+// Example: Update vehicle center assignment
+async function handleUpdateCenterAssignment(vehicleId, newCenterId) {
+  try {
+    showLoading('Updating center assignment...');
+    
+    // Update center assignment
+    const updatedVehicle = await updateVehicleCenterAssignment(
+      vehicleId, 
+      newCenterId // or null to remove assignment
+    );
+    
+    // Refresh vehicle list
+    await refreshVehiclesList();
+    
+    showSuccess(`Vehicle assigned to center successfully`);
+    
+    // Update UI optimistically
+    updateVehicleInList(updatedVehicle);
+    
+  } catch (error) {
+    if (error.response?.status === 404) {
+      showError('Vehicle or center not found');
+    } else {
+      showError('Failed to update center assignment');
+    }
+    handleApiError(error);
+  } finally {
+    hideLoading();
+  }
+}
+
+// Example: Update vehicle status and location
+async function handleUpdateVehicleStatus(vehicleId, status, centerId, notes) {
+  try {
+    showLoading('Updating vehicle status...');
+    
+    // Validate centerId for statuses that require location
+    if ([VehicleStatus.WAITING_IN_QUEUE, VehicleStatus.LOADING, VehicleStatus.UNLOADING].includes(status)) {
+      if (!centerId) {
+        throw new Error('Center ID is required for this status');
+      }
+    }
+    
+    const updatedVehicle = await updateVehicleStatus(vehicleId, status, centerId, notes);
+    
+    // Refresh vehicle list
+    await refreshVehiclesList();
+    
+    showSuccess(`Vehicle status updated to ${status}`);
+    
+    // Update UI optimistically
+    updateVehicleInList(updatedVehicle);
+    
+  } catch (error) {
+    if (error.response?.status === 400) {
+      showError(error.response.data?.message || 'Invalid status or missing center ID');
+    } else if (error.response?.status === 404) {
+      showError('Vehicle or center not found');
+    } else {
+      showError('Failed to update vehicle status');
+    }
+    handleApiError(error);
+  } finally {
+    hideLoading();
+  }
+}
+```
+
+**UI Component Example**:
+
+```javascript
+// React component example
+function VehicleCenterAssignmentModal({ vehicle, centers, onClose, onUpdate }) {
+  const [selectedCenterId, setSelectedCenterId] = useState(vehicle.centerId || null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    
+    try {
+      await updateVehicleCenterAssignment(vehicle.id, selectedCenterId);
+      onUpdate(vehicle.id, selectedCenterId);
+      onClose();
+    } catch (error) {
+      showError('Failed to update center assignment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <h2>Update Center Assignment</h2>
+      <p>Vehicle: {vehicle.plate}</p>
+      
+      <form onSubmit={handleSubmit}>
+        <label>
+          Assign to Center:
+          <select 
+            value={selectedCenterId || ''} 
+            onChange={(e) => setSelectedCenterId(e.target.value ? parseInt(e.target.value) : null)}
+          >
+            <option value="">None (Remove Assignment)</option>
+            {centers.map(center => (
+              <option key={center.id} value={center.id}>
+                {center.name} ({center.geozoneId})
+              </option>
+            ))}
+          </select>
+        </label>
+        
+        <div>
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="submit" disabled={loading}>
+            {loading ? 'Updating...' : 'Update Assignment'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+```
 
 ---
 
@@ -947,6 +1104,94 @@ function TripsList({ trips }) {
 9. Display Search Results
 ```
 
+### Flow 5: Update Vehicle Center Assignment
+
+```
+1. User navigates to Vehicles View
+   ↓
+2. Load Vehicles List
+   GET /api/v1/vehicles?page=1&limit=50
+   ↓
+3. User clicks on a Vehicle
+   ↓
+4. Load Vehicle Details
+   GET /api/v1/vehicles/:id?include=trips
+   ↓
+5. Display Vehicle Information
+   - Plate number
+   - Current status
+   - Current center (location)
+   - Assigned center (assignment)
+   ↓
+6. User clicks "Update Center Assignment"
+   ↓
+7. Load Centers List (if not already loaded)
+   GET /api/v1/centers
+   ↓
+8. Display Center Assignment Modal
+   - Dropdown with available centers
+   - Current assignment highlighted
+   - Option to remove assignment (set to null)
+   ↓
+9. User selects new center (or "None")
+   ↓
+10. Call Update Assignment API
+    PUT /api/v1/vehicles/:id/assignment
+    Body: { centerId: 123 } // or null to remove
+    ↓
+11. Update Successful (200 OK)
+    ↓
+12. Refresh Vehicle List
+    GET /api/v1/vehicles?page=1&limit=50
+    ↓
+13. Update UI Optimistically
+    - Show updated vehicle in list
+    - Close modal
+    - Show success notification
+```
+
+### Flow 6: Update Vehicle Status and Location
+
+```
+1. User navigates to Vehicles View
+   ↓
+2. User clicks on a Vehicle
+   ↓
+3. Load Vehicle Details
+   GET /api/v1/vehicles/:id
+   ↓
+4. User clicks "Update Status"
+   ↓
+5. Display Status Update Form
+   - Status dropdown (AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING)
+   - Center dropdown (required for WAITING_IN_QUEUE, LOADING, UNLOADING)
+   - Notes field (optional)
+   ↓
+6. User selects Status: LOADING
+   ↓
+7. User selects Center (required for LOADING)
+   ↓
+8. User enters notes (optional)
+   ↓
+9. Call Update Status API
+    PUT /api/v1/vehicles/:id/status
+    Body: {
+      status: "LOADING",
+      centerId: 123,
+      notes: "Vehicle loading timber"
+    }
+    ↓
+10. Update Successful (200 OK)
+    ↓
+11. Refresh Vehicle List
+    GET /api/v1/vehicles
+    ↓
+12. Update UI
+    - Show updated status in list
+    - Show updated center location
+    - Show success notification
+```
+
 ---
 
 ## Best Practices
@@ -1048,10 +1293,29 @@ function handleAction(action, params) {
 This dashboard integration workflow provides:
 
 ✅ **Complete API Coverage**: All endpoints for trips, queues, vehicles, and centers  
+✅ **Vehicle Management**: Update vehicle center assignments and status from dashboard  
 ✅ **Real-Time Updates**: Polling strategies for live data  
 ✅ **Performance Optimization**: Batching, pagination, caching  
 ✅ **Error Handling**: Robust error management and retry logic  
 ✅ **User Experience**: Loading states, optimistic updates, notifications  
 ✅ **Best Practices**: URL-based filters, debounced search, virtual scrolling  
+
+### Key Vehicle Management Features
+
+- **Update Center Assignment**: Assign vehicles to centers or remove assignments
+- **Update Vehicle Status**: Change vehicle status and location (currentCenterId)
+- **View Vehicle Details**: See full vehicle information, trips, and history
+- **Filter by Center**: View all vehicles at a specific center
+- **Filter by Status**: View vehicles by operational status
+
+### Available Vehicle Update Endpoints
+
+- `PUT /api/v1/vehicles/:id/assignment` - Update center assignment (centerId)
+- `PUT /api/v1/vehicles/:id/status` - Update status and location (currentCenterId)
+
+**Note**: 
+- `centerId` (assignment) is separate from `currentCenterId` (location)
+- Assignment tracks which center owns/manages the vehicle
+- Current center tracks where the vehicle physically is right now
 
 For mobile app integration, refer to [TRIPS_API_INTEGRATION_FLOW.md](./TRIPS_API_INTEGRATION_FLOW.md).

@@ -8,10 +8,18 @@ import { StartNextServiceDto } from './dto/start-next-service.dto';
 import { QueueType } from '@common/enums/queue-type.enum';
 import { TripEventType } from '@common/enums/trip-event-type.enum';
 
+// CenterQueue uses serial ID (number) but BaseEntity expects string
+// Create types: one for actual DB type, one for BaseService compatibility
 type CenterQueue = typeof schema.centerQueues.$inferSelect & { deletedAt?: null };
+type CenterQueueEntity = Omit<CenterQueue, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'> & {
+  id: string; // BaseEntity requires string
+  createdAt: Date; // BaseEntity requires non-null Date
+  updatedAt: Date; // BaseEntity requires non-null Date
+  deletedAt: Date | null; // BaseEntity requires Date | null
+};
 
 @Injectable()
-export class QueuesService extends BaseService<CenterQueue> {
+export class QueuesService extends BaseService<CenterQueueEntity> {
   private readonly logger = new Logger(QueuesService.name);
   private readonly dbConnection: any;
 
@@ -117,8 +125,9 @@ export class QueuesService extends BaseService<CenterQueue> {
 
     // Create queue entry with today's date for daily reset
     const todayDate = this.getTodayDate();
-    const queueEntry = await this.create(
-      {
+    const [queueEntry] = await this.dbConnection
+      .insert(schema.centerQueues)
+      .values({
         centerId,
         vehicleId: data.vehicleId,
         tripId: data.tripId,
@@ -127,9 +136,11 @@ export class QueuesService extends BaseService<CenterQueue> {
         queuedAt: new Date(),
         queueDate: todayDate, // Set to start of today for daily reset
         isActive: true,
-      },
-      accountId
-    );
+        accountId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
 
     // Create QUEUED trip event
     await this.dbConnection
