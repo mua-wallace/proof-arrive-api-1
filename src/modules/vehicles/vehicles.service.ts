@@ -7,7 +7,8 @@ import { BaseService } from '@common/services/base.service';
 import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 import { VehicleGroupDto, VehicleDto } from './dto/vehicle-group.dto';
-import { UpdateVehicleStatusDto, VehicleStatus } from './dto';
+import { UpdateVehicleStatusDto, UpdateVehicleAssignmentDto } from './dto';
+import { VehicleStatus } from '@common/enums/vehicle-status.enum';
 import { QrCodeService } from './qr-code.service';
 import { EncryptionService } from '@common/services/encryption.service';
 import * as QRCode from 'qrcode';
@@ -179,6 +180,9 @@ export class VehiclesService extends BaseService<Vehicle> {
           }
           if (options.include.includes('group')) {
             withRelations.group = true;
+          }
+          if (options.include.includes('assignedCenter') || options.include.includes('center')) {
+            withRelations.assignedCenter = true;
           }
         }
 
@@ -1219,9 +1223,9 @@ export class VehiclesService extends BaseService<Vehicle> {
       } else {
         // For statuses that require a center, throw error if not provided
         if (
-          updateDto.status === VehicleStatus.AT_CENTER ||
-          updateDto.status === VehicleStatus.IN_PROCESSING ||
-          updateDto.status === VehicleStatus.IN_GARAGE
+          updateDto.status === VehicleStatus.WAITING_IN_QUEUE ||
+          updateDto.status === VehicleStatus.LOADING ||
+          updateDto.status === VehicleStatus.UNLOADING
         ) {
           throw new BadRequestException(
             `Center ID is required for status: ${updateDto.status}`,
@@ -1282,6 +1286,88 @@ export class VehiclesService extends BaseService<Vehicle> {
       if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
       throw new InternalServerErrorException(
         `Failed to update vehicle status: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Update vehicle center assignment
+   * Updates which center a vehicle is assigned to (separate from currentCenterId which tracks location)
+   * @param vehicleId - Vehicle ID (internal database ID)
+   * @param updateDto - Update data containing centerId (or null to remove assignment)
+   * @param accountId - Account ID for multi-tenancy
+   * @returns Updated vehicle
+   */
+  async updateVehicleAssignment(
+    vehicleId: number,
+    updateDto: UpdateVehicleAssignmentDto,
+    accountId: number,
+  ): Promise<Vehicle> {
+    if (!vehicleId || vehicleId <= 0) {
+      throw new BadRequestException(`Invalid vehicle ID: ${vehicleId}`);
+    }
+
+    try {
+      // Check if vehicle exists and belongs to the account
+      const vehicle = await this.findOneById(vehicleId, { accountId });
+      if (!vehicle) {
+        throw new NotFoundException(`Vehicle with ID ${vehicleId} not found`);
+      }
+
+      // Validate center exists if centerId is provided
+      let centerIdToSet: number | null = null;
+      if (updateDto.centerId !== undefined && updateDto.centerId !== null) {
+        const [center] = await this.dbConnection
+          .select()
+          .from(schema.centers)
+          .where(
+            and(
+              eq(schema.centers.id, updateDto.centerId),
+              eq(schema.centers.accountId, accountId),
+            ),
+          )
+          .limit(1);
+
+        if (!center) {
+          throw new NotFoundException(`Center with ID ${updateDto.centerId} not found for this account`);
+        }
+        centerIdToSet = updateDto.centerId;
+      } else if (updateDto.centerId === null) {
+        // Explicitly set to null to remove assignment
+        centerIdToSet = null;
+      } else {
+        // If not provided, keep existing value
+        centerIdToSet = vehicle.centerId ?? null;
+      }
+
+      // Update vehicle center assignment
+      const [updatedVehicle] = await this.dbConnection
+        .update(schema.vehicles)
+        .set({
+          centerId: centerIdToSet,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.vehicles.id, vehicleId),
+            eq(schema.vehicles.accountId, accountId),
+          ),
+        )
+        .returning();
+
+      this.logger.log(
+        `Vehicle ${vehicle.id} center assignment updated: ${vehicle.centerId ?? 'null'} -> ${centerIdToSet ?? 'null'}`,
+      );
+
+      return updatedVehicle as Vehicle;
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to update vehicle center assignment for id=${vehicleId}: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
+      throw new InternalServerErrorException(
+        `Failed to update vehicle center assignment: ${error?.message || 'Unknown error occurred'}`,
       );
     }
   }
@@ -1389,7 +1475,7 @@ export class VehiclesService extends BaseService<Vehicle> {
     try {
       const conditions: SQL[] = [
         eq(schema.vehicles.accountId, accountId),
-        eq(schema.vehicles.currentStatus, status),
+        eq(schema.vehicles.status, status),
       ];
 
       const vehicles = await this.dbConnection
@@ -1486,21 +1572,20 @@ export class VehiclesService extends BaseService<Vehicle> {
     try {
       const vehicles = await this.dbConnection
         .select({
-          status: schema.vehicles.currentStatus,
+          status: schema.vehicles.status,
           count: count(),
         })
         .from(schema.vehicles)
         .where(eq(schema.vehicles.accountId, accountId))
-        .groupBy(schema.vehicles.currentStatus);
+        .groupBy(schema.vehicles.status);
 
       // Initialize all statuses with 0
       const summary: Record<VehicleStatus, number> = {
         [VehicleStatus.AVAILABLE]: 0,
-        [VehicleStatus.IN_GARAGE]: 0,
         [VehicleStatus.IN_TRANSIT]: 0,
-        [VehicleStatus.IN_PROCESSING]: 0,
-        [VehicleStatus.AT_CENTER]: 0,
-        [VehicleStatus.UNAVAILABLE]: 0,
+        [VehicleStatus.WAITING_IN_QUEUE]: 0,
+        [VehicleStatus.LOADING]: 0,
+        [VehicleStatus.UNLOADING]: 0,
       };
 
       // Fill in actual counts

@@ -9,6 +9,9 @@ import { arrivals } from './arrivals.schema';
 import { exits } from './exits.schema';
 import { processingStages } from './processing-stages.schema';
 import { vehicleStatusHistory } from './vehicle-status-history.schema';
+import { trips } from './trips.schema';
+import { tripEvents } from './trip-events.schema';
+import { centerQueues } from './center-queues.schema';
 
 // Centers Relations
 export const centersRelations = relations(centers, ({ one, many }) => ({
@@ -21,12 +24,28 @@ export const centersRelations = relations(centers, ({ one, many }) => ({
   arrivals: many(arrivals),
   // One center can have many exits
   exits: many(exits),
+  // One center can have many vehicles assigned to it
+  vehicles: many(vehicles, {
+    relationName: 'assignedCenter',
+  }),
   // One center can have many vehicles currently located there
   currentVehicles: many(vehicles, {
     relationName: 'currentCenter',
   }),
   // One center can appear in many vehicle status history records
   vehicleStatusHistory: many(vehicleStatusHistory),
+  // One center can be origin for many trips
+  originTrips: many(trips, {
+    relationName: 'originCenter',
+  }),
+  // One center can be destination for many trips
+  destinationTrips: many(trips, {
+    relationName: 'destinationCenter',
+  }),
+  // One center can have many trip events
+  tripEvents: many(tripEvents),
+  // One center can have many queue entries
+  queues: many(centerQueues),
 }));
 
 // Vehicle Groups Relations
@@ -42,6 +61,12 @@ export const vehiclesRelations = relations(vehicles, ({ one, many }) => ({
     fields: [vehicles.groupId],
     references: [vehicleGroups.id],
   }),
+  // One vehicle is assigned to one center (optional, can be updated manually)
+  assignedCenter: one(centers, {
+    fields: [vehicles.centerId],
+    references: [centers.id],
+    relationName: 'assignedCenter',
+  }),
   // One vehicle has at most one QR code (1:1)
   qrCode: one(qrCodes),
   // One vehicle can have many arrivals
@@ -56,6 +81,10 @@ export const vehiclesRelations = relations(vehicles, ({ one, many }) => ({
   }),
   // One vehicle can have many status history records
   statusHistory: many(vehicleStatusHistory),
+  // One vehicle can have many trips
+  trips: many(trips),
+  // One vehicle can have many queue entries
+  queueEntries: many(centerQueues),
 }));
 
 // QR Codes Relations
@@ -81,6 +110,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   createdExits: many(exits, {
     relationName: 'createdBy',
   }),
+  // One user (agent) can record many trip events
+  tripEvents: many(tripEvents),
 }));
 
 // Arrivals Relations
@@ -98,12 +129,12 @@ export const arrivalsRelations = relations(arrivals, ({ one, many }) => ({
   // One arrival belongs to one agent (user)
   agent: one(users, {
     fields: [arrivals.agentId],
-    references: [users.accid],
+    references: [users.id],
   }),
   // One arrival was created by one user
   creator: one(users, {
     fields: [arrivals.createdBy],
-    references: [users.accid],
+    references: [users.id],
     relationName: 'createdBy',
   }),
   // One arrival can have many processing stages
@@ -125,12 +156,12 @@ export const exitsRelations = relations(exits, ({ one, many }) => ({
   // One exit belongs to one agent (user)
   agent: one(users, {
     fields: [exits.agentId],
-    references: [users.accid],
+    references: [users.id],
   }),
   // One exit was created by one user
   creator: one(users, {
     fields: [exits.createdBy],
-    references: [users.accid],
+    references: [users.id],
     relationName: 'createdBy',
   }),
   // One exit can have an optional destination center (using geozoneId as FK)
@@ -161,6 +192,69 @@ export const vehicleStatusHistoryRelations = relations(vehicleStatusHistory, ({ 
   center: one(centers, {
     fields: [vehicleStatusHistory.centerId],
     references: [centers.id],
+  }),
+}));
+
+// Trips Relations
+export const tripsRelations = relations(trips, ({ one, many }) => ({
+  // One trip belongs to one vehicle
+  vehicle: one(vehicles, {
+    fields: [trips.vehicleId],
+    references: [vehicles.id],
+  }),
+  // One trip starts at one origin center
+  originCenter: one(centers, {
+    fields: [trips.originCenterId],
+    references: [centers.id],
+    relationName: 'originCenter',
+  }),
+  // One trip can have one destination center (optional, set when ready to exit)
+  destinationCenter: one(centers, {
+    fields: [trips.destinationCenterId],
+    references: [centers.id],
+    relationName: 'destinationCenter',
+  }),
+  // One trip can have many events
+  events: many(tripEvents),
+  // One trip can have queue entries
+  queueEntries: many(centerQueues),
+}));
+
+// Trip Events Relations
+export const tripEventsRelations = relations(tripEvents, ({ one }) => ({
+  // One trip event belongs to one trip
+  trip: one(trips, {
+    fields: [tripEvents.tripId],
+    references: [trips.id],
+  }),
+  // One trip event occurs at one center
+  center: one(centers, {
+    fields: [tripEvents.centerId],
+    references: [centers.id],
+  }),
+  // One trip event is recorded by one agent (user)
+  agent: one(users, {
+    fields: [tripEvents.agentId],
+    references: [users.id],
+  }),
+}));
+
+// Center Queues Relations
+export const centerQueuesRelations = relations(centerQueues, ({ one }) => ({
+  // One queue entry belongs to one center
+  center: one(centers, {
+    fields: [centerQueues.centerId],
+    references: [centers.id],
+  }),
+  // One queue entry belongs to one vehicle
+  vehicle: one(vehicles, {
+    fields: [centerQueues.vehicleId],
+    references: [vehicles.id],
+  }),
+  // One queue entry belongs to one trip
+  trip: one(trips, {
+    fields: [centerQueues.tripId],
+    references: [trips.id],
   }),
 }));
 

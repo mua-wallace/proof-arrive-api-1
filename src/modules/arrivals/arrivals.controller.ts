@@ -52,7 +52,8 @@ export class ArrivalsController {
     @Body() createDto: CreateArrivalDto,
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<Arrival> {
-    return this.arrivalsService.createArrival(createDto, credentials.accid.toString(), credentials.accid);
+    // Use subid as agentId (users.id equals subid)
+    return this.arrivalsService.createArrival(createDto, credentials.subid, credentials.accid);
   }
 
   @Get()

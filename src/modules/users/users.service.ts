@@ -167,8 +167,8 @@ export class UsersService extends BaseService<User> {
         // Check if error is due to missing email/role columns
         const errorMessage = selectError instanceof Error ? selectError.message : String(selectError);
         if (errorMessage?.toLowerCase().includes('email') || errorMessage?.toLowerCase().includes('role')) {
-          // Retry with explicit column selection excluding email/role
-          this.logger.warn('email/role columns missing, selecting columns explicitly (excluding email/role). Run migration 0005_add_user_fields.sql');
+          // Retry with explicit column selection excluding email/role/fullname
+          this.logger.warn('email/role/fullname columns missing, selecting columns explicitly (excluding email/role/fullname). Run migration 0005_add_user_fields.sql');
           data = await this.dbConnection
             .select({
               id: schema.users.id,
@@ -188,7 +188,6 @@ export class UsersService extends BaseService<User> {
               company: schema.users.company,
               username: schema.users.username,
               kP: schema.users.k_p,
-              fullname: schema.users.fullname,
               lastLoginAt: schema.users.lastLoginAt,
             })
             .from(schema.users)
@@ -229,8 +228,11 @@ export class UsersService extends BaseService<User> {
     };
   }
 
-  async findOneById(id: string, options?: { include?: string[]; accountId?: number }): Promise<User> {
-    if (!id) {
+  async findOneById(id: string | number, options?: { include?: string[]; accountId?: number }): Promise<User> {
+    // Convert id to number (users.id is now integer, equals subid)
+    const numericId = typeof id === 'string' ? Number(id) : id;
+    
+    if (!numericId || isNaN(numericId)) {
       throw new NotFoundException(`Invalid user ID: ${id}`);
     }
 
@@ -258,7 +260,7 @@ export class UsersService extends BaseService<User> {
         try {
           user = await this.dbConnection.query.users.findFirst({
             where: (users: any, { eq: eqFn, and: andFn }: any) => {
-              const conditions = [eqFn(users.id, id)];
+              const conditions = [eqFn(users.id, numericId)];
               if (options?.accountId !== undefined) {
                 conditions.push(eqFn(users.accountId, options.accountId));
               }
@@ -281,7 +283,7 @@ export class UsersService extends BaseService<User> {
           // If account_id column doesn't exist, retry without accountId filter
           if (isAccountIdError) {
             user = await this.dbConnection.query.users.findFirst({
-              where: (users: any, { eq: eqFn }: any) => eqFn(users.id, id),
+              where: (users: any, { eq: eqFn }: any) => eqFn(users.id, numericId),
               with: withRelations,
             });
           } else {
@@ -294,7 +296,7 @@ export class UsersService extends BaseService<User> {
           // Custom query with accountId filter
           try {
             const conditions = [
-              eq(schema.users.id, id),
+              eq(schema.users.id, numericId),
               eq(schema.users.accountId, options.accountId),
               sql`${schema.users.deletedAt} IS NULL`,
             ];
@@ -320,7 +322,7 @@ export class UsersService extends BaseService<User> {
             if (isAccountIdError) {
               // Use Drizzle with explicit column selection excluding account_id
               const fallbackConditions = [
-                eq(schema.users.id, id),
+                eq(schema.users.id, numericId),
                 sql`${schema.users.deletedAt} IS NULL`,
               ];
               
@@ -436,11 +438,83 @@ export class UsersService extends BaseService<User> {
         throw new NotFoundException('No search criteria provided');
       }
 
-      const user = await super.findOneBy(requestData, options);
-      if (!user) {
-        throw new NotFoundException(`User not found with criteria: ${JSON.stringify(requestData)}`);
+      try {
+        const user = await super.findOneBy(requestData, options);
+        if (!user) {
+          throw new NotFoundException(`User not found with criteria: ${JSON.stringify(requestData)}`);
+        }
+        return user;
+      } catch (error: any) {
+        // Check if error is due to missing email/role/fullname columns
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessageLower = errorMessage.toLowerCase();
+        
+        if (errorMessageLower.includes('email') || errorMessageLower.includes('role') || errorMessageLower.includes('fullname')) {
+          // Columns missing - use explicit column selection excluding email/role/fullname
+          this.logger.warn('email/role/fullname columns missing, using explicit column selection. Run migration 0005_add_user_fields.sql');
+          
+          // Build where conditions from requestData
+          const conditions: any[] = [];
+          if (requestData.accid !== undefined) {
+            conditions.push(eq(schema.users.accid, String(requestData.accid)));
+          }
+          if (requestData.subid !== undefined) {
+            conditions.push(eq(schema.users.subid, String(requestData.subid)));
+          }
+          if (requestData.id !== undefined) {
+            const idNum = typeof requestData.id === 'string' ? Number(requestData.id) : requestData.id;
+            conditions.push(eq(schema.users.id, idNum));
+          }
+          if (requestData.username !== undefined) {
+            conditions.push(eq(schema.users.username, String(requestData.username)));
+          }
+          
+          // Add accountId filter if provided
+          if (options?.accountId !== undefined) {
+            conditions.push(eq(schema.users.accountId, options.accountId));
+          }
+          
+          // Add deletedAt filter
+          conditions.push(sql`${schema.users.deletedAt} IS NULL`);
+          
+          // Select only columns that exist (excluding email/role/fullname)
+          const selectColumns: any = {
+            id: schema.users.id,
+            accountId: schema.users.accountId,
+            createdAt: schema.users.createdAt,
+            updatedAt: schema.users.updatedAt,
+            deletedAt: schema.users.deletedAt,
+            kU: schema.users.k_u,
+            pid: schema.users.pid,
+            subid: schema.users.subid,
+            partner: schema.users.partner,
+            kK: schema.users.k_k,
+            expire: schema.users.expire,
+            token: schema.users.token,
+            session: schema.users.session,
+            accid: schema.users.accid,
+            company: schema.users.company,
+            username: schema.users.username,
+            kP: schema.users.k_p,
+            lastLoginAt: schema.users.lastLoginAt,
+          };
+          
+          const [user] = await this.dbConnection
+            .select(selectColumns)
+            .from(schema.users)
+            .where(and(...conditions))
+            .limit(1);
+          
+          if (!user) {
+            throw new NotFoundException(`User not found with criteria: ${JSON.stringify(requestData)}`);
+          }
+          
+          return user as User;
+        }
+        
+        // Re-throw if not a column error
+        throw error;
       }
-      return user;
     } catch (error: any) {
       this.logger.error(`Failed to find user by criteria: ${error?.message || 'Unknown error'}`, error?.stack);
       if (error instanceof NotFoundException) throw error;

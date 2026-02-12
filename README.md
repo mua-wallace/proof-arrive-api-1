@@ -185,10 +185,18 @@ See `.env.example` for all available environment variables. Key variables includ
 
 When the container starts, the `scripts/start-with-migrations.sh` script automatically:
 1. Checks for database connection
-2. Syncs the schema using `drizzle-kit push` (with retry logic)
-3. Starts the NestJS application
+2. Runs all SQL migrations in order (with retry logic)
+3. **Automatically verifies critical user migrations** (0005, 0011, 0015) are applied
+4. **Automatically re-runs user migrations if they're missing** (ensures user table schema is correct)
+5. Verifies other critical migrations (account_id, qr_code columns, etc.)
+6. Starts the NestJS application
 
 **You don't need to manually run migrations in production** - the schema is automatically kept in sync with your code.
+
+**User Migrations (Automatically Verified):**
+- `0005_add_user_fields.sql` - Adds email, role, fullname columns
+- `0011_add_unique_constraint_users_accid_subid.sql` - Creates unique constraint
+- `0015_use_subid_as_user_id.sql` - Changes id from UUID to integer (equals subid)
 
 ### Manual Migrations (Development)
 

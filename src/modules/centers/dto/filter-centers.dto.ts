@@ -51,9 +51,16 @@ export class FilterCentersDto {
   sortBy?: string;
 
   @ApiPropertyOptional({
-    description: 'Comma-separated relations to include (geozone, arrivals, exits)',
+    description: 'Comma-separated relations to include (geozone, vehicles, arrivals, exits)',
   })
   @IsOptional()
   @IsString()
   include?: string;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Bulk sync centers to local database (default: false). Accepts boolean or string values: true, "true", "1"',
+  })
+  @IsOptional()
+  sync?: boolean | string;
 }

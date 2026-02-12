@@ -190,7 +190,9 @@ export class CentersSeederService implements OnModuleInit {
 
           if (existingCenter.length === 0) {
             // Center doesn't exist for this account, insert it (create just once)
+            // Note: id uses thirdPartyId value (not auto-generated)
             await this.dbConnection.insert(schema.centers).values({
+              id: centerData.thirdPartyId, // Use thirdPartyId as id value
               ...centerData,
               accountId: accId,
             }).execute();

@@ -1,12 +1,16 @@
-import { pgTable, text, timestamp, varchar, index, uniqueIndex } from 'drizzle-orm/pg-core';
-import { baseColumns } from './base.schema';
+import { pgTable, text, timestamp, varchar, integer, index, uniqueIndex } from 'drizzle-orm/pg-core';
 
 // User roles enum
 export type UserRole = 'agent' | 'admin' | 'manager';
 
 // Users/Agents
+// id column uses subid value (not auto-generated)
 export const users = pgTable('users', {
-  ...baseColumns,
+  id: integer('id').primaryKey().notNull(), // Uses subid value (not auto-generated)
+  accountId: integer('account_id').notNull(), // Multi-tenant: account ID from logged-in user
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'),
   k_u: text('k_u').notNull(),
   pid: text('pid').notNull(),
   subid: text('subid').notNull(),
