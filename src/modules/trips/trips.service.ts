@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger, BadRequestException, forwardRef } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { PaginateQuery, PaginateResult, BaseEntity } from '@common/interfaces';
 import { BaseService } from '@common/services/base.service';
@@ -9,7 +9,10 @@ import { CreateTripEventDto } from './dto/create-trip-event.dto';
 import { FilterTripsDto } from './dto/filter-trips.dto';
 import { TripStatus } from '@common/enums/trip-status.enum';
 import { TripEventType } from '@common/enums/trip-event-type.enum';
+import { TripPurpose } from '@common/enums/trip-purpose.enum';
+import { QueueType } from '@common/enums/queue-type.enum';
 import { VehicleStatus } from '@common/enums/vehicle-status.enum';
+import { QueuesService } from '@modules/queues/queues.service';
 
 type Trip = typeof schema.trips.$inferSelect & BaseEntity;
 type TripEvent = typeof schema.tripEvents.$inferSelect & BaseEntity;
@@ -22,6 +25,8 @@ export class TripsService extends BaseService<Trip> {
   constructor(
     @Inject(DATABASE_CONNECTION)
     db: any,
+    @Inject(forwardRef(() => QueuesService))
+    private readonly queuesService: QueuesService,
   ) {
     super(db, schema.trips as any);
     this.dbConnection = db;
@@ -216,6 +221,33 @@ export class TripsService extends BaseService<Trip> {
         accountId,
         agentId
       );
+
+      // Automatically add vehicle to queue based on trip purpose
+      // DELIVERY -> LOADING queue (vehicle loads goods to deliver)
+      // PICKUP -> UNLOADING queue (vehicle unloads goods that were picked up)
+      // Run asynchronously in background so it doesn't block trip creation response
+      const tripPurpose = trip.purpose || TripPurpose.DELIVERY;
+      const queueType = tripPurpose === TripPurpose.DELIVERY ? QueueType.LOADING : QueueType.UNLOADING;
+      
+      this.logger.log(
+        `🚀 Automatically adding vehicle ${vehicle.id} to ${queueType} queue for trip ${trip.id} ` +
+        `(purpose: ${tripPurpose}) at center ${originCenter.id}`
+      );
+      
+      this.addVehicleToQueueAutomatically(
+        originCenter.id, // Use center.id (which equals thirdPartyId)
+        vehicle.id, // Use vehicle.id (which equals thirdPartyId)
+        trip.id,
+        queueType,
+        accountId,
+        agentId
+      ).catch((error) => {
+        // Log error but don't fail trip creation
+        this.logger.error(
+          `❌ Failed to automatically add vehicle ${vehicle.id} to ${queueType} queue for trip ${trip.id}: ${error?.message || 'Unknown error'}`,
+          error?.stack
+        );
+      });
 
       return trip;
     } catch (error: any) {
@@ -693,5 +725,51 @@ export class TripsService extends BaseService<Trip> {
     };
 
     return this.findAll(paginateQuery, { ...options, filterDto });
+  }
+
+  /**
+   * Automatically add vehicle to queue after trip creation
+   * Runs asynchronously in background - errors are logged but don't fail trip creation
+   * @private
+   */
+  private async addVehicleToQueueAutomatically(
+    centerId: number,
+    vehicleId: number,
+    tripId: number,
+    queueType: QueueType,
+    accountId: number,
+    agentId: number
+  ): Promise<void> {
+    try {
+      this.logger.log(
+        `Automatically adding vehicle ${vehicleId} to ${queueType} queue for trip ${tripId} at center ${centerId}`
+      );
+
+      await this.queuesService.addToQueue(
+        centerId,
+        {
+          vehicleId,
+          tripId,
+          queueType,
+        },
+        accountId,
+        agentId
+      );
+
+      this.logger.log(
+        `Successfully added vehicle ${vehicleId} to ${queueType} queue for trip ${tripId}`
+      );
+    } catch (error: any) {
+      // If vehicle is already in queue, that's okay - just log it
+      if (error instanceof BadRequestException && error.message?.includes('already in')) {
+        this.logger.warn(
+          `Vehicle ${vehicleId} already in ${queueType} queue for trip ${tripId}, skipping automatic queue addition`
+        );
+        return;
+      }
+
+      // For other errors, re-throw so it gets caught and logged by the caller
+      throw error;
+    }
   }
 }
