@@ -32,51 +32,207 @@ export class TripsService extends BaseService<Trip> {
    * Ensures vehicle doesn't have an active trip
    */
   async createTrip(data: CreateTripDto, accountId: number, agentId: number): Promise<Trip> {
-    // Check if vehicle has an active trip
-    const activeTrip = await this.dbConnection
-      .select()
-      .from(schema.trips)
-      .where(
-        and(
-          eq(schema.trips.vehicleId, data.vehicleId),
-          eq(schema.trips.status, TripStatus.ONGOING),
-          eq(schema.trips.accountId, accountId)
+    // Log the payload for debugging
+    console.log('📦 Create Trip Payload:', JSON.stringify({ data, accountId, agentId }, null, 2));
+    
+    try {
+      // Validate that vehicle exists and belongs to account
+      // Try both id and thirdPartyId since vehicles.id = vehicles.thirdPartyId
+      let [vehicle] = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(
+          and(
+            eq(schema.vehicles.id, data.vehicleId),
+            eq(schema.vehicles.accountId, accountId)
+          )
         )
-      )
-      .limit(1);
+        .limit(1);
 
-    if (activeTrip.length > 0) {
-      throw new BadRequestException(`Vehicle ${data.vehicleId} already has an active trip`);
+      // If not found by id, try thirdPartyId (should be same, but just in case)
+      if (!vehicle) {
+        [vehicle] = await this.dbConnection
+          .select()
+          .from(schema.vehicles)
+          .where(
+            and(
+              eq(schema.vehicles.thirdPartyId, data.vehicleId),
+              eq(schema.vehicles.accountId, accountId)
+            )
+          )
+          .limit(1);
+      }
+
+      if (!vehicle) {
+        throw new NotFoundException(
+          `Vehicle ${data.vehicleId} not found for this account. ` +
+          `Please ensure the vehicle is synced from the Malambi API first using POST /api/v1/vehicles/sync?vehicle_id=${data.vehicleId}`
+        );
+      }
+
+      // Validate that origin center exists and belongs to account
+      // Try both id (thirdPartyId) and geozoneId since API might send either
+      let [originCenter] = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(
+          and(
+            eq(schema.centers.id, data.originCenterId),
+            eq(schema.centers.accountId, accountId)
+          )
+        )
+        .limit(1);
+
+      // If not found by id, try geozoneId (like arrivals/exits do)
+      if (!originCenter) {
+        [originCenter] = await this.dbConnection
+          .select()
+          .from(schema.centers)
+          .where(
+            and(
+              eq(schema.centers.geozoneId, data.originCenterId),
+              eq(schema.centers.accountId, accountId)
+            )
+          )
+          .limit(1);
+      }
+
+      if (!originCenter) {
+        throw new NotFoundException(`Origin center ${data.originCenterId} not found for this account (tried both id and geozoneId)`);
+      }
+
+      // Validate destination center if provided
+      let destinationCenter: any = null;
+      if (data.destinationCenterId !== undefined && data.destinationCenterId !== null) {
+        // Try both id (thirdPartyId) and geozoneId
+        [destinationCenter] = await this.dbConnection
+          .select()
+          .from(schema.centers)
+          .where(
+            and(
+              eq(schema.centers.id, data.destinationCenterId),
+              eq(schema.centers.accountId, accountId)
+            )
+          )
+          .limit(1);
+
+        if (!destinationCenter) {
+          [destinationCenter] = await this.dbConnection
+            .select()
+            .from(schema.centers)
+            .where(
+              and(
+                eq(schema.centers.geozoneId, data.destinationCenterId),
+                eq(schema.centers.accountId, accountId)
+              )
+            )
+            .limit(1);
+        }
+
+        if (!destinationCenter) {
+          throw new NotFoundException(`Destination center ${data.destinationCenterId} not found for this account (tried both id and geozoneId)`);
+        }
+      }
+
+      // Check if vehicle has an active trip
+      const activeTrip = await this.dbConnection
+        .select()
+        .from(schema.trips)
+        .where(
+          and(
+            eq(schema.trips.vehicleId, data.vehicleId),
+            eq(schema.trips.status, TripStatus.ONGOING),
+            eq(schema.trips.accountId, accountId)
+          )
+        )
+        .limit(1);
+
+      if (activeTrip.length > 0) {
+        throw new BadRequestException(`Vehicle ${data.vehicleId} already has an active trip`);
+      }
+
+      // Create trip - use center.id (which equals thirdPartyId) since trips.originCenterId references centers.id
+      // vehicleId should already be the internal id (which equals thirdPartyId) since vehicles.id = vehicles.thirdPartyId
+      const tripData: any = {
+        vehicleId: vehicle.id, // Use vehicle.id (which equals thirdPartyId) to match schema FK
+        originCenterId: originCenter.id, // Use center.id (which equals thirdPartyId) to match schema FK, not geozoneId
+        purpose: data.purpose || 'DELIVERY',
+        status: TripStatus.ONGOING,
+      };
+
+      // Only include destinationCenterId if it's provided (not undefined)
+      // Use center.id (which equals thirdPartyId) to match schema FK
+      if (destinationCenter) {
+        tripData.destinationCenterId = destinationCenter.id;
+      }
+
+      // Log the trip data that will be inserted
+      console.log('💾 Trip Data to Insert:', JSON.stringify({ tripData, accountId }, null, 2));
+      console.log('🔍 Vehicle found:', { id: vehicle.id, thirdPartyId: vehicle.thirdPartyId });
+      console.log('🔍 Origin Center found:', { id: originCenter.id, thirdPartyId: originCenter.thirdPartyId, geozoneId: originCenter.geozoneId });
+      if (destinationCenter) {
+        console.log('🔍 Destination Center found:', { id: destinationCenter.id, thirdPartyId: destinationCenter.thirdPartyId, geozoneId: destinationCenter.geozoneId });
+      }
+
+      let trip: Trip;
+      try {
+        trip = await this.create(tripData, accountId);
+      } catch (error: any) {
+        // Log the actual database error for debugging
+        this.logger.error(
+          `Failed to create trip in database: ${error?.message || 'Unknown error'}`,
+          error?.stack
+        );
+        this.logger.error(`Trip data: ${JSON.stringify(tripData)}, accountId: ${accountId}`);
+        
+        // Check for common database errors
+        const errorMessage = error?.message || String(error);
+        if (errorMessage.includes('foreign key') || errorMessage.includes('violates foreign key')) {
+          throw new BadRequestException(
+            `Invalid vehicle or center ID. Please verify that vehicle ${data.vehicleId} and center ${data.originCenterId} exist and belong to this account.`
+          );
+        }
+        if (errorMessage.includes('not null') || errorMessage.includes('NULL')) {
+          throw new BadRequestException(
+            `Missing required field: ${errorMessage}`
+          );
+        }
+        
+        // Re-throw with more context
+        throw new BadRequestException(
+          `Failed to create trip: ${errorMessage}`
+        );
+      }
+
+      // Create initial ARRIVED event
+      // Note: trip_events.centerId references centers.id (which equals thirdPartyId), not geozoneId
+      await this.createTripEvent(
+        trip.id,
+        {
+          eventType: TripEventType.ARRIVED,
+          centerId: originCenter.id, // Use center.id (which equals thirdPartyId) to match schema FK
+          metadata: {},
+        },
+        accountId,
+        agentId
+      );
+
+      return trip;
+    } catch (error: any) {
+      // Re-throw known exceptions
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      // Log and wrap unexpected errors
+      this.logger.error(
+        `Unexpected error creating trip: ${error?.message || 'Unknown error'}`,
+        error?.stack
+      );
+      throw new BadRequestException(
+        `Failed to create trip: ${error?.message || 'Unknown error'}`
+      );
     }
-
-    // Create trip - only include destinationCenterId if provided
-    const tripData: any = {
-      vehicleId: data.vehicleId,
-      originCenterId: data.originCenterId,
-      purpose: data.purpose || 'DELIVERY',
-      status: TripStatus.ONGOING,
-    };
-
-    // Only include destinationCenterId if it's provided (not undefined)
-    if (data.destinationCenterId !== undefined && data.destinationCenterId !== null) {
-      tripData.destinationCenterId = data.destinationCenterId;
-    }
-
-    const trip = await this.create(tripData, accountId);
-
-    // Create initial ARRIVED event
-    await this.createTripEvent(
-      trip.id,
-      {
-        eventType: TripEventType.ARRIVED,
-        centerId: data.originCenterId,
-        metadata: {},
-      },
-      accountId,
-      agentId
-    );
-
-    return trip;
   }
 
   /**
