@@ -200,31 +200,94 @@ export class QrCodeService {
         throw new BadRequestException('Invalid QR code: vehicle ID is not valid');
       }
 
-      const encryptedQrCode = this.encryptionService.encrypt(qrCodeString);
+      let qrRow: typeof schema.qrCodes.$inferSelect | undefined;
 
-      // Find qr_codes row by accountId and (encrypted or legacy plain) qrCode
-      const [qrRow] = await this.dbConnection
+      // Optimization: Since QR codes are String(vehicleId), try to find by vehicleThirdPartyId first
+      // This avoids decrypting all QR codes for the account
+      const [potentialQrRow] = await this.dbConnection
         .select()
         .from(schema.qrCodes)
         .where(
           and(
+            eq(schema.qrCodes.vehicleThirdPartyId, vehicleIdFromQr),
             eq(schema.qrCodes.accountId, accountId),
-            or(
-              eq(schema.qrCodes.qrCode, encryptedQrCode),
-              eq(schema.qrCodes.qrCode, qrCodeString),
-            ),
           ),
         )
         .limit(1);
 
+      if (potentialQrRow) {
+        // Verify by decrypting and comparing
+        try {
+          let decrypted: string;
+          if (this.encryptionService.isEncrypted(potentialQrRow.qrCode)) {
+            decrypted = this.encryptionService.decrypt(potentialQrRow.qrCode);
+          } else {
+            decrypted = potentialQrRow.qrCode;
+          }
+
+          if (decrypted === qrCodeString) {
+            qrRow = potentialQrRow;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Failed to decrypt QR code ${potentialQrRow.id} for vehicle ${vehicleIdFromQr}:`,
+            error instanceof Error ? error.message : 'Unknown error',
+          );
+        }
+      }
+
+      // Fallback: If not found by vehicleThirdPartyId, search all QR codes for this account
+      // This handles edge cases where QR code format might differ
+      if (!qrRow) {
+        const qrCodes = await this.dbConnection
+          .select()
+          .from(schema.qrCodes)
+          .where(eq(schema.qrCodes.accountId, accountId));
+
+        // Try to find matching QR code by decrypting stored values
+        for (const qr of qrCodes) {
+          try {
+            let decrypted: string;
+            if (this.encryptionService.isEncrypted(qr.qrCode)) {
+              decrypted = this.encryptionService.decrypt(qr.qrCode);
+            } else {
+              // Legacy unencrypted QR code
+              decrypted = qr.qrCode;
+            }
+
+            // Compare decrypted value with input
+            if (decrypted === qrCodeString) {
+              qrRow = qr;
+              break;
+            }
+          } catch (error) {
+            // Skip QR codes that fail to decrypt (might be corrupted or from different encryption key)
+            this.logger.warn(
+              `Failed to decrypt QR code ${qr.id} for account ${accountId}:`,
+              error instanceof Error ? error.message : 'Unknown error',
+            );
+            continue;
+          }
+        }
+
+        // Also check plain text match (for legacy unencrypted QR codes)
+        if (!qrRow) {
+          const plainTextMatch = qrCodes.find((qr) => qr.qrCode === qrCodeString);
+          if (plainTextMatch) {
+            qrRow = plainTextMatch;
+          }
+        }
+      }
+
       if (!qrRow) {
         throw new NotFoundException(
-          `Vehicle not found for QR code. The QR code may be invalid or belong to a different account.`,
+          `QR code not found. The QR code may be invalid or belong to a different account.`,
         );
       }
 
       // Upgrade legacy unencrypted QR code to encrypted
-      if (qrRow.qrCode === qrCodeString && !this.encryptionService.isEncrypted(qrRow.qrCode)) {
+      if (!this.encryptionService.isEncrypted(qrRow.qrCode)) {
+        const encryptedQrCode = this.encryptionService.encrypt(qrCodeString);
         await this.dbConnection
           .update(schema.qrCodes)
           .set({
