@@ -61,6 +61,40 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
     accountId: number,
     agentId: number
   ): Promise<CenterQueue> {
+    // Look up center by id (thirdPartyId) or geozoneId since API might send either
+    // center_queues.centerId references centers.id (which equals thirdPartyId)
+    let [center] = await this.dbConnection
+      .select()
+      .from(schema.centers)
+      .where(
+        and(
+          eq(schema.centers.id, centerId),
+          eq(schema.centers.accountId, accountId)
+        )
+      )
+      .limit(1);
+
+    // If not found by id, try geozoneId (like arrivals/exits do)
+    if (!center) {
+      [center] = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(
+          and(
+            eq(schema.centers.geozoneId, centerId),
+            eq(schema.centers.accountId, accountId)
+          )
+        )
+        .limit(1);
+    }
+
+    if (!center) {
+      throw new NotFoundException(`Center ${centerId} not found for this account (tried both id and geozoneId)`);
+    }
+
+    // Use center.id (which equals thirdPartyId) for the foreign key
+    const actualCenterId = center.id;
+
     // Verify trip exists and belongs to account
     const trip = await this.dbConnection
       .select()
@@ -77,14 +111,46 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       throw new NotFoundException(`Trip ${data.tripId} not found`);
     }
 
+    // Verify vehicle exists and get its id (which equals thirdPartyId)
+    let [vehicle] = await this.dbConnection
+      .select()
+      .from(schema.vehicles)
+      .where(
+        and(
+          eq(schema.vehicles.id, data.vehicleId),
+          eq(schema.vehicles.accountId, accountId)
+        )
+      )
+      .limit(1);
+
+    // If not found by id, try thirdPartyId
+    if (!vehicle) {
+      [vehicle] = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(
+          and(
+            eq(schema.vehicles.thirdPartyId, data.vehicleId),
+            eq(schema.vehicles.accountId, accountId)
+          )
+        )
+        .limit(1);
+    }
+
+    if (!vehicle) {
+      throw new NotFoundException(`Vehicle ${data.vehicleId} not found for this account`);
+    }
+
+    const actualVehicleId = vehicle.id;
+
     // Check if vehicle is already in queue
     const existingQueue = await this.dbConnection
       .select()
       .from(schema.centerQueues)
       .where(
         and(
-          eq(schema.centerQueues.centerId, centerId),
-          eq(schema.centerQueues.vehicleId, data.vehicleId),
+          eq(schema.centerQueues.centerId, actualCenterId),
+          eq(schema.centerQueues.vehicleId, actualVehicleId),
           eq(schema.centerQueues.queueType, data.queueType),
           eq(schema.centerQueues.isActive, true),
           eq(schema.centerQueues.accountId, accountId)
@@ -107,7 +173,7 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       .from(schema.centerQueues)
       .where(
         and(
-          eq(schema.centerQueues.centerId, centerId),
+          eq(schema.centerQueues.centerId, actualCenterId),
           eq(schema.centerQueues.queueType, data.queueType),
           eq(schema.centerQueues.isActive, true),
           eq(schema.centerQueues.accountId, accountId),
@@ -124,12 +190,27 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
     const nextPosition = activeCount + 1;
 
     // Create queue entry with today's date for daily reset
+    // Use actualCenterId and actualVehicleId to match schema foreign keys
     const todayDate = this.getTodayDate();
+    
+    // Log the queue data being inserted
+    console.log('📦 Add to Queue Payload:', JSON.stringify({ 
+      centerId, 
+      actualCenterId, 
+      vehicleId: data.vehicleId, 
+      actualVehicleId,
+      tripId: data.tripId,
+      queueType: data.queueType,
+      accountId 
+    }, null, 2));
+    console.log('🔍 Center found:', { id: center.id, thirdPartyId: center.thirdPartyId, geozoneId: center.geozoneId });
+    console.log('🔍 Vehicle found:', { id: vehicle.id, thirdPartyId: vehicle.thirdPartyId });
+    
     const [queueEntry] = await this.dbConnection
       .insert(schema.centerQueues)
       .values({
-        centerId,
-        vehicleId: data.vehicleId,
+        centerId: actualCenterId, // Use center.id (which equals thirdPartyId) to match schema FK
+        vehicleId: actualVehicleId, // Use vehicle.id (which equals thirdPartyId) to match schema FK
         tripId: data.tripId,
         queueType: data.queueType,
         position: nextPosition,
@@ -143,11 +224,12 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       .returning();
 
     // Create QUEUED trip event
+    // trip_events.centerId also references centers.id (which equals thirdPartyId)
     await this.dbConnection
       .insert(schema.tripEvents)
       .values({
         tripId: data.tripId,
-        centerId,
+        centerId: actualCenterId, // Use center.id (which equals thirdPartyId) to match schema FK
         agentId,
         eventType: TripEventType.QUEUED,
         timestamp: new Date(),
@@ -173,6 +255,39 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
     accountId: number,
     agentId: number
   ): Promise<{ queue: CenterQueue; tripEvent: any }> {
+    // Look up center by id (thirdPartyId) or geozoneId since API might send either
+    let [center] = await this.dbConnection
+      .select()
+      .from(schema.centers)
+      .where(
+        and(
+          eq(schema.centers.id, centerId),
+          eq(schema.centers.accountId, accountId)
+        )
+      )
+      .limit(1);
+
+    // If not found by id, try geozoneId
+    if (!center) {
+      [center] = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(
+          and(
+            eq(schema.centers.geozoneId, centerId),
+            eq(schema.centers.accountId, accountId)
+          )
+        )
+        .limit(1);
+    }
+
+    if (!center) {
+      throw new NotFoundException(`Center ${centerId} not found for this account (tried both id and geozoneId)`);
+    }
+
+    // Use center.id (which equals thirdPartyId) for the foreign key
+    const actualCenterId = center.id;
+
     // Get today's date range for daily queue reset
     const { start: todayStart, end: todayEnd } = this.getTodayDateRange();
 
@@ -182,7 +297,7 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       .from(schema.centerQueues)
       .where(
         and(
-          eq(schema.centerQueues.centerId, centerId),
+          eq(schema.centerQueues.centerId, actualCenterId),
           eq(schema.centerQueues.queueType, data.queueType),
           eq(schema.centerQueues.isActive, true),
           eq(schema.centerQueues.accountId, accountId),
@@ -210,11 +325,12 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       .where(eq(schema.centerQueues.id, queue.id));
 
     // Create SERVICE_STARTED trip event
+    // trip_events.centerId references centers.id (which equals thirdPartyId)
     const tripEvent = await this.dbConnection
       .insert(schema.tripEvents)
       .values({
         tripId: queue.tripId,
-        centerId,
+        centerId: actualCenterId, // Use center.id (which equals thirdPartyId) to match schema FK
         agentId,
         eventType: TripEventType.SERVICE_STARTED,
         timestamp: new Date(),
@@ -238,7 +354,7 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       .from(schema.centerQueues)
       .where(
         and(
-          eq(schema.centerQueues.centerId, centerId),
+          eq(schema.centerQueues.centerId, actualCenterId),
           eq(schema.centerQueues.queueType, data.queueType),
           eq(schema.centerQueues.isActive, true),
           gt(schema.centerQueues.position, queue.position),
@@ -273,8 +389,41 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
     accountId: number,
     filterDto?: { type?: QueueType; isActive?: boolean; date?: Date }
   ): Promise<Array<CenterQueue & { vehicle?: any; trip?: any; waitingTimeMinutes?: number; queueTypeLabel?: string }>> {
+    // Look up center by id (thirdPartyId) or geozoneId since API might send either
+    let [center] = await this.dbConnection
+      .select()
+      .from(schema.centers)
+      .where(
+        and(
+          eq(schema.centers.id, centerId),
+          eq(schema.centers.accountId, accountId)
+        )
+      )
+      .limit(1);
+
+    // If not found by id, try geozoneId
+    if (!center) {
+      [center] = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(
+          and(
+            eq(schema.centers.geozoneId, centerId),
+            eq(schema.centers.accountId, accountId)
+          )
+        )
+        .limit(1);
+    }
+
+    if (!center) {
+      throw new NotFoundException(`Center ${centerId} not found for this account (tried both id and geozoneId)`);
+    }
+
+    // Use center.id (which equals thirdPartyId) for the foreign key
+    const actualCenterId = center.id;
+
     const conditions: SQL[] = [
-      eq(schema.centerQueues.centerId, centerId),
+      eq(schema.centerQueues.centerId, actualCenterId),
       eq(schema.centerQueues.accountId, accountId),
     ];
 

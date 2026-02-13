@@ -263,12 +263,46 @@ export class TripsService extends BaseService<Trip> {
 
     const tripData = trip[0];
 
+    // Look up center by id (thirdPartyId) or geozoneId since API might send either
+    // trip_events.centerId references centers.id (which equals thirdPartyId)
+    let [center] = await this.dbConnection
+      .select()
+      .from(schema.centers)
+      .where(
+        and(
+          eq(schema.centers.id, data.centerId),
+          eq(schema.centers.accountId, accountId)
+        )
+      )
+      .limit(1);
+
+    // If not found by id, try geozoneId
+    if (!center) {
+      [center] = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(
+          and(
+            eq(schema.centers.geozoneId, data.centerId),
+            eq(schema.centers.accountId, accountId)
+          )
+        )
+        .limit(1);
+    }
+
+    if (!center) {
+      throw new NotFoundException(`Center ${data.centerId} not found for this account (tried both id and geozoneId)`);
+    }
+
+    // Use center.id (which equals thirdPartyId) for the foreign key
+    const actualCenterId = center.id;
+
     // Create trip event
     const event = await this.dbConnection
       .insert(schema.tripEvents)
       .values({
         tripId,
-        centerId: data.centerId,
+        centerId: actualCenterId, // Use center.id (which equals thirdPartyId) to match schema FK
         agentId,
         eventType: data.eventType,
         timestamp: new Date(),
@@ -280,17 +314,50 @@ export class TripsService extends BaseService<Trip> {
       .returning();
 
     // Update vehicle status and current center based on event type
-    await this.updateVehicleStatusFromEvent(tripData.vehicleId, data.eventType, data.centerId, accountId);
+    await this.updateVehicleStatusFromEvent(tripData.vehicleId, data.eventType, actualCenterId, accountId);
 
     // Update trip destination if READY_TO_EXIT event has destination in metadata
     if (data.eventType === TripEventType.READY_TO_EXIT && data.metadata?.destinationCenterId) {
-      await this.dbConnection
-        .update(schema.trips)
-        .set({
-          destinationCenterId: data.metadata.destinationCenterId,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.trips.id, tripId));
+      // Validate destination center - try both id (thirdPartyId) and geozoneId
+      let [destinationCenter] = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(
+          and(
+            eq(schema.centers.id, data.metadata.destinationCenterId),
+            eq(schema.centers.accountId, accountId)
+          )
+        )
+        .limit(1);
+
+      // If not found by id, try geozoneId
+      if (!destinationCenter) {
+        [destinationCenter] = await this.dbConnection
+          .select()
+          .from(schema.centers)
+          .where(
+            and(
+              eq(schema.centers.geozoneId, data.metadata.destinationCenterId),
+              eq(schema.centers.accountId, accountId)
+            )
+          )
+          .limit(1);
+      }
+
+      if (destinationCenter) {
+        // Use center.id (which equals thirdPartyId) for trips.destinationCenterId FK
+        await this.dbConnection
+          .update(schema.trips)
+          .set({
+            destinationCenterId: destinationCenter.id,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.trips.id, tripId));
+      } else {
+        this.logger.warn(
+          `Destination center ${data.metadata.destinationCenterId} not found for trip ${tripId}, skipping destination update`
+        );
+      }
     }
 
     // Complete trip if ARRIVED_DESTINATION event and purpose is DELIVERY
@@ -317,21 +384,25 @@ export class TripsService extends BaseService<Trip> {
       case TripEventType.ARRIVED:
       case TripEventType.ARRIVED_DESTINATION:
         newStatus = VehicleStatus.WAITING_IN_QUEUE;
+        // centerId is already validated and converted to centers.id in createTripEvent
         newCurrentCenterId = centerId;
         break;
       case TripEventType.QUEUED:
         newStatus = VehicleStatus.WAITING_IN_QUEUE;
+        // centerId is already validated and converted to centers.id in createTripEvent
         newCurrentCenterId = centerId;
         break;
       case TripEventType.SERVICE_STARTED:
         // Determine if loading or unloading based on trip purpose or metadata
         // For now, default to LOADING - can be enhanced with metadata
         newStatus = VehicleStatus.LOADING;
+        // centerId is already validated and converted to centers.id in createTripEvent
         newCurrentCenterId = centerId;
         break;
       case TripEventType.LOADING_ENDED:
       case TripEventType.UNLOADING_ENDED:
         newStatus = VehicleStatus.AVAILABLE;
+        // centerId is already validated and converted to centers.id in createTripEvent
         newCurrentCenterId = centerId;
         break;
       case TripEventType.EXITED:
