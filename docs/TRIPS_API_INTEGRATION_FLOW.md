@@ -271,12 +271,27 @@ Content-Type: application/json
 - `ARRIVED` event is automatically created
 - Vehicle status changes to `WAITING_IN_QUEUE`
 - Vehicle `currentCenterId` is set to origin center
+- **Vehicle is automatically added to the appropriate queue** (runs in background):
+  - **DELIVERY trips** → Added to **LOADING** queue (vehicle loads goods to deliver)
+  - **PICKUP trips** → Added to **UNLOADING** queue (vehicle unloads goods that were picked up)
+- Queue position is automatically calculated from today's active queue entries
+- `QUEUED` event is automatically created with queue metadata
+
+**Queue Addition Details:**
+- Queue addition runs **asynchronously in the background** - trip creation response is not blocked
+- If queue addition fails, it's logged but doesn't fail trip creation
+- Queue position is calculated from count of active vehicles in queue **today**
+- **Daily Reset:** Positions reset each day - each day starts from position 1
+- Example: If 2 vehicles are already in queue today (positions 1, 2), new vehicle gets position 3
 
 ---
 
-#### Step 2: Add Vehicle to Loading Queue
+#### Step 2: (Optional) Manually Add Vehicle to Queue
 
-**If loading bay is busy, vehicle enters queue**
+**Note:** This step is now **automatic** when creating a trip. You only need to manually add vehicles to queue if:
+- The automatic queue addition failed (check logs)
+- You need to change the queue type
+- You need to add the vehicle to a different queue
 
 ```http
 POST /api/v1/centers/4114/queue
@@ -289,6 +304,8 @@ Content-Type: application/json
   "queueType": "LOADING"
 }
 ```
+
+**Note:** The `centerId` in the URL can be either the center's `id` (thirdPartyId) or `geozoneId`. The API will automatically resolve it.
 
 **Response:**
 ```json
@@ -305,7 +322,7 @@ Content-Type: application/json
 }
 ```
 
-**What happens automatically:**
+**What happens:**
 - Vehicle is added to queue with position automatically calculated from **today's** active queue entries
 - **Daily Reset:** Positions reset each day - each day starts from position 1
 - Position is set to: (count of active vehicles in queue **today**) + 1
@@ -325,7 +342,9 @@ Content-Type: application/json
 
 #### Step 3: Start Service for Next Vehicle
 
-**When loading bay becomes available, start service for first vehicle in queue**
+**When loading bay becomes available, start service for the first vehicle in queue**
+
+Vehicles are automatically added to the queue when trips are created (Step 1), so you can proceed directly to starting service. This endpoint will return a 404 error if no vehicles are in the queue (which should be rare since queue addition is automatic).
 
 ```http
 POST /api/v1/centers/4114/queue/next
@@ -336,6 +355,13 @@ Content-Type: application/json
   "queueType": "LOADING"
 }
 ```
+
+**Note:** The `centerId` in the URL can be either the center's `id` (thirdPartyId) or `geozoneId`. The API will automatically resolve it.
+
+**Error Handling:**
+- If no vehicles are in the queue, you'll receive a 404 error with a message indicating the queue is empty.
+- The error message will include the center name and guidance.
+- This should rarely happen since vehicles are automatically added to queue on trip creation.
 
 **Response:**
 ```json
@@ -850,23 +876,43 @@ Manually complete a trip (usually automatic for DELIVERY trips after UNLOADING_E
 
 ### Queue Endpoints
 
-#### Add Vehicle to Queue
+#### Add Vehicle to Queue (Automatic)
+**✅ AUTOMATIC:** Vehicles are automatically added to the appropriate queue when trips are created:
+- **DELIVERY trips** → Automatically added to **LOADING** queue
+- **PICKUP trips** → Automatically added to **UNLOADING** queue
+
+Queue addition runs asynchronously in the background and doesn't block trip creation.
+
+#### Manually Add Vehicle to Queue (Optional)
 ```http
 POST /api/v1/centers/{centerId}/queue
 ```
-Adds vehicle to queue and creates `QUEUED` event.
+**Note:** This is now optional since queue addition is automatic. Use this endpoint only if:
+- You need to manually add a vehicle to queue
+- The automatic queue addition failed (check logs)
+- You need to change the queue type
+
+**Note:** The `centerId` in the URL can be either the center's `id` (thirdPartyId) or `geozoneId`. The API will automatically resolve it.
 
 **Position Calculation:**
-- Queue position is **automatically calculated** from the count of existing active vehicles in the queue
-- Position = (number of active vehicles) + 1
+- Queue position is **automatically calculated** from the count of existing active vehicles in the queue **today**
+- Position = (number of active vehicles today) + 1
 - Ensures sequential positions (1, 2, 3...) without gaps
-- Example: If 2 vehicles are in queue, new vehicle gets position 3
+- **Daily Reset:** Positions reset each day - each day starts from position 1
+- Example: If 2 vehicles are in queue today, new vehicle gets position 3
 
 #### Start Next Service
 ```http
 POST /api/v1/centers/{centerId}/queue/next
 ```
 Starts service for first vehicle in queue and creates `SERVICE_STARTED` event.
+
+**Note:** The `centerId` in the URL can be either the center's `id` (thirdPartyId) or `geozoneId`. The API will automatically resolve it.
+
+**Error Handling:**
+- Returns 404 if no vehicles are in the queue
+- Error message includes center name and guidance
+- This should rarely happen since vehicles are automatically added to queue on trip creation
 
 **Position Renumbering:**
 - When a vehicle starts service, it is removed from the queue

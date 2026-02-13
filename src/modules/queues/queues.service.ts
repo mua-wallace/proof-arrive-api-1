@@ -309,7 +309,12 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       .limit(1);
 
     if (queueEntry.length === 0) {
-      throw new NotFoundException(`No vehicles in ${data.queueType} queue at center ${centerId}`);
+      // Provide helpful error message with center name and guidance
+      const centerName = center.name || `center ${centerId}`;
+      throw new NotFoundException(
+        `No vehicles in ${data.queueType} queue at ${centerName} (ID: ${center.id}). ` +
+        `Please add vehicles to the queue first using POST /api/v1/centers/${centerId}/queue`
+      );
     }
 
     const queue = queueEntry[0];
