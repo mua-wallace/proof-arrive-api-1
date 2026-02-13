@@ -1204,7 +1204,8 @@ export class VehiclesService extends BaseService<Vehicle> {
       let centerIdToSet: number | null = null;
       if (updateDto.centerId !== undefined && updateDto.centerId !== null) {
         // Verify center exists and belongs to account
-        const [center] = await this.dbConnection
+        // Try both id (thirdPartyId) and geozoneId since API might send either
+        let [center] = await this.dbConnection
           .select()
           .from(schema.centers)
           .where(
@@ -1215,11 +1216,26 @@ export class VehiclesService extends BaseService<Vehicle> {
           )
           .limit(1);
 
+        // If not found by id, try geozoneId
         if (!center) {
-          throw new NotFoundException(`Center with ID ${updateDto.centerId} not found for this account`);
+          [center] = await this.dbConnection
+            .select()
+            .from(schema.centers)
+            .where(
+              and(
+                eq(schema.centers.geozoneId, updateDto.centerId),
+                eq(schema.centers.accountId, accountId),
+              ),
+            )
+            .limit(1);
         }
 
-        centerIdToSet = updateDto.centerId;
+        if (!center) {
+          throw new NotFoundException(`Center ${updateDto.centerId} not found for this account (tried both id and geozoneId)`);
+        }
+
+        // Use center.id (which equals thirdPartyId) for vehicles.currentCenterId FK
+        centerIdToSet = center.id;
       } else {
         // For statuses that require a center, throw error if not provided
         if (
@@ -1620,12 +1636,53 @@ export class VehiclesService extends BaseService<Vehicle> {
     notes?: string,
   ): Promise<void> {
     try {
+      // Validate centerId if provided (should already be validated, but double-check)
+      let actualCenterId: number | null = null;
+      if (centerId !== null && centerId !== undefined) {
+        // Try to find center by id (thirdPartyId) or geozoneId
+        let [center] = await this.dbConnection
+          .select()
+          .from(schema.centers)
+          .where(
+            and(
+              eq(schema.centers.id, centerId),
+              eq(schema.centers.accountId, accountId),
+            ),
+          )
+          .limit(1);
+
+        // If not found by id, try geozoneId
+        if (!center) {
+          [center] = await this.dbConnection
+            .select()
+            .from(schema.centers)
+            .where(
+              and(
+                eq(schema.centers.geozoneId, centerId),
+                eq(schema.centers.accountId, accountId),
+              ),
+            )
+            .limit(1);
+        }
+
+        if (center) {
+          // Use center.id (which equals thirdPartyId) for vehicle_status_history.centerId FK
+          actualCenterId = center.id;
+        } else {
+          // Center not found - log warning but continue (don't fail)
+          this.logger.warn(
+            `Center ${centerId} not found when logging status change for vehicle ${vehicleId}, using null`,
+          );
+          actualCenterId = null;
+        }
+      }
+
       await this.dbConnection
         .insert(schema.vehicleStatusHistory)
         .values({
           vehicleId,
           status,
-          centerId,
+          centerId: actualCenterId,
           accountId,
           changedBy: changedBy || null,
           notes: notes || null,
