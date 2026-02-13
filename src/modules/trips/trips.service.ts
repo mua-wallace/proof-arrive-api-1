@@ -49,17 +49,20 @@ export class TripsService extends BaseService<Trip> {
       throw new BadRequestException(`Vehicle ${data.vehicleId} already has an active trip`);
     }
 
-    // Create trip
-    const trip = await this.create(
-      {
-        vehicleId: data.vehicleId,
-        originCenterId: data.originCenterId,
-        destinationCenterId: data.destinationCenterId,
-        purpose: data.purpose || 'DELIVERY',
-        status: TripStatus.ONGOING,
-      },
-      accountId
-    );
+    // Create trip - only include destinationCenterId if provided
+    const tripData: any = {
+      vehicleId: data.vehicleId,
+      originCenterId: data.originCenterId,
+      purpose: data.purpose || 'DELIVERY',
+      status: TripStatus.ONGOING,
+    };
+
+    // Only include destinationCenterId if it's provided (not undefined)
+    if (data.destinationCenterId !== undefined && data.destinationCenterId !== null) {
+      tripData.destinationCenterId = data.destinationCenterId;
+    }
+
+    const trip = await this.create(tripData, accountId);
 
     // Create initial ARRIVED event
     await this.createTripEvent(

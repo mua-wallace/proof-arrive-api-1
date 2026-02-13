@@ -42,8 +42,16 @@ export class BaseService<T extends BaseEntity> {
     data: Partial<Omit<T, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>>,
     accountId?: number,
   ): Promise<T> {
+    // Filter out undefined values to avoid issues with Drizzle ORM
+    const filteredData: any = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        filteredData[key] = value;
+      }
+    }
+
     const insertData: any = {
-      ...data,
+      ...filteredData,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
