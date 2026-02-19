@@ -968,6 +968,30 @@ Query parameters:
 ]
 ```
 
+#### Get All Vehicles in Queue
+```http
+GET /api/v1/centers/{centerId}/queue/vehicles?type=LOADING&isActive=true&date=2026-02-12
+```
+Returns a list of **all vehicles** currently in the queue at the center. Same filters as Get Queue (`type`, `isActive`, `date`). Use this when you need a vehicle-focused list (e.g. for dashboards or vehicle lookup).
+
+**Response:**
+```json
+{
+  "vehicles": [
+    {
+      "vehicle": { "id": 17589, "plate": "ABC-123", ... },
+      "queueEntryId": 1,
+      "position": 1,
+      "queueType": "LOADING",
+      "queueTypeLabel": "Loading Queue",
+      "waitingTimeMinutes": 10,
+      "tripId": 1,
+      "isActive": true
+    }
+  ]
+}
+```
+
 #### Get Queue Summary
 ```http
 GET /api/v1/centers/{centerId}/queue/summary

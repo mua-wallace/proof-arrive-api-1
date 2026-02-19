@@ -498,6 +498,40 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
   }
 
   /**
+   * Get all vehicles currently in the queue at a center.
+   * Returns a list of vehicles with their queue position, type, and optional waiting time.
+   */
+  async getVehiclesInQueue(
+    centerId: number,
+    accountId: number,
+    filterDto?: { type?: QueueType; isActive?: boolean; date?: Date }
+  ): Promise<{
+    vehicles: Array<{
+      vehicle: any;
+      queueEntryId: number;
+      position: number;
+      queueType: QueueType;
+      queueTypeLabel: string;
+      waitingTimeMinutes?: number;
+      tripId: number;
+      isActive: boolean;
+    }>;
+  }> {
+    const queues = await this.getQueue(centerId, accountId, filterDto);
+    const vehicles = queues.map((q) => ({
+      vehicle: (q as any).vehicle,
+      queueEntryId: q.id,
+      position: q.position,
+      queueType: q.queueType as QueueType,
+      queueTypeLabel: String((q as any).queueTypeLabel ?? (q.queueType === QueueType.LOADING ? 'Loading Queue' : 'Unloading Queue')),
+      waitingTimeMinutes: (q as any).waitingTimeMinutes as number | undefined,
+      tripId: q.tripId,
+      isActive: q.isActive ?? false,
+    }));
+    return { vehicles };
+  }
+
+  /**
    * Get queue summary/statistics for a center
    * Shows queue position and type clearly
    */

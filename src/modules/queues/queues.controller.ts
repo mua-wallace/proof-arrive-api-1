@@ -62,6 +62,28 @@ export class QueuesController {
     );
   }
 
+  @Get('vehicles')
+  @ApiOperation({
+    summary: 'Get all vehicles in the queue at a center',
+    description: 'Returns a list of all vehicles currently in the queue (by default today\'s active queue). Each item includes vehicle details, queue position, queue type (LOADING/UNLOADING), and waiting time. Supports same filters as GET /queue (type, isActive, date).'
+  })
+  @ApiResponse({ status: 200, description: 'List of vehicles in queue' })
+  @ApiQuery({ name: 'type', required: false, enum: ['LOADING', 'UNLOADING'], description: 'Filter by queue type' })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Show only active queues (default: true)' })
+  @ApiQuery({ name: 'date', required: false, type: String, description: 'Queue date (YYYY-MM-DD). Default: today' })
+  async getVehiclesInQueue(
+    @Param('centerId', ParseIntPipe) centerId: number,
+    @Query() filterDto: FilterQueuesDto & { date?: string },
+    @CurrentUserCredentials() credentials: any,
+  ) {
+    const filterOptions: any = {
+      type: filterDto.type,
+      isActive: filterDto.isActive !== undefined ? filterDto.isActive : true,
+    };
+    if (filterDto.date) filterOptions.date = new Date(filterDto.date);
+    return this.queuesService.getVehiclesInQueue(centerId, credentials.accid, filterOptions);
+  }
+
   @Get()
   @ApiOperation({ 
     summary: 'Get queue at a center',
