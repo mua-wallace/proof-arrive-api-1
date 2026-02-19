@@ -246,8 +246,8 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
   }
 
   /**
-   * Start service for the next vehicle in queue
-   * Only processes today's queue entries (daily reset)
+   * Start service for the next vehicle in queue at a center (center-based API).
+   * Only processes today's queue entries (daily reset).
    */
   async startNextService(
     centerId: number,
@@ -255,44 +255,26 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
     accountId: number,
     agentId: number
   ): Promise<{ queue: CenterQueue; tripEvent: any }> {
-    // Look up center by id (thirdPartyId) or geozoneId since API might send either
+    const { start: todayStart, end: todayEnd } = this.getTodayDateRange();
+
     let [center] = await this.dbConnection
       .select()
       .from(schema.centers)
-      .where(
-        and(
-          eq(schema.centers.id, centerId),
-          eq(schema.centers.accountId, accountId)
-        )
-      )
+      .where(and(eq(schema.centers.id, centerId), eq(schema.centers.accountId, accountId)))
       .limit(1);
-
-    // If not found by id, try geozoneId
     if (!center) {
       [center] = await this.dbConnection
         .select()
         .from(schema.centers)
-        .where(
-          and(
-            eq(schema.centers.geozoneId, centerId),
-            eq(schema.centers.accountId, accountId)
-          )
-        )
+        .where(and(eq(schema.centers.geozoneId, centerId), eq(schema.centers.accountId, accountId)))
         .limit(1);
     }
-
     if (!center) {
       throw new NotFoundException(`Center ${centerId} not found for this account (tried both id and geozoneId)`);
     }
-
-    // Use center.id (which equals thirdPartyId) for the foreign key
     const actualCenterId = center.id;
 
-    // Get today's date range for daily queue reset
-    const { start: todayStart, end: todayEnd } = this.getTodayDateRange();
-
-    // Get first vehicle in TODAY'S queue (positions reset daily)
-    const queueEntry = await this.dbConnection
+    const [queueEntry] = await this.dbConnection
       .select()
       .from(schema.centerQueues)
       .where(
@@ -308,8 +290,7 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       .orderBy(asc(schema.centerQueues.position))
       .limit(1);
 
-    if (queueEntry.length === 0) {
-      // Provide helpful error message with center name and guidance
+    if (!queueEntry) {
       const centerName = center.name || `center ${centerId}`;
       throw new NotFoundException(
         `No vehicles in ${data.queueType} queue at ${centerName} (ID: ${center.id}). ` +
@@ -317,50 +298,111 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       );
     }
 
-    const queue = queueEntry[0];
+    return this.executeStartService(queueEntry, data.queueType, agentId, accountId);
+  }
 
-    // Update queue entry
+  /**
+   * Start service for a specific vehicle (vehicle-based API).
+   * The vehicle must be first in the queue at its center for the given queue type.
+   */
+  async startServiceByVehicleId(
+    vehicleId: number,
+    data: StartNextServiceDto,
+    accountId: number,
+    agentId: number
+  ): Promise<{ queue: CenterQueue; tripEvent: any }> {
+    const { start: todayStart, end: todayEnd } = this.getTodayDateRange();
+
+    let [vehicle] = await this.dbConnection
+      .select()
+      .from(schema.vehicles)
+      .where(and(eq(schema.vehicles.id, vehicleId), eq(schema.vehicles.accountId, accountId)))
+      .limit(1);
+    if (!vehicle) {
+      [vehicle] = await this.dbConnection
+        .select()
+        .from(schema.vehicles)
+        .where(and(eq(schema.vehicles.thirdPartyId, vehicleId), eq(schema.vehicles.accountId, accountId)))
+        .limit(1);
+    }
+    if (!vehicle) {
+      throw new NotFoundException(`Vehicle ${vehicleId} not found for this account (tried both id and thirdPartyId)`);
+    }
+    const actualVehicleId = vehicle.id;
+
+    const [queueEntry] = await this.dbConnection
+      .select()
+      .from(schema.centerQueues)
+      .where(
+        and(
+          eq(schema.centerQueues.vehicleId, actualVehicleId),
+          eq(schema.centerQueues.queueType, data.queueType),
+          eq(schema.centerQueues.isActive, true),
+          eq(schema.centerQueues.accountId, accountId),
+          eq(schema.centerQueues.position, 1),
+          gte(schema.centerQueues.queueDate, todayStart),
+          lt(schema.centerQueues.queueDate, todayEnd)
+        )
+      )
+      .limit(1);
+
+    if (!queueEntry) {
+      throw new NotFoundException(
+        `Vehicle ${vehicleId} is not first in ${data.queueType} queue at any center. ` +
+        `Ensure the vehicle is in the queue and at position 1, or use GET /api/v1/centers/{centerId}/queue/vehicles to check.`
+      );
+    }
+
+    return this.executeStartService(queueEntry, data.queueType, agentId, accountId);
+  }
+
+  /**
+   * Mark queue entry as service started, create SERVICE_STARTED event, renumber remaining positions.
+   */
+  private async executeStartService(
+    queue: CenterQueue,
+    queueType: QueueType,
+    agentId: number,
+    accountId: number
+  ): Promise<{ queue: CenterQueue; tripEvent: any }> {
+    const actualCenterId = queue.centerId;
+    const { start: todayStart, end: todayEnd } = this.getTodayDateRange();
+    const startedAt = new Date();
+
     await this.dbConnection
       .update(schema.centerQueues)
       .set({
-        serviceStartedAt: new Date(),
+        serviceStartedAt: startedAt,
         isActive: false,
-        updatedAt: new Date(),
+        updatedAt: startedAt,
       })
       .where(eq(schema.centerQueues.id, queue.id));
 
-    // Create SERVICE_STARTED trip event
-    // trip_events.centerId references centers.id (which equals thirdPartyId)
-    const tripEvent = await this.dbConnection
+    const waitMinutes = queue.queuedAt
+      ? Math.floor((startedAt.getTime() - new Date(queue.queuedAt).getTime()) / 1000 / 60)
+      : null;
+    const [tripEvent] = await this.dbConnection
       .insert(schema.tripEvents)
       .values({
         tripId: queue.tripId,
-        centerId: actualCenterId, // Use center.id (which equals thirdPartyId) to match schema FK
+        centerId: actualCenterId,
         agentId,
         eventType: TripEventType.SERVICE_STARTED,
-        timestamp: new Date(),
-        metadata: {
-          service_type: data.queueType,
-          queue_wait_time: queue.serviceStartedAt
-            ? Math.floor((new Date(queue.serviceStartedAt).getTime() - new Date(queue.queuedAt).getTime()) / 1000 / 60) // minutes
-            : null,
-        },
+        timestamp: startedAt,
+        metadata: { service_type: queueType, queue_wait_time: waitMinutes },
         accountId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: startedAt,
+        updatedAt: startedAt,
       })
       .returning();
 
-    // Renumber positions of remaining vehicles in TODAY'S queue to be sequential (1, 2, 3...)
-    // Get all remaining active vehicles in today's queue, ordered by position
-    // Reuse the date range already calculated above
     const remainingQueues = await this.dbConnection
       .select()
       .from(schema.centerQueues)
       .where(
         and(
           eq(schema.centerQueues.centerId, actualCenterId),
-          eq(schema.centerQueues.queueType, data.queueType),
+          eq(schema.centerQueues.queueType, queueType),
           eq(schema.centerQueues.isActive, true),
           gt(schema.centerQueues.position, queue.position),
           eq(schema.centerQueues.accountId, accountId),
@@ -370,18 +412,14 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       )
       .orderBy(asc(schema.centerQueues.position));
 
-    // Renumber positions sequentially starting from 1 (the vehicle that just left was position 1)
     for (let i = 0; i < remainingQueues.length; i++) {
       await this.dbConnection
         .update(schema.centerQueues)
-        .set({
-          position: i + 1, // Renumber to 1, 2, 3... (sequential, no gaps)
-          updatedAt: new Date(),
-        })
+        .set({ position: i + 1, updatedAt: new Date() })
         .where(eq(schema.centerQueues.id, remainingQueues[i].id));
     }
 
-    return { queue, tripEvent: tripEvent[0] };
+    return { queue, tripEvent };
   }
 
   /**
