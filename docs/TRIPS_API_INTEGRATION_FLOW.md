@@ -8,7 +8,8 @@ This document describes the complete integration flow for the trips and queues s
 3. [Complete Workflow Example](#complete-workflow-example)
 4. [API Endpoints Reference](#api-endpoints-reference)
 5. [Event Sequence Diagrams](#event-sequence-diagrams)
-6. [Error Handling](#error-handling)
+6. [Mobile: Endpoint-by-Endpoint (Trip Creation to Completion)](#mobile-endpoint-by-endpoint-trip-creation-to-completion)
+7. [Error Handling](#error-handling)
 
 ---
 
@@ -342,9 +343,9 @@ Content-Type: application/json
 
 #### Step 3: Start Service for Next Vehicle
 
-**When loading bay becomes available, start service for the first vehicle in queue**
+**When loading bay becomes available, start service for the first vehicle in queue at the center**
 
-Vehicles are automatically added to the queue when trips are created (Step 1), so you can proceed directly to starting service. This endpoint will return a 404 error if no vehicles are in the queue (which should be rare since queue addition is automatic).
+Vehicles are automatically added to the queue when trips are created (Step 1). Use the **center-based** endpoint with the origin center ID.
 
 ```http
 POST /api/v1/centers/4114/queue/next
@@ -356,12 +357,11 @@ Content-Type: application/json
 }
 ```
 
-**Note:** The `centerId` in the URL can be either the center's `id` (thirdPartyId) or `geozoneId`. The API will automatically resolve it.
+- **centerId** in the URL: origin center (same as trip’s `originCenterId`). Can be the center's `id` (thirdPartyId) or `geozoneId`; the API resolves it.
+- Starts service for the **first vehicle** in that center’s LOADING queue and creates `SERVICE_STARTED` event.
 
 **Error Handling:**
-- If no vehicles are in the queue, you'll receive a 404 error with a message indicating the queue is empty.
-- The error message will include the center name and guidance.
-- This should rarely happen since vehicles are automatically added to queue on trip creation.
+- **404** – No vehicles in queue at that center. Vehicles are automatically added on trip creation, so 404 should be rare when the flow is followed.
 
 **Response:**
 ```json
@@ -675,6 +675,8 @@ Content-Type: application/json
 }
 ```
 
+- **centerId** in the URL: destination center (4115). Can be center's `id` or `geozoneId`. Starts service for the first vehicle in that center’s UNLOADING queue.
+
 **Response:**
 ```json
 {
@@ -901,18 +903,16 @@ POST /api/v1/centers/{centerId}/queue
 - **Daily Reset:** Positions reset each day - each day starts from position 1
 - Example: If 2 vehicles are in queue today, new vehicle gets position 3
 
-#### Start Next Service
+#### Start Next Service (by center)
 ```http
 POST /api/v1/centers/{centerId}/queue/next
+Content-Type: application/json
+Body: { "queueType": "LOADING" | "UNLOADING" }
 ```
-Starts service for first vehicle in queue and creates `SERVICE_STARTED` event.
+Starts service for the **first vehicle** in that center's queue and creates `SERVICE_STARTED` event. Use this with **centerId** (origin center for loading, destination center for unloading).
 
-**Note:** The `centerId` in the URL can be either the center's `id` (thirdPartyId) or `geozoneId`. The API will automatically resolve it.
-
-**Error Handling:**
-- Returns 404 if no vehicles are in the queue
-- Error message includes center name and guidance
-- This should rarely happen since vehicles are automatically added to queue on trip creation
+- **centerId** in URL: center's `id` (thirdPartyId) or `geozoneId` (API resolves).
+- **404:** No vehicles in queue at that center.
 
 **Position Renumbering:**
 - When a vehicle starts service, it is removed from the queue
@@ -1141,69 +1141,284 @@ Vehicle Status: AVAILABLE
 
 ---
 
-## Mobile App Integration Guide
+## Mobile: Endpoint-by-Endpoint (Trip Creation to Completion)
 
-### Step-by-Step Mobile App Flow
+This section lists **every API call** the mobile app makes in order, from trip creation to trip completion. For each call: endpoint, parameters (and where to get them), and possible responses.
 
-#### At Origin Center (Creating Trip)
+**Headers for all requests:** `Authorization: Bearer {token}`, `Content-Type: application/json` (for POST/PUT).
 
-1. **Agent opens mobile app and navigates to "Scan QR Code"**
-2. **Camera opens, agent scans vehicle QR code**
-3. **App calls:** `GET /api/v1/vehicles/qr-code/{scannedQrCode}`
-4. **App receives vehicle information**
-5. **App displays:**
-   - Vehicle plate number
-   - Vehicle model/brand
-   - Current status
-   - Current location (if any)
-6. **Agent confirms:** "Yes, this is the correct vehicle"
-7. **App proceeds to:** "Create Trip" screen
-8. **App pre-fills:** `vehicleId` from QR scan response
-9. **Agent selects:** Origin center (or uses GPS location)
-10. **App creates trip:** `POST /api/v1/trips` with vehicleId from QR scan
+---
 
-#### At Destination Center (Vehicle Arrival)
+### 1. Validate QR code (origin – before creating trip)
 
-1. **Agent opens mobile app and navigates to "Scan QR Code"**
-2. **Camera opens, agent scans vehicle QR code**
-3. **App calls:** `GET /api/v1/vehicles/qr-code/{scannedQrCode}`
-4. **App receives vehicle information**
-5. **App displays:**
-   - Vehicle plate number
-   - Vehicle model/brand
-   - Current status (should be `IN_TRANSIT`)
-   - Active trip information (if vehicle has active trip)
-6. **App verifies:** Vehicle has active trip and vehicleId matches
-7. **Agent confirms:** "Yes, this is the correct vehicle"
-8. **App proceeds to:** "Record Arrival" screen
-9. **App pre-fills:** `tripId` from active trip, `centerId` from current center
-10. **App creates event:** `POST /api/v1/trips/{tripId}/events` with `ARRIVED_DESTINATION`
+| Item | Value |
+|------|--------|
+| **Endpoint** | `GET /api/v1/vehicles/qr-code/{scannedQrCode}` |
+| **When** | Right after the agent scans the vehicle QR code at origin. |
+| **Path param** | `scannedQrCode` – raw string from the camera (e.g. `"17589"`). |
 
-### QR Code Format
-
-- QR codes contain the vehicle's `thirdPartyId` (vehicleId) as a string
-- QR codes are encrypted in the database but decrypted for validation
-- Example QR code value: `"17589"` (string representation of vehicleId)
-
-### Error Handling for QR Code Scanning
-
-#### Invalid QR Code Format
+**Success (200)** – store for next steps:
 ```json
 {
-  "statusCode": 400,
-  "message": "Invalid QR code: vehicle ID is not valid"
+  "vehicle": { "id": 17589, "thirdPartyId": 17589, "plate": "ABC-123", "status": "...", ... },
+  "vehicleId": 17589,
+  "qrCode": "17589"
 }
 ```
-**Solution:** Show error message: "Invalid QR code. Please scan again."
+→ Use **`vehicleId`** from this response for creating the trip (do not use the scanned string as ID).
 
-#### Vehicle Not Found
+**Possible errors**
+- **400** – `"Invalid QR code: vehicle ID is not valid"` → Ask user to rescan.
+- **404** – `"Vehicle not found for QR code. ..."` → Show “Vehicle not found”, allow rescan.
+- **401** – Unauthorized → Refresh token and retry.
+
+---
+
+### 2. Create trip
+
+| Item | Value |
+|------|--------|
+| **Endpoint** | `POST /api/v1/trips` |
+| **When** | After QR validation; agent has confirmed vehicle and selected origin center. |
+| **Body** | `vehicleId` (from step 1), `originCenterId` (user selection or GPS), `purpose` (`"DELIVERY"` or `"PICKUP"`). |
+
+**Example body:**
 ```json
 {
-  "statusCode": 404,
-  "message": "Vehicle not found for QR code. The QR code may be invalid or belong to a different account."
+  "vehicleId": 17589,
+  "originCenterId": 4114,
+  "purpose": "DELIVERY"
 }
 ```
-**Solution:** Show error message: "Vehicle not found. This QR code may be invalid or belong to a different account."
+
+**Success (201)** – store for later steps:
+```json
+{
+  "id": 1,
+  "vehicleId": 17589,
+  "originCenterId": 4114,
+  "destinationCenterId": null,
+  "purpose": "DELIVERY",
+  "status": "ONGOING",
+  "startedAt": "2026-02-12T10:00:00Z",
+  "endedAt": null
+}
+```
+→ Store **`id`** as `tripId` for all subsequent trip event and queue calls. Vehicle is auto-added to queue (LOADING for DELIVERY, UNLOADING for PICKUP).
+
+**Possible errors**
+- **400** – e.g. `"Vehicle 17589 already has an active trip"` → Show message, do not create another trip.
+- **404** – Vehicle or center not found → Check IDs (can be `id` or `geozoneId` for center).
+
+---
+
+### 3. Start service (loading at origin)
+
+| Item | Value |
+|------|--------|
+| **Endpoint** | `POST /api/v1/centers/{centerId}/queue/next` |
+| **When** | Loading bay is free; agent starts loading for the next vehicle in queue. |
+| **Path param** | `centerId` – origin center (same as trip’s `originCenterId`; can be center `id` or `geozoneId`). |
+| **Body** | `queueType`: `"LOADING"` for origin (after a DELIVERY trip create). |
+
+**Example body:**
+```json
+{ "queueType": "LOADING" }
+```
+
+**Success (200):**
+```json
+{
+  "queue": { "id": 1, "centerId": 4114, "vehicleId": 17589, "tripId": 1, "queueType": "LOADING", "position": 1, "serviceStartedAt": "...", "isActive": false },
+  "tripEvent": { "id": 3, "tripId": 1, "eventType": "SERVICE_STARTED", "timestamp": "...", "metadata": { "service_type": "LOADING", "queue_wait_time": 10 } }
+}
+```
+
+**Possible errors**
+- **404** – No vehicles in queue at this center → Ensure vehicles were added to queue (auto on trip create) or add manually.
+
+---
+
+### 4. Loading ended
+
+| Item | Value |
+|------|--------|
+| **Endpoint** | `POST /api/v1/trips/{tripId}/events` |
+| **When** | Loading is finished at origin. |
+| **Path param** | `tripId` – from step 2 (create trip response). |
+| **Body** | `eventType`: `"LOADING_ENDED"`, `centerId`: origin center (same as trip’s `originCenterId`). Optional: `metadata` (e.g. `weight`, `notes`). |
+
+**Example body:**
+```json
+{
+  "eventType": "LOADING_ENDED",
+  "centerId": 4114,
+  "metadata": { "weight": 5000, "notes": "Loaded timber" }
+}
+```
+
+**Success (201):**
+```json
+{
+  "id": 4,
+  "tripId": 1,
+  "centerId": 4114,
+  "eventType": "LOADING_ENDED",
+  "timestamp": "...",
+  "metadata": { "weight": 5000, "notes": "Loaded timber" }
+}
+```
+
+---
+
+### 5. Ready to exit (set destination)
+
+| Item | Value |
+|------|--------|
+| **Endpoint** | `POST /api/v1/trips/{tripId}/events` |
+| **When** | Vehicle is ready to leave origin; agent sets destination. |
+| **Path param** | `tripId` – from step 2. |
+| **Body** | `eventType`: `"READY_TO_EXIT"`, `centerId`: origin center, `metadata.destinationCenterId`: destination center ID. |
+
+**Example body:**
+```json
+{
+  "eventType": "READY_TO_EXIT",
+  "centerId": 4114,
+  "metadata": { "destinationCenterId": 4115 }
+}
+```
+
+**Success (201):** Event object with `eventType: "READY_TO_EXIT"` and `metadata.destinationCenterId`. Trip’s `destinationCenterId` is updated.
+
+---
+
+### 6. Vehicle exited origin
+
+| Item | Value |
+|------|--------|
+| **Endpoint** | `POST /api/v1/trips/{tripId}/events` |
+| **When** | Vehicle has left the origin gate. |
+| **Path param** | `tripId` – from step 2. |
+| **Body** | `eventType`: `"EXITED"`, `centerId`: origin center. |
+
+**Example body:**
+```json
+{
+  "eventType": "EXITED",
+  "centerId": 4114
+}
+```
+
+**Success (201):** Event object. Vehicle status becomes `IN_TRANSIT`, `currentCenterId` cleared.
+
+---
+
+### 7. Validate QR code (destination – before recording arrival)
+
+| Item | Value |
+|------|--------|
+| **Endpoint** | `GET /api/v1/vehicles/qr-code/{scannedQrCode}` |
+| **When** | Agent scans the vehicle again at destination. |
+| **Path param** | `scannedQrCode` – from camera. |
+
+**Success (200):** Same shape as step 1. Use **`vehicleId`** to fetch active trip (step 8) and to create ARRIVED_DESTINATION (step 9). Same error handling as step 1.
+
+---
+
+### 8. Get active trip for vehicle (destination)
+
+| Item | Value |
+|------|--------|
+| **Endpoint** | `GET /api/v1/trips?vehicleId={vehicleId}&status=ONGOING` |
+| **When** | After QR validation at destination; before creating ARRIVED_DESTINATION. |
+| **Query params** | `vehicleId` – from step 7; `status` – `ONGOING`. |
+
+**Success (200):** List of trips (usually one). From the first trip take **`id`** as `tripId` and optionally check `destinationCenterId` matches current center.
+
+**If empty list** → Show “Vehicle does not have an active trip” and do not allow recording arrival.
+
+---
+
+### 9. Arrived at destination
+
+| Item | Value |
+|------|--------|
+| **Endpoint** | `POST /api/v1/trips/{tripId}/events` |
+| **When** | Agent confirms vehicle at destination. |
+| **Path param** | `tripId` – from step 8 (active trip). |
+| **Body** | `eventType`: `"ARRIVED_DESTINATION"`, `centerId`: destination center (where vehicle arrived). |
+
+**Example body:**
+```json
+{
+  "eventType": "ARRIVED_DESTINATION",
+  "centerId": 4115
+}
+```
+
+**Success (201):** Event object. Vehicle status becomes `WAITING_IN_QUEUE`; vehicle is auto-added to UNLOADING queue for this center.
+
+---
+
+### 10. Start service (unloading at destination)
+
+| Item | Value |
+|------|--------|
+| **Endpoint** | `POST /api/v1/centers/{centerId}/queue/next` |
+| **When** | Unloading bay is free; agent starts unloading for the next vehicle in queue. |
+| **Path param** | `centerId` – destination center (same as trip’s `destinationCenterId` / where vehicle arrived; can be center `id` or `geozoneId`). |
+| **Body** | `queueType`: `"UNLOADING"`. |
+
+**Example body:**
+```json
+{ "queueType": "UNLOADING" }
+```
+
+**Success (200):** Same shape as step 3; `eventType`: `SERVICE_STARTED`, `metadata.service_type`: `"UNLOADING"`.
+
+**Possible errors**
+- **404** – No vehicles in UNLOADING queue at this center → Add to queue or wait.
+
+---
+
+### 11. Unloading ended (trip completion for DELIVERY)
+
+| Item | Value |
+|------|--------|
+| **Endpoint** | `POST /api/v1/trips/{tripId}/events` |
+| **When** | Unloading is finished at destination. |
+| **Path param** | `tripId` – from step 8. |
+| **Body** | `eventType`: `"UNLOADING_ENDED"`, `centerId`: destination center. Optional: `metadata`. |
+
+**Example body:**
+```json
+{
+  "eventType": "UNLOADING_ENDED",
+  "centerId": 4115,
+  "metadata": { "weight": 5000, "notes": "Unloaded successfully" }
+}
+```
+
+**Success (201):** Event object. For **DELIVERY** trips the trip is auto-completed (status `COMPLETED`, `endedAt` set). Vehicle status becomes `AVAILABLE`.
+
+**PICKUP trips:** After UNLOADING_ENDED you may need to call `POST /api/v1/trips/{tripId}/complete` to complete the trip (see API reference).
+
+---
+
+### Quick reference: where parameters come from
+
+| Parameter | Source |
+|-----------|--------|
+| `scannedQrCode` | Camera / QR scanner (string). |
+| `vehicleId` | Step 1 or 7 response: `vehicleId` (or `vehicle.id`). |
+| `tripId` | Step 2 response: `id`; or step 8 response: trip `id`. |
+| `originCenterId` | User-selected origin center (or GPS); can be center `id` or `geozoneId`. |
+| `centerId` (queue/next) | Step 3: origin center (same as trip origin). Step 10: destination center (where vehicle arrived). Can be center `id` or `geozoneId`. |
+| `centerId` (in events) | Origin center for steps 4–6; destination center for steps 9 and 11. |
+| `destinationCenterId` | User-selected destination (step 5 body). |
+| `purpose` | User choice: `"DELIVERY"` or `"PICKUP"`. |
+| `queueType` | `"LOADING"` at origin (step 3); `"UNLOADING"` at destination (step 10). |
 
 ---
 
