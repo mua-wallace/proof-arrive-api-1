@@ -20,7 +20,7 @@ export class CentersService extends BaseService<Center> {
     private readonly centersSyncService: CentersSyncService,
     private readonly malambiApi: MalambiApiService,
   ) {
-    // Note: centers table uses serial ID and no deletedAt, so we pass it but override methods
+    // Note: centers.id = geozoneId (from Malambi gzone_id); no deletedAt
     super(db, schema.centers as any);
     this.dbConnection = db;
   }
@@ -175,7 +175,7 @@ export class CentersService extends BaseService<Center> {
     }
   }
 
-  // Override BaseService.findOneById to handle number IDs (serial) instead of string IDs (UUID)
+  // Override BaseService.findOneById to handle number IDs (centers.id = geozoneId from Malambi)
   async findOneById(id: number | string, options?: { include?: string[]; accountId?: number }): Promise<Center> {
     const numericId = typeof id === 'string' ? Number(id) : id;
 
@@ -184,12 +184,12 @@ export class CentersService extends BaseService<Center> {
     }
 
     try {
-      // Build where conditions
-      const whereConditions: SQL[] = [eq(schema.centers.id, numericId)];
-      
-      // Automatically filter by accountId if provided
+      // centers.id is geozoneId (from Malambi gzone_id); also try lookup by id for backwards compatibility
+      const whereById: SQL[] = [eq(schema.centers.id, numericId)];
+      const whereByGeozoneId: SQL[] = [eq(schema.centers.geozoneId, numericId)];
       if (options?.accountId !== undefined) {
-        whereConditions.push(eq(schema.centers.accountId, options.accountId));
+        whereById.push(eq(schema.centers.accountId, options.accountId));
+        whereByGeozoneId.push(eq(schema.centers.accountId, options.accountId));
       }
 
       // Build relations object for Drizzle query API
@@ -211,28 +211,33 @@ export class CentersService extends BaseService<Center> {
 
       let center: any;
       if (Object.keys(withRelations).length > 0) {
-        // Use relational query API when relations are requested
         center = await this.dbConnection.query.centers.findFirst({
-          where: (centers: any, { eq: eqFn, and: andFn }: any) => {
-            const conditions = [eqFn(centers.id, numericId)];
-            if (options?.accountId !== undefined) {
-              conditions.push(eqFn(centers.accountId, options.accountId));
-            }
-            return andFn(...conditions);
-          },
+          where: (centers: any, { eq: eqFn, and: andFn }: any) => andFn(...[eqFn(centers.id, numericId), ...(options?.accountId !== undefined ? [eqFn(centers.accountId, options.accountId)] : [])]),
           with: withRelations,
         });
+        if (!center) {
+          center = await this.dbConnection.query.centers.findFirst({
+            where: (centers: any, { eq: eqFn, and: andFn }: any) => andFn(...[eqFn(centers.geozoneId, numericId), ...(options?.accountId !== undefined ? [eqFn(centers.accountId, options.accountId)] : [])]),
+            with: withRelations,
+          });
+        }
       } else {
-        // Use standard query when no relations
         [center] = await this.dbConnection
           .select()
           .from(schema.centers)
-          .where(and(...whereConditions))
+          .where(and(...whereById))
           .limit(1);
+        if (!center) {
+          [center] = await this.dbConnection
+            .select()
+            .from(schema.centers)
+            .where(and(...whereByGeozoneId))
+            .limit(1);
+        }
       }
 
       if (!center) {
-        throw new NotFoundException(`Center with ID ${numericId} not found`);
+        throw new NotFoundException(`Center with ID ${numericId} not found (tried id and geozoneId)`);
       }
       return center as Center;
     } catch (error: any) {
@@ -298,11 +303,11 @@ export class CentersService extends BaseService<Center> {
     }
 
     try {
-      // First check if center exists and belongs to the account
+      // First check if center exists and belongs to the account (lookup by id or geozoneId)
       const center = await this.findOneById(numericId, { accountId });
       
-      // Delete the center
-      const whereConditions: SQL[] = [eq(schema.centers.id, numericId)];
+      // Delete by the actual primary key (center.id)
+      const whereConditions: SQL[] = [eq(schema.centers.id, center.id)];
       if (accountId !== undefined) {
         whereConditions.push(eq(schema.centers.accountId, accountId));
       }

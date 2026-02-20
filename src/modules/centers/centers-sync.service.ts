@@ -301,6 +301,7 @@ export class CentersSyncService {
 
     try {
       for (const center of centers) {
+        
         try {
           // Check if center already exists (with accountId check)
           const exists = await this.centerExists(center.id, center.siteid);
