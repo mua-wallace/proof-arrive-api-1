@@ -1,6 +1,10 @@
 # Trips & Queues API Integration Flow
 
-This document describes the complete integration flow for the trips and queues system, showing how API endpoints work together to track vehicle movements and manage operations at centers.
+This document is the **detailed reference** for the trips and queues system. It includes full request/response examples, workflow scenarios, and API descriptions.
+
+**For mobile app integration:** use **[MOBILE_INTEGRATION_FLOW.md](./MOBILE_INTEGRATION_FLOW.md)** — it has a restructured flow (Phase A: origin → Phase B: transit → Phase C: destination), step-by-step actions, and where each parameter comes from.
+
+---
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -273,8 +277,7 @@ Content-Type: application/json
 - Vehicle status changes to `WAITING_IN_QUEUE`
 - Vehicle `currentCenterId` is set to origin center
 - **Vehicle is automatically added to the appropriate queue** (runs in background):
-  - **DELIVERY trips** → Added to **LOADING** queue (vehicle loads goods to deliver)
-  - **PICKUP trips** → Added to **UNLOADING** queue (vehicle unloads goods that were picked up)
+  - At origin, both **DELIVERY** and **PICKUP** → Added to **LOADING** queue (vehicle loads/picks up goods at first center)
 - Queue position is automatically calculated from today's active queue entries
 - `QUEUED` event is automatically created with queue metadata
 
@@ -341,14 +344,14 @@ Content-Type: application/json
 
 ---
 
-#### Step 3: Start Service for Next Vehicle
+#### Step 3: Start processing for a vehicle (by vehicleId) — recommended
 
-**When loading bay becomes available, start service for the first vehicle in queue at the center**
+**After scan, show a card with vehicle info, "Arrived at &lt;center&gt;", and a "Start processing" button. When the agent taps it, call this endpoint. No queue position is required in the UI.**
 
-Vehicles are automatically added to the queue when trips are created (Step 1). Use the **center-based** endpoint with the origin center ID.
+The API finds the vehicle in the queue by `vehicleId` (any position), updates `serviceStartedAt`, and creates the `SERVICE_STARTED` event.
 
 ```http
-POST /api/v1/centers/4114/queue/next
+POST /api/v1/vehicles/17589/queue/start
 Authorization: Bearer {token}
 Content-Type: application/json
 
@@ -357,11 +360,11 @@ Content-Type: application/json
 }
 ```
 
-- **centerId** in the URL: origin center (same as trip’s `originCenterId`). Can be the center's `id` (thirdPartyId) or `geozoneId`; the API resolves it.
-- Starts service for the **first vehicle** in that center’s LOADING queue and creates `SERVICE_STARTED` event.
+- **vehicleId** in the URL: from QR validation (Step 0 / create trip). API accepts vehicle `id` or `thirdPartyId`.
+- **queueType:** `"LOADING"` at origin, `"UNLOADING"` at destination. The API finds this vehicle in the queue (any position) and sets `serviceStartedAt`; no need to display queue position.
 
 **Error Handling:**
-- **404** – No vehicles in queue at that center. Vehicles are automatically added on trip creation, so 404 should be rare when the flow is followed.
+- **404** – Vehicle not found or vehicle not in the queue. Ensure the trip was created (origin) or arrival recorded and vehicle added to queue (destination). **Alternative (center-based):** `POST /api/v1/centers/{centerId}/queue/next` starts the first vehicle in queue.
 
 **Response:**
 ```json
@@ -393,13 +396,11 @@ Content-Type: application/json
 ```
 
 **What happens automatically:**
-- First vehicle in **today's** queue (position 1) starts service
+- The queue entry for this vehicle is found (by vehicleId + queueType + active + today)
+- `serviceStartedAt` is set, queue entry `isActive` set to `false`
 - `SERVICE_STARTED` event is created
 - Vehicle status changes to `LOADING`
-- Queue entry `isActive` set to `false`
-- **Queue positions are automatically renumbered:** Remaining vehicles in **today's** queue are renumbered sequentially (1, 2, 3...) to ensure no gaps
-  - Example: If vehicle at position 1 leaves, vehicles at positions 2, 3, 4 become positions 1, 2, 3
-  - Only affects today's queue entries (daily reset ensures clean slate each day)
+- Remaining vehicles in that center's queue are renumbered (positions 1, 2, 3...)
 
 ---
 
@@ -661,12 +662,12 @@ Content-Type: application/json
 
 ---
 
-#### Step 9: Start Unloading Service
+#### Step 9: Start processing (unloading) for the vehicle — recommended
 
-**Start unloading when bay is available**
+**After scan at destination, show a card with vehicle info and "Start processing". When the agent taps it, call this endpoint.**
 
 ```http
-POST /api/v1/centers/4115/queue/next
+POST /api/v1/vehicles/17589/queue/start
 Authorization: Bearer {token}
 Content-Type: application/json
 
@@ -676,7 +677,7 @@ Content-Type: application/json
 ```
 
 - **centerId** in the URL: destination center (4115). Can be center's `id` or `geozoneId`. Starts service for the first vehicle in that center’s UNLOADING queue.
-
+- **vehicleId** in the URL: from QR. **queueType:** `"UNLOADING"` at destination. API finds this vehicle in the queue and sets `serviceStartedAt`; then move to End processing (Step 10).
 **Response:**
 ```json
 {
@@ -880,8 +881,7 @@ Manually complete a trip (usually automatic for DELIVERY trips after UNLOADING_E
 
 #### Add Vehicle to Queue (Automatic)
 **✅ AUTOMATIC:** Vehicles are automatically added to the appropriate queue when trips are created:
-- **DELIVERY trips** → Automatically added to **LOADING** queue
-- **PICKUP trips** → Automatically added to **UNLOADING** queue
+- At origin: **DELIVERY** and **PICKUP** trips → Automatically added to **LOADING** queue (vehicle loads/picks up at first center)
 
 Queue addition runs asynchronously in the background and doesn't block trip creation.
 
@@ -903,13 +903,24 @@ POST /api/v1/centers/{centerId}/queue
 - **Daily Reset:** Positions reset each day - each day starts from position 1
 - Example: If 2 vehicles are in queue today, new vehicle gets position 3
 
-#### Start Next Service (by center)
+#### Start processing (by vehicle) — recommended
+```http
+POST /api/v1/vehicles/{vehicleId}/queue/start
+Content-Type: application/json
+Body: { "queueType": "LOADING" | "UNLOADING" }
+```
+Finds the vehicle in the queue by **vehicleId** (any position), updates `serviceStartedAt`, and creates `SERVICE_STARTED` event. Use when the agent scans a vehicle and taps "Start processing" — no queue position needed in the UI.
+
+- **vehicleId** in URL: from QR (vehicle `id` or `thirdPartyId`). **queueType:** `"LOADING"` at origin, `"UNLOADING"` at destination.
+- **404:** Vehicle not found or vehicle not in the queue.
+
+#### Start Next Service (by center) — alternative
 ```http
 POST /api/v1/centers/{centerId}/queue/next
 Content-Type: application/json
 Body: { "queueType": "LOADING" | "UNLOADING" }
 ```
-Starts service for the **first vehicle** in that center's queue and creates `SERVICE_STARTED` event. Use this with **centerId** (origin center for loading, destination center for unloading).
+Starts service for the **first vehicle** in that center's queue. Use when you do not have a specific vehicle (e.g. no scan).
 
 - **centerId** in URL: center's `id` (thirdPartyId) or `geozoneId` (API resolves).
 - **404:** No vehicles in queue at that center.
@@ -1204,7 +1215,7 @@ This section lists **every API call** the mobile app makes in order, from trip c
   "endedAt": null
 }
 ```
-→ Store **`id`** as `tripId` for all subsequent trip event and queue calls. Vehicle is auto-added to queue (LOADING for DELIVERY, UNLOADING for PICKUP).
+→ Store **`id`** as `tripId` for all subsequent trip event and queue calls. Vehicle is auto-added to **LOADING** queue at origin (for both DELIVERY and PICKUP).
 
 **Possible errors**
 - **400** – e.g. `"Vehicle 17589 already has an active trip"` → Show message, do not create another trip.
@@ -1212,14 +1223,14 @@ This section lists **every API call** the mobile app makes in order, from trip c
 
 ---
 
-### 3. Start service (loading at origin)
+### 3. Start processing (loading at origin) — recommended
 
 | Item | Value |
 |------|--------|
-| **Endpoint** | `POST /api/v1/centers/{centerId}/queue/next` |
-| **When** | Loading bay is free; agent starts loading for the next vehicle in queue. |
-| **Path param** | `centerId` – origin center (same as trip’s `originCenterId`; can be center `id` or `geozoneId`). |
-| **Body** | `queueType`: `"LOADING"` for origin (after a DELIVERY trip create). |
+| **Endpoint** | `POST /api/v1/vehicles/{vehicleId}/queue/start` |
+| **When** | Agent taps "Start processing" on the vehicle card (after scan). No queue position needed. |
+| **Path param** | `vehicleId` – from QR (vehicle `id` or `thirdPartyId`). |
+| **Body** | `queueType`: `"LOADING"` at origin. |
 
 **Example body:**
 ```json
@@ -1235,7 +1246,7 @@ This section lists **every API call** the mobile app makes in order, from trip c
 ```
 
 **Possible errors**
-- **404** – No vehicles in queue at this center → Ensure vehicles were added to queue (auto on trip create) or add manually.
+- **404** – Vehicle not found or not in queue → Ensure trip was created (origin) or arrival + queue add (destination). **Alternative:** `POST /api/v1/centers/{centerId}/queue/next` for center-based start.
 
 ---
 
@@ -1361,14 +1372,14 @@ This section lists **every API call** the mobile app makes in order, from trip c
 
 ---
 
-### 10. Start service (unloading at destination)
+### 10. Start processing (unloading at destination) — recommended
 
 | Item | Value |
 |------|--------|
-| **Endpoint** | `POST /api/v1/centers/{centerId}/queue/next` |
+| **Endpoint** | `POST /api/v1/vehicles/{vehicleId}/queue/start` |
 | **When** | Unloading bay is free; agent starts unloading for the next vehicle in queue. |
-| **Path param** | `centerId` – destination center (same as trip’s `destinationCenterId` / where vehicle arrived; can be center `id` or `geozoneId`). |
-| **Body** | `queueType`: `"UNLOADING"`. |
+| **When** | Agent taps "Start processing" on the vehicle card at destination. |
+| **Path param** | `vehicleId` – from QR. |
 
 **Example body:**
 ```json
@@ -1378,7 +1389,7 @@ This section lists **every API call** the mobile app makes in order, from trip c
 **Success (200):** Same shape as step 3; `eventType`: `SERVICE_STARTED`, `metadata.service_type`: `"UNLOADING"`.
 
 **Possible errors**
-- **404** – No vehicles in UNLOADING queue at this center → Add to queue or wait.
+- **404** – Vehicle not found or not in UNLOADING queue. **Alternative:** `POST /api/v1/centers/{centerId}/queue/next` for center-based start.
 
 ---
 
@@ -1414,7 +1425,7 @@ This section lists **every API call** the mobile app makes in order, from trip c
 | `vehicleId` | Step 1 or 7 response: `vehicleId` (or `vehicle.id`). |
 | `tripId` | Step 2 response: `id`; or step 8 response: trip `id`. |
 | `originCenterId` | User-selected origin center (or GPS); can be center `id` or `geozoneId`. |
-| `centerId` (queue/next) | Step 3: origin center (same as trip origin). Step 10: destination center (where vehicle arrived). Can be center `id` or `geozoneId`. |
+| `vehicleId` (queue/start) | From QR (step 1 or 7). Used in `POST /vehicles/{vehicleId}/queue/start` for Start processing (steps 3 and 10). |
 | `centerId` (in events) | Origin center for steps 4–6; destination center for steps 9 and 11. |
 | `destinationCenterId` | User-selected destination (step 5 body). |
 | `purpose` | User choice: `"DELIVERY"` or `"PICKUP"`. |

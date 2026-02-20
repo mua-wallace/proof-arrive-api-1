@@ -303,7 +303,8 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
 
   /**
    * Start service for a specific vehicle (vehicle-based API).
-   * The vehicle must be first in the queue at its center for the given queue type.
+   * Finds the vehicle in the queue by vehicleId (any position); if found, updates serviceStartedAt
+   * and creates SERVICE_STARTED event. Use when the agent scans a vehicle and clicks "Start processing".
    */
   async startServiceByVehicleId(
     vehicleId: number,
@@ -339,7 +340,6 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
           eq(schema.centerQueues.queueType, data.queueType),
           eq(schema.centerQueues.isActive, true),
           eq(schema.centerQueues.accountId, accountId),
-          eq(schema.centerQueues.position, 1),
           gte(schema.centerQueues.queueDate, todayStart),
           lt(schema.centerQueues.queueDate, todayEnd)
         )
@@ -348,8 +348,8 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
 
     if (!queueEntry) {
       throw new NotFoundException(
-        `Vehicle ${vehicleId} is not first in ${data.queueType} queue at any center. ` +
-        `Ensure the vehicle is in the queue and at position 1, or use GET /api/v1/centers/{centerId}/queue/vehicles to check.`
+        `Vehicle ${vehicleId} is not in the ${data.queueType} queue. ` +
+        `Ensure the vehicle has been added to the queue (e.g. after trip creation or arrival at destination).`
       );
     }
 

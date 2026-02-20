@@ -24,12 +24,12 @@ export class VehicleQueueController {
   @Post('start')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Start service for a vehicle (by vehicleId)',
+    summary: 'Start processing for a vehicle (by vehicleId)',
     description:
-      'Starts service for the given vehicle. The vehicle must be first in the queue (position 1) for the given queue type at its center. Use this instead of center-based start when the mobile app only has vehicleId (e.g. from QR scan).',
+      'Finds the vehicle in the queue by vehicleId (any position). If found, updates serviceStartedAt and creates SERVICE_STARTED event. Use when the agent scans a vehicle and taps "Start processing" — no queue position needed in the UI. Body: { "queueType": "LOADING" } at origin, "UNLOADING" at destination.',
   })
-  @ApiResponse({ status: 200, description: 'Service started for vehicle' })
-  @ApiResponse({ status: 404, description: 'Vehicle not found or not first in queue' })
+  @ApiResponse({ status: 200, description: 'Service started for vehicle; move to End processing' })
+  @ApiResponse({ status: 404, description: 'Vehicle not found or vehicle not in queue' })
   async startService(
     @Param('vehicleId', ParseIntPipe) vehicleId: number,
     @Body() startNextDto: StartNextServiceDto,

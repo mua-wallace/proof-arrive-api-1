@@ -222,16 +222,15 @@ export class TripsService extends BaseService<Trip> {
         agentId
       );
 
-      // Automatically add vehicle to queue based on trip purpose
-      // DELIVERY -> LOADING queue (vehicle loads goods to deliver)
-      // PICKUP -> UNLOADING queue (vehicle unloads goods that were picked up)
+      // Automatically add vehicle to queue at origin
+      // At origin (first center) the vehicle is always loading: DELIVERY = load goods to deliver, PICKUP = pick up (load) goods
+      // So both use LOADING queue at origin. UNLOADING is used at destination when the vehicle arrives there.
       // Run asynchronously in background so it doesn't block trip creation response
-      const tripPurpose = trip.purpose || TripPurpose.DELIVERY;
-      const queueType = tripPurpose === TripPurpose.DELIVERY ? QueueType.LOADING : QueueType.UNLOADING;
+      const queueType = QueueType.LOADING;
       
       this.logger.log(
         `🚀 Automatically adding vehicle ${vehicle.id} to ${queueType} queue for trip ${trip.id} ` +
-        `(purpose: ${tripPurpose}) at center ${originCenter.id}`
+        `(purpose: ${trip.purpose || TripPurpose.DELIVERY}) at center ${originCenter.id}`
       );
       
       this.addVehicleToQueueAutomatically(
