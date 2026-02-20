@@ -2,11 +2,12 @@ import { pgTable, integer, varchar, text, index, timestamp } from 'drizzle-orm/p
 import { baseColumnsSerial } from './base.schema';
 
 // Centers
-// id column uses thirdPartyId value (not auto-generated)
+// id column uses geozoneId value from Malambi API (not auto-generated)
+// geozoneId (gzone_id) from Malambi must be a valid integer that gets used as id
 export const centers = pgTable('centers', {
-  id: integer('id').primaryKey().notNull(), // Uses thirdPartyId value (not auto-generated)
+  id: integer('id').primaryKey().notNull(), // Uses geozoneId value from Malambi API (not auto-generated)
   accountId: integer('account_id').notNull(), // Multi-tenant: account ID from logged-in user
-  thirdPartyId: integer('third_party_id').notNull(), // id from Malambi API (e.g., 84) - same value as id
+  thirdPartyId: integer('third_party_id').notNull(), // id from Malambi API (e.g., 84)
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
   siteid: integer('siteid').notNull(), // siteid from Malambi API (e.g., 9164)

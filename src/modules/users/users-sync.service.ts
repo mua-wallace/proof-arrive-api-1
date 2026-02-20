@@ -107,9 +107,16 @@ export class UsersSyncService {
       // accountId is mandatory - derived from accid for multi-tenancy
       // Note: id uses subid value (not auto-generated)
       // Handle missing email/role columns gracefully by using Drizzle ORM with explicit columns
-      const subidNum = Number(subidStr);
+      
+      // Validate and convert subid to integer for id field
+      // subid from Malambi API must be a valid integer string
+      const subidNum = parseInt(subidStr, 10);
+      if (isNaN(subidNum) || subidNum <= 0) {
+        throw new Error(`Invalid subid from Malambi API: "${subidStr}" cannot be converted to a positive integer for user id`);
+      }
+      
       const userRecord: any = {
-        id: subidNum, // Use subid as id value (converted to integer)
+        id: subidNum, // Use subid as id value (converted to integer from Malambi API)
         accountId: accountIdNum, // Multi-tenant: account ID (derived from accid)
         accid: accidStr,
         subid: subidStr,
@@ -205,8 +212,13 @@ export class UsersSyncService {
    * Checks if user exists first to avoid duplicates and errors
    */
   private async insertUserWithRawSql(userRecord: any, accountId: number): Promise<void> {
-    // Note: id uses subid value (converted to integer)
-    const subidNum = Number(userRecord.subid);
+    // Note: id uses subid value (converted to integer from Malambi API)
+    // Validate and convert subid to integer for id field
+    const subidStr = String(userRecord.subid);
+    const subidNum = parseInt(subidStr, 10);
+    if (isNaN(subidNum) || subidNum <= 0) {
+      throw new Error(`Invalid subid from Malambi API: "${subidStr}" cannot be converted to a positive integer for user id`);
+    }
     
     // First, check if user already exists by id (which equals subid after migration 0015)
     // Or by (accid, subid) if migration 0015 hasn't run yet

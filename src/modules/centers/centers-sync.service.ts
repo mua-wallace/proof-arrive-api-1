@@ -47,19 +47,22 @@ export class CentersSyncService {
     timeoutin_muros_str?: string;
   }, accountId: number): Promise<void> {
     try {
+      // Validate geozoneId from Malambi API
+      // id column uses geozoneId value (not auto-generated)
+      const geozoneId = centerData.gzone_id;
+      if (!geozoneId || typeof geozoneId !== 'number' || geozoneId <= 0 || !Number.isInteger(geozoneId)) {
+        throw new Error(`Invalid geozoneId (gzone_id) from Malambi API: "${centerData.gzone_id}" must be a positive integer for center id`);
+      }
+      
       const thirdPartyId = centerData.id;
       const siteid = centerData.siteid;
       
-      // Check if center already exists by thirdPartyId, siteid, or geozoneId
-      const geozoneId = centerData.gzone_id;
+      // Check if center already exists by geozoneId, thirdPartyId, or siteid
       const conditions = [
+        eq(schema.centers.geozoneId, geozoneId),
         eq(schema.centers.thirdPartyId, thirdPartyId),
         eq(schema.centers.siteid, siteid),
       ];
-      
-      if (geozoneId) {
-        conditions.push(eq(schema.centers.geozoneId, geozoneId));
-      }
 
       const existingCenter = await this.dbConnection
         .select()
@@ -72,16 +75,16 @@ export class CentersSyncService {
       }
 
       // Insert center with data from Malambi API
-      // Note: id uses thirdPartyId value (not auto-generated)
+      // Note: id uses geozoneId value from Malambi API (not auto-generated)
       const centerRecord = {
-        id: thirdPartyId, // Use thirdPartyId as id value
+        id: geozoneId, // Use geozoneId as id value (from Malambi API gzone_id)
         accountId: accountId, // Multi-tenant: account ID
         thirdPartyId,
         siteid,
-        name: centerData.name || `Center_${thirdPartyId}`,
+        name: centerData.name || `Center_${geozoneId}`,
         fullname: centerData.fullname || null,
         geozone: centerData.geozone || null,
-        geozoneId: centerData.gzone_id || null,
+        geozoneId: geozoneId, // Use validated geozoneId (from Malambi API gzone_id)
         manager: centerData.manager || null,
         groupid: centerData.groupid || null,
         groupname: centerData.groupname || null,
@@ -298,6 +301,7 @@ export class CentersSyncService {
 
     try {
       for (const center of centers) {
+        
         try {
           // Check if center already exists (with accountId check)
           const exists = await this.centerExists(center.id, center.siteid);

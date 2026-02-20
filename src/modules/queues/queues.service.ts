@@ -61,8 +61,8 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
     accountId: number,
     agentId: number
   ): Promise<CenterQueue> {
-    // Look up center by id (thirdPartyId) or geozoneId since API might send either
-    // center_queues.centerId references centers.id (which equals thirdPartyId)
+    // Look up center by id (geozoneId) or geozoneId since API might send either
+    // center_queues.centerId references centers.id (which equals geozoneId)
     let [center] = await this.dbConnection
       .select()
       .from(schema.centers)
@@ -92,7 +92,7 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       throw new NotFoundException(`Center ${centerId} not found for this account (tried both id and geozoneId)`);
     }
 
-    // Use center.id (which equals thirdPartyId) for the foreign key
+    // Use center.id (which equals geozoneId) for the foreign key
     const actualCenterId = center.id;
 
     // Verify trip exists and belongs to account
@@ -209,7 +209,7 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
     const [queueEntry] = await this.dbConnection
       .insert(schema.centerQueues)
       .values({
-        centerId: actualCenterId, // Use center.id (which equals thirdPartyId) to match schema FK
+        centerId: actualCenterId, // Use center.id (which equals geozoneId) to match schema FK
         vehicleId: actualVehicleId, // Use vehicle.id (which equals thirdPartyId) to match schema FK
         tripId: data.tripId,
         queueType: data.queueType,
@@ -224,12 +224,12 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       .returning();
 
     // Create QUEUED trip event
-    // trip_events.centerId also references centers.id (which equals thirdPartyId)
+    // trip_events.centerId also references centers.id (which equals geozoneId)
     await this.dbConnection
       .insert(schema.tripEvents)
       .values({
         tripId: data.tripId,
-        centerId: actualCenterId, // Use center.id (which equals thirdPartyId) to match schema FK
+        centerId: actualCenterId, // Use center.id (which equals geozoneId) to match schema FK
         agentId,
         eventType: TripEventType.QUEUED,
         timestamp: new Date(),
@@ -462,7 +462,7 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       throw new NotFoundException(`Center ${centerId} not found for this account (tried both id and geozoneId)`);
     }
 
-    // Use center.id (which equals thirdPartyId) for the foreign key
+    // Use center.id (which equals geozoneId) for the foreign key
     const actualCenterId = center.id;
 
     const conditions: SQL[] = [

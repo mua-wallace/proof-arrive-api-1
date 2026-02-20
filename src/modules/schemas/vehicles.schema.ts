@@ -3,9 +3,10 @@ import { centers } from './centers.schema';
 import { VehicleStatus } from '@common/enums/vehicle-status.enum';
 
 // Vehicles
-// id column uses thirdPartyId value (not auto-generated)
+// id column uses thirdPartyId value from Malambi API (not auto-generated)
+// thirdPartyId from Malambi must be a valid integer that gets used as id
 export const vehicles = pgTable('vehicles', {
-  id: integer('id').primaryKey().notNull(), // Uses thirdPartyId value (not auto-generated)
+  id: integer('id').primaryKey().notNull(), // Uses thirdPartyId value from Malambi API (not auto-generated)
   accountId: integer('account_id').notNull(), // Multi-tenant: account ID from logged-in user
   thirdPartyId: integer('third_party_id').notNull(), // Malambi API vehicle ID - same value as id
   createdAt: timestamp('created_at').defaultNow(),

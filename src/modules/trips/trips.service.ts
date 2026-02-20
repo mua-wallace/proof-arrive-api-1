@@ -160,13 +160,13 @@ export class TripsService extends BaseService<Trip> {
       // vehicleId should already be the internal id (which equals thirdPartyId) since vehicles.id = vehicles.thirdPartyId
       const tripData: any = {
         vehicleId: vehicle.id, // Use vehicle.id (which equals thirdPartyId) to match schema FK
-        originCenterId: originCenter.id, // Use center.id (which equals thirdPartyId) to match schema FK, not geozoneId
+        originCenterId: originCenter.id, // Use center.id (which equals geozoneId) to match schema FK, not geozoneId
         purpose: data.purpose || 'DELIVERY',
         status: TripStatus.ONGOING,
       };
 
       // Only include destinationCenterId if it's provided (not undefined)
-      // Use center.id (which equals thirdPartyId) to match schema FK
+      // Use center.id (which equals geozoneId) to match schema FK
       if (destinationCenter) {
         tripData.destinationCenterId = destinationCenter.id;
       }
@@ -215,7 +215,7 @@ export class TripsService extends BaseService<Trip> {
         trip.id,
         {
           eventType: TripEventType.ARRIVED,
-          centerId: originCenter.id, // Use center.id (which equals thirdPartyId) to match schema FK
+          centerId: originCenter.id, // Use center.id (which equals geozoneId) to match schema FK
           metadata: {},
         },
         accountId,
@@ -295,8 +295,8 @@ export class TripsService extends BaseService<Trip> {
 
     const tripData = trip[0];
 
-    // Look up center by id (thirdPartyId) or geozoneId since API might send either
-    // trip_events.centerId references centers.id (which equals thirdPartyId)
+    // Look up center by id (geozoneId) or geozoneId since API might send either
+    // trip_events.centerId references centers.id (which equals geozoneId)
     let [center] = await this.dbConnection
       .select()
       .from(schema.centers)
@@ -334,7 +334,7 @@ export class TripsService extends BaseService<Trip> {
       .insert(schema.tripEvents)
       .values({
         tripId,
-        centerId: actualCenterId, // Use center.id (which equals thirdPartyId) to match schema FK
+        centerId: actualCenterId, // Use center.id (which equals geozoneId) to match schema FK
         agentId,
         eventType: data.eventType,
         timestamp: new Date(),
@@ -377,7 +377,7 @@ export class TripsService extends BaseService<Trip> {
       }
 
       if (destinationCenter) {
-        // Use center.id (which equals thirdPartyId) for trips.destinationCenterId FK
+        // Use center.id (which equals geozoneId) for trips.destinationCenterId FK
         await this.dbConnection
           .update(schema.trips)
           .set({

@@ -4,9 +4,10 @@ import { pgTable, text, timestamp, varchar, integer, index, uniqueIndex } from '
 export type UserRole = 'agent' | 'admin' | 'manager';
 
 // Users/Agents
-// id column uses subid value (not auto-generated)
+// id column uses subid value from Malambi API (not auto-generated)
+// subid from Malambi must be a valid integer string that gets converted to integer for id
 export const users = pgTable('users', {
-  id: integer('id').primaryKey().notNull(), // Uses subid value (not auto-generated)
+  id: integer('id').primaryKey().notNull(), // Uses subid value from Malambi API (converted to integer, not auto-generated)
   accountId: integer('account_id').notNull(), // Multi-tenant: account ID from logged-in user
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
