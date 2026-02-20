@@ -5,6 +5,9 @@ on:
     branches:
       - dev
 
+env:
+  IMAGE_NAME: proof-arrive-api
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -38,6 +41,41 @@ jobs:
           # Note: Warnings about DATABASE_PASSWORD are harmless (docker-compose-build.yml doesn't use variables)
           docker compose -f docker-compose-build.yml build
           docker compose -f docker-compose-build.yml push
+      - name: Delete old container images (keep 5 latest)
+        if: success()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          KEEP=5
+          OWNER="${{ github.repository_owner }}"
+          PACKAGE="${{ env.IMAGE_NAME }}"
+          # Try org API first, then user (for user-owned repos)
+          VERSIONS=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/orgs/$OWNER/packages/container/$PACKAGE/versions?per_page=100")
+          if echo "$VERSIONS" | grep -q '"message":"Not Found"'; then
+            VERSIONS=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/user/packages/container/$PACKAGE/versions?per_page=100")
+            BASE_URL="https://api.github.com/user/packages/container/$PACKAGE/versions"
+          else
+            BASE_URL="https://api.github.com/orgs/$OWNER/packages/container/$PACKAGE/versions"
+          fi
+          if echo "$VERSIONS" | grep -q '"message":"Not Found"'; then
+            echo "Package not found or no access; skipping cleanup."
+            exit 0
+          fi
+          echo "Keeping $KEEP latest versions..."
+          TO_DELETE=$(echo "$VERSIONS" | jq -r --argjson keep $KEEP '.[$keep:] | .[].id')
+          if [ -z "$TO_DELETE" ]; then
+            echo "No old versions to delete."
+            exit 0
+          fi
+          for id in $TO_DELETE; do
+            echo "Deleting version id: $id"
+            curl -s -X DELETE -H "Authorization: Bearer $GH_TOKEN" "$BASE_URL/$id" || true
+          done
+          echo "Cleanup done."
+
       - name: Notify Portainer
         if: always()
         continue-on-error: true
