@@ -4,7 +4,7 @@ import { Type } from 'class-transformer';
 import { QueueType } from '@common/enums/queue-type.enum';
 
 export class FilterQueuesDto {
-  @ApiPropertyOptional({ description: 'Filter by queue type', enum: QueueType })
+  @ApiPropertyOptional({ description: 'Filter by queue type. Optional; if not specified, returns both LOADING and UNLOADING.', enum: QueueType })
   @IsOptional()
   @IsEnum(QueueType)
   type?: QueueType;

@@ -78,7 +78,7 @@ export class QueuesController {
     description: 'Returns a list of vehicles in the queue. Use include=center,trip to add center and trip to the response. Supports same filters as GET /queue (type, isActive, date).'
   })
   @ApiResponse({ status: 200, description: 'List of vehicles in queue; center and trip when requested via include' })
-  @ApiQuery({ name: 'type', required: false, enum: ['LOADING', 'UNLOADING'], description: 'Filter by queue type' })
+  @ApiQuery({ name: 'type', required: false, enum: ['LOADING', 'UNLOADING'], description: 'Filter by queue type. Optional; if not specified, returns both LOADING and UNLOADING.' })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Show only active queues (default: true)' })
   @ApiQuery({ name: 'date', required: false, type: String, description: 'Queue date (YYYY-MM-DD). Default: today' })
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Include related entities (comma-separated: center,trip)' })
@@ -102,7 +102,7 @@ export class QueuesController {
     description: 'Returns queue list with position and type. Use include=center,trip to add center and trip per entry. By default, returns today\'s queue (positions reset daily).'
   })
   @ApiResponse({ status: 200, description: 'Queue list; center and trip per entry when requested via include' })
-  @ApiQuery({ name: 'type', required: false, enum: ['LOADING', 'UNLOADING'], description: 'Filter by queue type' })
+  @ApiQuery({ name: 'type', required: false, enum: ['LOADING', 'UNLOADING'], description: 'Filter by queue type. Optional; if not specified, returns both LOADING and UNLOADING.' })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Show only active queues (default: true)' })
   @ApiQuery({ name: 'date', required: false, type: String, description: 'Get queue for specific date (YYYY-MM-DD). Default: today' })
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Include related entities (comma-separated: center,trip)' })
