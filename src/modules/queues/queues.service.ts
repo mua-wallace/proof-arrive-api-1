@@ -424,14 +424,20 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
 
   /**
    * Get queue at a center
-   * By default, returns today's queue (positions reset daily)
-   * Queue position and type are clearly visible in response
+   * By default, returns today's queue (positions reset daily).
+   * Pass include=center,trip to add center and trip (and vehicle) to the response.
    */
   async getQueue(
     centerId: number,
     accountId: number,
-    filterDto?: { type?: QueueType; isActive?: boolean; date?: Date }
-  ): Promise<Array<CenterQueue & { vehicle?: any; trip?: any; waitingTimeMinutes?: number; queueTypeLabel?: string }>> {
+    filterDto?: { type?: QueueType; isActive?: boolean; date?: Date; include?: string[] }
+  ): Promise<{
+    center: Record<string, unknown> | null;
+    queue: Array<CenterQueue & { vehicle?: any; trip?: any; waitingTimeMinutes?: number; queueTypeLabel?: string }>;
+  }> {
+    const include = filterDto?.include ?? [];
+    const includeCenter = include.includes('center');
+    const includeTrip = include.includes('trip');
     // Look up center by id (thirdPartyId) or geozoneId since API might send either
     let [center] = await this.dbConnection
       .select()
@@ -499,21 +505,26 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       .where(and(...conditions))
       .orderBy(asc(schema.centerQueues.queueType), asc(schema.centerQueues.position));
 
-    // Load vehicle and trip information, and enhance with queue visibility
+    // Load vehicle and trip when include=trip; enhance with queue visibility
     for (const queue of queues) {
-      const vehicle = await this.dbConnection
-        .select()
-        .from(schema.vehicles)
-        .where(eq(schema.vehicles.id, queue.vehicleId))
-        .limit(1);
-      (queue as any).vehicle = vehicle[0] || null;
+      if (includeTrip) {
+        const vehicle = await this.dbConnection
+          .select()
+          .from(schema.vehicles)
+          .where(eq(schema.vehicles.id, queue.vehicleId))
+          .limit(1);
+        (queue as any).vehicle = vehicle[0] || null;
 
-      const trip = await this.dbConnection
-        .select()
-        .from(schema.trips)
-        .where(eq(schema.trips.id, queue.tripId))
-        .limit(1);
-      (queue as any).trip = trip[0] || null;
+        const trip = await this.dbConnection
+          .select()
+          .from(schema.trips)
+          .where(eq(schema.trips.id, queue.tripId))
+          .limit(1);
+        (queue as any).trip = trip[0] || null;
+      } else {
+        (queue as any).vehicle = undefined;
+        (queue as any).trip = undefined;
+      }
 
       // Calculate waiting time
       if (queue.queuedAt && !queue.serviceStartedAt) {
@@ -524,28 +535,30 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
         (queue as any).waitingTimeMinutes = Math.floor(waitTimeMs / 1000 / 60);
       }
 
-      // Add human-readable queue type label for better visibility
       (queue as any).queueTypeLabel = queue.queueType === QueueType.LOADING ? 'Loading Queue' : 'Unloading Queue';
-      
-      // Add formatted position display (e.g., "Position 1 of 5")
       const totalInQueue = queues.filter(q => q.queueType === queue.queueType && q.isActive).length;
       (queue as any).positionDisplay = `Position ${queue.position} of ${totalInQueue}`;
     }
 
-    return queues;
+    return {
+      center: includeCenter ? (center ?? null) : null,
+      queue: queues,
+    };
   }
 
   /**
    * Get all vehicles currently in the queue at a center.
-   * Returns a list of vehicles with their queue position, type, and optional waiting time.
+   * Use include=center,trip to add center and trip to the response.
    */
   async getVehiclesInQueue(
     centerId: number,
     accountId: number,
-    filterDto?: { type?: QueueType; isActive?: boolean; date?: Date }
+    filterDto?: { type?: QueueType; isActive?: boolean; date?: Date; include?: string[] }
   ): Promise<{
+    center: Record<string, unknown> | null;
     vehicles: Array<{
       vehicle: any;
+      trip?: any;
       queueEntryId: number;
       position: number;
       queueType: QueueType;
@@ -555,18 +568,34 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       isActive: boolean;
     }>;
   }> {
-    const queues = await this.getQueue(centerId, accountId, filterDto);
-    const vehicles = queues.map((q) => ({
-      vehicle: (q as any).vehicle,
-      queueEntryId: q.id,
-      position: q.position,
-      queueType: q.queueType as QueueType,
-      queueTypeLabel: String((q as any).queueTypeLabel ?? (q.queueType === QueueType.LOADING ? 'Loading Queue' : 'Unloading Queue')),
-      waitingTimeMinutes: (q as any).waitingTimeMinutes as number | undefined,
-      tripId: q.tripId,
-      isActive: q.isActive ?? false,
-    }));
-    return { vehicles };
+    // Always load vehicle (and trip when requested) for this endpoint
+    const include = filterDto?.include ?? [];
+    const includeTrip = include.includes('trip');
+    const getQueueInclude = includeTrip ? include : [...include, 'trip'];
+    const { center, queue: queues } = await this.getQueue(centerId, accountId, {
+      ...filterDto,
+      include: getQueueInclude,
+    });
+
+    const vehicles = queues.map((q) => {
+      const item: any = {
+        vehicle: (q as any).vehicle ?? null,
+        queueEntryId: q.id,
+        position: q.position,
+        queueType: q.queueType as QueueType,
+        queueTypeLabel: String((q as any).queueTypeLabel ?? (q.queueType === QueueType.LOADING ? 'Loading Queue' : 'Unloading Queue')),
+        waitingTimeMinutes: (q as any).waitingTimeMinutes as number | undefined,
+        tripId: q.tripId,
+        isActive: q.isActive ?? false,
+      };
+      if (includeTrip) item.trip = (q as any).trip ?? null;
+      return item;
+    });
+
+    return {
+      center: include.includes('center') ? center : null,
+      vehicles,
+    };
   }
 
   /**
@@ -585,8 +614,8 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
     const { start: todayStart } = this.getTodayDateRange();
     const todayDateStr = todayStart.toISOString().split('T')[0]; // YYYY-MM-DD
 
-    // Get all today's queues
-    const allQueues = await this.getQueue(centerId, accountId, { isActive: true });
+    // Get all today's queues (include trip so vehicle is loaded for plate)
+    const { queue: allQueues } = await this.getQueue(centerId, accountId, { isActive: true, include: ['trip'] });
 
     // Separate by queue type
     const loadingQueues = allQueues.filter(q => q.queueType === QueueType.LOADING);

@@ -18,6 +18,16 @@ import { AddToQueueDto } from './dto/add-to-queue.dto';
 import { StartNextServiceDto } from './dto/start-next-service.dto';
 import { FilterQueuesDto } from './dto/filter-queues.dto';
 
+const ALLOWED_INCLUDE = ['center', 'trip'] as const;
+
+function parseIncludeParam(include?: string): string[] {
+  if (!include || typeof include !== 'string') return [];
+  return include
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s && ALLOWED_INCLUDE.includes(s as any));
+}
+
 @ApiTags('Queues')
 @Controller('centers/:centerId/queue')
 @UseGuards(JwtAuthGuard)
@@ -65,20 +75,22 @@ export class QueuesController {
   @Get('vehicles')
   @ApiOperation({
     summary: 'Get all vehicles in the queue at a center',
-    description: 'Returns a list of all vehicles currently in the queue (by default today\'s active queue). Each item includes vehicle details, queue position, queue type (LOADING/UNLOADING), and waiting time. Supports same filters as GET /queue (type, isActive, date).'
+    description: 'Returns a list of vehicles in the queue. Use include=center,trip to add center and trip to the response. Supports same filters as GET /queue (type, isActive, date).'
   })
-  @ApiResponse({ status: 200, description: 'List of vehicles in queue' })
+  @ApiResponse({ status: 200, description: 'List of vehicles in queue; center and trip when requested via include' })
   @ApiQuery({ name: 'type', required: false, enum: ['LOADING', 'UNLOADING'], description: 'Filter by queue type' })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Show only active queues (default: true)' })
   @ApiQuery({ name: 'date', required: false, type: String, description: 'Queue date (YYYY-MM-DD). Default: today' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Include related entities (comma-separated: center,trip)' })
   async getVehiclesInQueue(
     @Param('centerId', ParseIntPipe) centerId: number,
-    @Query() filterDto: FilterQueuesDto & { date?: string },
+    @Query() filterDto: FilterQueuesDto & { date?: string; include?: string },
     @CurrentUserCredentials() credentials: any,
   ) {
     const filterOptions: any = {
       type: filterDto.type,
       isActive: filterDto.isActive !== undefined ? filterDto.isActive : true,
+      include: parseIncludeParam(filterDto.include),
     };
     if (filterDto.date) filterOptions.date = new Date(filterDto.date);
     return this.queuesService.getVehiclesInQueue(centerId, credentials.accid, filterOptions);
@@ -87,31 +99,25 @@ export class QueuesController {
   @Get()
   @ApiOperation({ 
     summary: 'Get queue at a center',
-    description: 'Returns queue list with position and type clearly visible. By default, returns today\'s queue (positions reset daily). Each entry shows queue position, queue type (LOADING/UNLOADING), vehicle info, and waiting time.'
+    description: 'Returns queue list with position and type. Use include=center,trip to add center and trip per entry. By default, returns today\'s queue (positions reset daily).'
   })
-  @ApiResponse({ status: 200, description: 'Queue list retrieved successfully' })
+  @ApiResponse({ status: 200, description: 'Queue list; center and trip per entry when requested via include' })
   @ApiQuery({ name: 'type', required: false, enum: ['LOADING', 'UNLOADING'], description: 'Filter by queue type' })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Show only active queues (default: true)' })
   @ApiQuery({ name: 'date', required: false, type: String, description: 'Get queue for specific date (YYYY-MM-DD). Default: today' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Include related entities (comma-separated: center,trip)' })
   async getQueue(
     @Param('centerId', ParseIntPipe) centerId: number,
-    @Query() filterDto: FilterQueuesDto & { date?: string },
+    @Query() filterDto: FilterQueuesDto & { date?: string; include?: string },
     @CurrentUserCredentials() credentials: any,
   ) {
     const filterOptions: any = {
       type: filterDto.type,
       isActive: filterDto.isActive !== undefined ? filterDto.isActive : true,
+      include: parseIncludeParam(filterDto.include),
     };
-    
-    if (filterDto.date) {
-      filterOptions.date = new Date(filterDto.date);
-    }
-
-    return this.queuesService.getQueue(
-      centerId,
-      credentials.accid,
-      filterOptions,
-    );
+    if (filterDto.date) filterOptions.date = new Date(filterDto.date);
+    return this.queuesService.getQueue(centerId, credentials.accid, filterOptions);
   }
 
   @Get('summary')
