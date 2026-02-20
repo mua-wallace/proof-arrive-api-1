@@ -537,15 +537,17 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
 
   /**
    * Get all vehicles currently in the queue at a center.
-   * Returns a list of vehicles with their queue position, type, and optional waiting time.
+   * Returns center info, trip info per vehicle, queue position, type, and optional waiting time.
    */
   async getVehiclesInQueue(
     centerId: number,
     accountId: number,
     filterDto?: { type?: QueueType; isActive?: boolean; date?: Date }
   ): Promise<{
+    center: Record<string, unknown> | null;
     vehicles: Array<{
       vehicle: any;
+      trip: any;
       queueEntryId: number;
       position: number;
       queueType: QueueType;
@@ -556,8 +558,34 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
     }>;
   }> {
     const queues = await this.getQueue(centerId, accountId, filterDto);
+
+    // Resolve center (same logic as getQueue) for response
+    let [center] = await this.dbConnection
+      .select()
+      .from(schema.centers)
+      .where(
+        and(
+          eq(schema.centers.id, centerId),
+          eq(schema.centers.accountId, accountId)
+        )
+      )
+      .limit(1);
+    if (!center) {
+      [center] = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(
+          and(
+            eq(schema.centers.geozoneId, centerId),
+            eq(schema.centers.accountId, accountId)
+          )
+        )
+        .limit(1);
+    }
+
     const vehicles = queues.map((q) => ({
       vehicle: (q as any).vehicle,
+      trip: (q as any).trip ?? null,
       queueEntryId: q.id,
       position: q.position,
       queueType: q.queueType as QueueType,
@@ -566,7 +594,11 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       tripId: q.tripId,
       isActive: q.isActive ?? false,
     }));
-    return { vehicles };
+
+    return {
+      center: center ?? null,
+      vehicles,
+    };
   }
 
   /**
