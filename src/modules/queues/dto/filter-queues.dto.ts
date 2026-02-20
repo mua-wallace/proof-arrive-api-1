@@ -9,7 +9,7 @@ export class FilterQueuesDto {
   @IsEnum(QueueType)
   type?: QueueType;
 
-  @ApiPropertyOptional({ description: 'Show only active queues', default: true })
+  @ApiPropertyOptional({ description: 'Filter by active queues. Optional; if not specified, returns both active and inactive.' })
   @IsOptional()
   @Type(() => Boolean)
   @IsBoolean()

@@ -64,8 +64,13 @@ jobs:
             echo "Package not found or no access; skipping cleanup."
             exit 0
           fi
+          # Response must be an array; API can return an object on error
+          if ! echo "$VERSIONS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            echo "Unexpected API response (not an array); skipping cleanup."
+            exit 0
+          fi
           echo "Keeping $KEEP latest versions..."
-          TO_DELETE=$(echo "$VERSIONS" | jq -r --argjson keep $KEEP '.[$keep:] | .[].id')
+          TO_DELETE=$(echo "$VERSIONS" | jq -r --argjson keep $KEEP 'if type == "array" then .[$keep:] | .[].id else empty end')
           if [ -z "$TO_DELETE" ]; then
             echo "No old versions to delete."
             exit 0

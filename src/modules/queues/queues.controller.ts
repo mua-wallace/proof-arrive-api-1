@@ -79,7 +79,7 @@ export class QueuesController {
   })
   @ApiResponse({ status: 200, description: 'List of vehicles in queue; center and trip when requested via include' })
   @ApiQuery({ name: 'type', required: false, enum: ['LOADING', 'UNLOADING'], description: 'Filter by queue type. Optional; if not specified, returns both LOADING and UNLOADING.' })
-  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Show only active queues (default: true)' })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Filter by active queues. Optional; if not specified, returns both active and inactive.' })
   @ApiQuery({ name: 'date', required: false, type: String, description: 'Queue date (YYYY-MM-DD). Default: today' })
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Include related entities (comma-separated: center,trip)' })
   async getVehiclesInQueue(
@@ -89,7 +89,7 @@ export class QueuesController {
   ) {
     const filterOptions: any = {
       type: filterDto.type,
-      isActive: filterDto.isActive !== undefined ? filterDto.isActive : true,
+      isActive: filterDto.isActive,
       include: parseIncludeParam(filterDto.include),
     };
     if (filterDto.date) filterOptions.date = new Date(filterDto.date);
@@ -103,7 +103,7 @@ export class QueuesController {
   })
   @ApiResponse({ status: 200, description: 'Queue list; center and trip per entry when requested via include' })
   @ApiQuery({ name: 'type', required: false, enum: ['LOADING', 'UNLOADING'], description: 'Filter by queue type. Optional; if not specified, returns both LOADING and UNLOADING.' })
-  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Show only active queues (default: true)' })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Filter by active queues. Optional; if not specified, returns both active and inactive.' })
   @ApiQuery({ name: 'date', required: false, type: String, description: 'Get queue for specific date (YYYY-MM-DD). Default: today' })
   @ApiQuery({ name: 'include', required: false, type: String, description: 'Include related entities (comma-separated: center,trip)' })
   async getQueue(
@@ -113,7 +113,7 @@ export class QueuesController {
   ) {
     const filterOptions: any = {
       type: filterDto.type,
-      isActive: filterDto.isActive !== undefined ? filterDto.isActive : true,
+      isActive: filterDto.isActive,
       include: parseIncludeParam(filterDto.include),
     };
     if (filterDto.date) filterOptions.date = new Date(filterDto.date);
