@@ -9,4 +9,5 @@ export enum VehicleStatus {
   WAITING_IN_QUEUE = 'WAITING_IN_QUEUE', // Vehicle is waiting in queue at a center
   LOADING = 'LOADING', // Vehicle is being loaded at a center
   UNLOADING = 'UNLOADING', // Vehicle is being unloaded at a center
+  IN_GARAGE = 'IN_GARAGE', // Vehicle is in the garage; currentCenterId is set to null
 }

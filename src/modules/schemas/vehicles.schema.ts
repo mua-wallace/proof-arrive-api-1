@@ -22,8 +22,8 @@ export const vehicles = pgTable('vehicles', {
   lastSyncedAt: timestamp('last_synced_at'),
   // Current status and location tracking
   // Status is derived from latest trip event, not manually set
-  status: varchar('status', { length: 50 }).default(VehicleStatus.AVAILABLE), // VehicleStatus enum: AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING
-  currentCenterId: integer('current_center_id'), // References centers.id (which equals thirdPartyId) - current center where vehicle is located (nullable for IN_TRANSIT)
+  status: varchar('status', { length: 50 }).default(VehicleStatus.AVAILABLE), // VehicleStatus: AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING, IN_GARAGE
+  currentCenterId: integer('current_center_id'), // References centers.id - current center where vehicle is located (null for IN_TRANSIT or IN_GARAGE)
 }, (table) => ({
   accountIdx: index('idx_vehicles_account').on(table.accountId),
   plateIdx: index('idx_vehicles_plate').on(table.plate),

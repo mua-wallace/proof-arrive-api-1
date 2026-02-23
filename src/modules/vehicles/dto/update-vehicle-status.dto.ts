@@ -13,7 +13,7 @@ export class UpdateVehicleStatusDto {
   status: VehicleStatus;
 
   @ApiPropertyOptional({ 
-    description: 'Center ID (internal database ID) where the vehicle is located. Required for statuses that require a location (WAITING_IN_QUEUE, LOADING, UNLOADING). Optional/nullable for IN_TRANSIT and AVAILABLE.',
+    description: 'Center ID (internal database ID) where the vehicle is located. Required for WAITING_IN_QUEUE, LOADING, UNLOADING. Optional for IN_TRANSIT and AVAILABLE. For IN_GARAGE, center is ignored and set to null.',
     example: 1
   })
   @IsOptional()

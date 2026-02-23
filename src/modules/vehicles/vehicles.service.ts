@@ -1205,7 +1205,10 @@ export class VehiclesService extends BaseService<Vehicle> {
 
       // Validate center if provided
       let centerIdToSet: number | null = null;
-      if (updateDto.centerId !== undefined && updateDto.centerId !== null) {
+      // IN_GARAGE: always set center to null (vehicle is not at a center)
+      if (updateDto.status === VehicleStatus.IN_GARAGE) {
+        centerIdToSet = null;
+      } else if (updateDto.centerId !== undefined && updateDto.centerId !== null) {
         // Verify center exists and belongs to account
         // Try both id (thirdPartyId) and geozoneId since API might send either
         let [center] = await this.dbConnection
@@ -1250,14 +1253,14 @@ export class VehiclesService extends BaseService<Vehicle> {
             `Center ID is required for status: ${updateDto.status}`,
           );
         }
-        // For in_transit and available, center can be null
+        // For IN_TRANSIT, AVAILABLE (and IN_GARAGE already handled above), center can be null
         if (updateDto.status === VehicleStatus.IN_TRANSIT || updateDto.status === VehicleStatus.AVAILABLE) {
           centerIdToSet = null;
         }
       }
 
-      // Check if status is actually changing
-      const statusChanged = vehicle.currentStatus !== updateDto.status;
+      // Check if status is actually changing (schema uses status, not currentStatus)
+      const statusChanged = vehicle.status !== updateDto.status;
       const centerChanged = vehicle.currentCenterId !== centerIdToSet;
 
       if (!statusChanged && !centerChanged) {
@@ -1266,11 +1269,11 @@ export class VehiclesService extends BaseService<Vehicle> {
         return vehicle as Vehicle;
       }
 
-      // Update vehicle status and center
+      // Update vehicle status and center (schema column is status)
       const [updatedVehicle] = await this.dbConnection
         .update(schema.vehicles)
         .set({
-          currentStatus: updateDto.status,
+          status: updateDto.status,
           currentCenterId: centerIdToSet,
           updatedAt: new Date(),
         })
@@ -1293,7 +1296,7 @@ export class VehiclesService extends BaseService<Vehicle> {
       );
 
       this.logger.log(
-        `Vehicle ${vehicle.id} status updated: ${vehicle.currentStatus} -> ${updateDto.status}, center: ${vehicle.currentCenterId} -> ${centerIdToSet}`,
+        `Vehicle ${vehicle.id} status updated: ${vehicle.status} -> ${updateDto.status}, center: ${vehicle.currentCenterId} -> ${centerIdToSet}`,
       );
 
       return updatedVehicle as Vehicle;
