@@ -169,12 +169,6 @@ export class VehiclesService extends BaseService<Vehicle> {
       // Build relations object for Drizzle query API
         const withRelations: any = {};
         if (options?.include) {
-          if (options.include.includes('arrivals')) {
-            withRelations.arrivals = true;
-          }
-          if (options.include.includes('exits')) {
-            withRelations.exits = true;
-          }
           if (options.include.includes('qrCodes')) {
             withRelations.qrCode = true;
           }
@@ -183,6 +177,9 @@ export class VehiclesService extends BaseService<Vehicle> {
           }
           if (options.include.includes('assignedCenter') || options.include.includes('center')) {
             withRelations.assignedCenter = true;
+          }
+          if (options.include.includes('currentCenter')) {
+            withRelations.currentCenter = true;
           }
         }
 
@@ -460,11 +457,17 @@ export class VehiclesService extends BaseService<Vehicle> {
       // Build relations object for Drizzle query API
       const withRelations: any = {};
       if (options?.include) {
-        if (options.include.includes('arrivals')) {
-          withRelations.arrivals = true;
+        if (options.include.includes('qrCodes')) {
+          withRelations.qrCode = true;
         }
-        if (options.include.includes('exits')) {
-          withRelations.exits = true;
+        if (options.include.includes('group')) {
+          withRelations.group = true;
+        }
+        if (options.include.includes('assignedCenter') || options.include.includes('center')) {
+          withRelations.assignedCenter = true;
+        }
+        if (options.include.includes('currentCenter')) {
+          withRelations.currentCenter = true;
         }
       }
 
