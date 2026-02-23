@@ -25,14 +25,14 @@ export class VehiclesController {
   @Get()
   @ApiOperation({
     summary: 'List all synced vehicles in the system with filtering and pagination',
-    description: 'Retrieves a paginated list of vehicles that have been synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (arrivals, exits, qrCodes, group).',
+    description: 'Retrieves a paginated list of vehicles that have been synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (qrCodes, group, assignedCenter, currentCenter).',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, qrCodes, group)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (qrCodes, group, assignedCenter, currentCenter)' })
   async findAll(
     @Query() filterDto: FilterVehiclesDto,
     @CurrentUserCredentials() credentials: Credentials,
@@ -336,7 +336,7 @@ export class VehiclesController {
     summary: 'Get vehicle details by ID',
     description: 'Provides access to view the details of a specific vehicle by its internal ID (serial integer).',
   })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, qrCodes, group)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (qrCodes, group, assignedCenter, currentCenter)' })
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,

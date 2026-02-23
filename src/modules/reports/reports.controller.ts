@@ -1,11 +1,11 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
-  ApiQuery,
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@modules/auth/guards/jwt-auth.guard';
+import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-credentials.decorator';
 import { ReportsService } from './reports.service';
 import { ReportQueryDto } from './dto/report-query.dto';
 
@@ -20,71 +20,118 @@ export class ReportsController {
   @ApiOperation({
     summary: 'Get dashboard summary with key metrics',
     description:
-      'Returns a comprehensive dashboard summary including total arrivals, exits, in-transit vehicles, and breakdowns by status and type.',
+      'Returns dashboard summary: vehicles by status (including IN_GARAGE), trips (ongoing, completed, by purpose/phase), queue counts (loading/unloading), centers, and optional legacy arrivals/exits.',
   })
-  async getDashboardSummary(@Query() query: ReportQueryDto) {
-    return this.reportsService.getDashboardSummary(query);
+  async getDashboardSummary(
+    @Query() query: ReportQueryDto,
+    @CurrentUserCredentials() credentials: { accid: string | number },
+  ) {
+    const accountId = Number(credentials?.accid);
+    if (!accountId || isNaN(accountId)) {
+      throw new BadRequestException('Invalid account context');
+    }
+    return this.reportsService.getDashboardSummary(query, accountId);
   }
 
   @Get('arrivals')
   @ApiOperation({
-    summary: 'Get arrival analytics',
+    summary: 'Get arrival analytics (legacy)',
     description:
-      'Returns detailed analytics about arrivals including breakdowns by center, date, and top vehicles.',
+      'Returns analytics about arrivals by center, date, and top vehicles. Filtered by account.',
   })
-  async getArrivalAnalytics(@Query() query: ReportQueryDto) {
-    return this.reportsService.getArrivalAnalytics(query);
+  async getArrivalAnalytics(
+    @Query() query: ReportQueryDto,
+    @CurrentUserCredentials() credentials: { accid: string | number },
+  ) {
+    const accountId = Number(credentials?.accid);
+    if (!accountId || isNaN(accountId)) {
+      throw new BadRequestException('Invalid account context');
+    }
+    return this.reportsService.getArrivalAnalytics(query, accountId);
   }
 
   @Get('exits')
   @ApiOperation({
-    summary: 'Get exit analytics',
+    summary: 'Get exit analytics (legacy)',
     description:
-      'Returns detailed analytics about exits including breakdowns by center, date, and exit type.',
+      'Returns analytics about exits by center, date, and exit type. Filtered by account.',
   })
-  async getExitAnalytics(@Query() query: ReportQueryDto) {
-    return this.reportsService.getExitAnalytics(query);
+  async getExitAnalytics(
+    @Query() query: ReportQueryDto,
+    @CurrentUserCredentials() credentials: { accid: string | number },
+  ) {
+    const accountId = Number(credentials?.accid);
+    if (!accountId || isNaN(accountId)) {
+      throw new BadRequestException('Invalid account context');
+    }
+    return this.reportsService.getExitAnalytics(query, accountId);
   }
-
-  // Incoming vehicles endpoint removed - not useful
 
   @Get('processing-stages')
   @ApiOperation({
-    summary: 'Get processing stage analytics',
+    summary: 'Get processing stage analytics (legacy)',
     description:
-      'Returns analytics about processing stages including breakdowns by type and status, and average processing times.',
+      'Returns analytics about processing stages by type and status. Filtered by account.',
   })
-  async getProcessingStageAnalytics(@Query() query: ReportQueryDto) {
-    return this.reportsService.getProcessingStageAnalytics(query);
+  async getProcessingStageAnalytics(
+    @Query() query: ReportQueryDto,
+    @CurrentUserCredentials() credentials: { accid: string | number },
+  ) {
+    const accountId = Number(credentials?.accid);
+    if (!accountId || isNaN(accountId)) {
+      throw new BadRequestException('Invalid account context');
+    }
+    return this.reportsService.getProcessingStageAnalytics(query, accountId);
   }
 
   @Get('centers/performance')
   @ApiOperation({
     summary: 'Get center performance metrics',
     description:
-      'Returns performance metrics for centers including arrivals, exits, and net flow calculations.',
+      'Returns performance per center: trip counts (as origin/destination), vehicles at center, queue counts. Filtered by account.',
   })
-  async getCenterPerformance(@Query() query: ReportQueryDto) {
-    return this.reportsService.getCenterPerformance(query);
+  async getCenterPerformance(
+    @Query() query: ReportQueryDto,
+    @CurrentUserCredentials() credentials: { accid: string | number },
+  ) {
+    const accountId = Number(credentials?.accid);
+    if (!accountId || isNaN(accountId)) {
+      throw new BadRequestException('Invalid account context');
+    }
+    return this.reportsService.getCenterPerformance(query, accountId);
   }
 
   @Get('vehicles/activity')
   @ApiOperation({
     summary: 'Get vehicle activity report',
     description:
-      'Returns activity metrics for vehicles including arrivals, exits, and total movements.',
+      'Returns activity per vehicle: trip count, completed trips (in period). Filtered by account.',
   })
-  async getVehicleActivity(@Query() query: ReportQueryDto) {
-    return this.reportsService.getVehicleActivity(query);
+  async getVehicleActivity(
+    @Query() query: ReportQueryDto,
+    @CurrentUserCredentials() credentials: { accid: string | number },
+  ) {
+    const accountId = Number(credentials?.accid);
+    if (!accountId || isNaN(accountId)) {
+      throw new BadRequestException('Invalid account context');
+    }
+    return this.reportsService.getVehicleActivity(query, accountId);
   }
 
   @Get('agents/activity')
   @ApiOperation({
     summary: 'Get agent activity report',
     description:
-      'Returns activity metrics for agents/users including arrivals, exits, and total activities.',
+      'Returns activity per agent from trip events: events count by type. Filtered by account.',
   })
-  async getAgentActivity(@Query() query: ReportQueryDto) {
-    return this.reportsService.getAgentActivity(query);
+  async getAgentActivity(
+    @Query() query: ReportQueryDto,
+    @CurrentUserCredentials() credentials: { accid: string | number },
+  ) {
+    const accountId = Number(credentials?.accid);
+    if (!accountId || isNaN(accountId)) {
+      throw new BadRequestException('Invalid account context');
+    }
+    return this.reportsService.getAgentActivity(query, accountId);
   }
 }

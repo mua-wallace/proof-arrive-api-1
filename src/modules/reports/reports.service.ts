@@ -5,9 +5,13 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
-import { eq, and, SQL, sql, gte, lte, count, desc, asc, inArray } from 'drizzle-orm';
+import { eq, and, SQL, sql, gte, lte, lt, count, desc, asc, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 import { ReportQueryDto } from './dto/report-query.dto';
+import { VehicleStatus } from '@common/enums/vehicle-status.enum';
+import { TripStatus } from '@common/enums/trip-status.enum';
+import { TripPurpose } from '@common/enums/trip-purpose.enum';
+import { QueueType } from '@common/enums/queue-type.enum';
 
 type DrizzleDatabase = ReturnType<typeof import('drizzle-orm/postgres-js').drizzle>;
 
@@ -21,58 +25,205 @@ export class ReportsService {
   ) {}
 
   /**
-   * Get dashboard summary with key metrics
+   * Get today's date range (start of day to start of next day) for queue stats
    */
-  async getDashboardSummary(query: ReportQueryDto = {}) {
-    
+  private getTodayDateRange(): { start: Date; end: Date } {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { start, end };
+  }
+
+  /**
+   * Get dashboard summary with key metrics (trips, vehicles by status, queues, centers)
+   * Scoped by accountId. Optional date range applies to trip counts and legacy arrivals/exits.
+   */
+  async getDashboardSummary(query: ReportQueryDto = {}, accountId: number) {
     try {
-      const conditions = this.buildDateConditions(query);
+      const tripConditions = this.buildTripDateConditions(query, accountId);
+      const conditions = this.buildDateConditions(query, accountId);
+      const { start: todayStart, end: todayEnd } = this.getTodayDateRange();
 
-      // Total arrivals
-      const arrivalsCount = await this.db
+      // --- Vehicles (current state, always account-scoped) ---
+      const totalVehicles = await this.db
         .select({ count: count() })
-        .from(schema.arrivals)
-        .where(and(...conditions.arrivals));
+        .from(schema.vehicles)
+        .where(eq(schema.vehicles.accountId, accountId));
 
-      // Total exits
-      const exitsCount = await this.db
+      const vehiclesByStatus = await this.db
+        .select({ status: schema.vehicles.status, count: count() })
+        .from(schema.vehicles)
+        .where(eq(schema.vehicles.accountId, accountId))
+        .groupBy(schema.vehicles.status);
+
+      const statusCounts: Record<string, number> = {};
+      Object.values(VehicleStatus).forEach((s) => (statusCounts[s] = 0));
+      vehiclesByStatus.forEach((row) => {
+        statusCounts[row.status || ''] = Number(row.count);
+      });
+
+      const vehiclesInGarage = await this.db
         .select({ count: count() })
-        .from(schema.exits)
-        .where(and(...conditions.exits));
+        .from(schema.vehicles)
+        .where(
+          and(
+            eq(schema.vehicles.accountId, accountId),
+            eq(schema.vehicles.status, VehicleStatus.IN_GARAGE),
+          ),
+        );
 
-      // Arrivals by status
-      const arrivalsByStatus = await this.db
-        .select({
-          status: schema.arrivals.status,
-          count: count(),
-        })
-        .from(schema.arrivals)
-        .where(and(...conditions.arrivals))
-        .groupBy(schema.arrivals.status);
+      const vehiclesAtCenter = await this.db
+        .select({ count: count() })
+        .from(schema.vehicles)
+        .where(
+          and(
+            eq(schema.vehicles.accountId, accountId),
+            sql`${schema.vehicles.currentCenterId} IS NOT NULL`,
+          ),
+        );
 
-      // Exits by type
-      const exitsByType = await this.db
-        .select({
-          exitType: schema.exits.exitType,
-          count: count(),
-        })
-        .from(schema.exits)
-        .where(and(...conditions.exits))
-        .groupBy(schema.exits.exitType);
+      const vehiclesInTransit = await this.db
+        .select({ count: count() })
+        .from(schema.vehicles)
+        .where(
+          and(
+            eq(schema.vehicles.accountId, accountId),
+            eq(schema.vehicles.status, VehicleStatus.IN_TRANSIT),
+          ),
+        );
+
+      // --- Trips ---
+      const ongoingTrips = await this.db
+        .select({ count: count() })
+        .from(schema.trips)
+        .where(
+          and(
+            eq(schema.trips.accountId, accountId),
+            eq(schema.trips.status, TripStatus.ONGOING),
+          ),
+        );
+
+      const completedTripsInPeriod = await this.db
+        .select({ count: count() })
+        .from(schema.trips)
+        .where(and(...tripConditions.completed));
+
+      const totalTripsInPeriod = await this.db
+        .select({ count: count() })
+        .from(schema.trips)
+        .where(and(...tripConditions.started));
+
+      const tripsByPurpose = await this.db
+        .select({ purpose: schema.trips.purpose, count: count() })
+        .from(schema.trips)
+        .where(and(...tripConditions.started))
+        .groupBy(schema.trips.purpose);
+
+      const tripsByPhase = await this.db
+        .select({ phase: schema.trips.phase, count: count() })
+        .from(schema.trips)
+        .where(
+          and(
+            eq(schema.trips.accountId, accountId),
+            eq(schema.trips.status, TripStatus.ONGOING),
+          ),
+        )
+        .groupBy(schema.trips.phase);
+
+      // --- Queues (today's active entries) ---
+      const loadingQueueCount = await this.db
+        .select({ count: count() })
+        .from(schema.centerQueues)
+        .where(
+          and(
+            eq(schema.centerQueues.accountId, accountId),
+            eq(schema.centerQueues.queueType, QueueType.LOADING),
+            eq(schema.centerQueues.isActive, true),
+            gte(schema.centerQueues.queueDate, todayStart),
+            lt(schema.centerQueues.queueDate, todayEnd),
+          ),
+        );
+
+      const unloadingQueueCount = await this.db
+        .select({ count: count() })
+        .from(schema.centerQueues)
+        .where(
+          and(
+            eq(schema.centerQueues.accountId, accountId),
+            eq(schema.centerQueues.queueType, QueueType.UNLOADING),
+            eq(schema.centerQueues.isActive, true),
+            gte(schema.centerQueues.queueDate, todayStart),
+            lt(schema.centerQueues.queueDate, todayEnd),
+          ),
+        );
+
+      // --- Centers ---
+      const totalCenters = await this.db
+        .select({ count: count() })
+        .from(schema.centers)
+        .where(eq(schema.centers.accountId, accountId));
+
+      // --- Legacy (arrivals/exits in date range) ---
+      let totalArrivals = 0;
+      let totalExits = 0;
+      let arrivalsByStatus: { status: string | null; count: number }[] = [];
+      let exitsByType: { exitType: string | null; count: number }[] = [];
+      if (conditions.arrivals.length > 0) {
+        const arrivalsCount = await this.db
+          .select({ count: count() })
+          .from(schema.arrivals)
+          .where(and(...conditions.arrivals));
+        totalArrivals = Number(arrivalsCount[0]?.count || 0);
+        const byStatus = await this.db
+          .select({ status: schema.arrivals.status, count: count() })
+          .from(schema.arrivals)
+          .where(and(...conditions.arrivals))
+          .groupBy(schema.arrivals.status);
+        arrivalsByStatus = byStatus.map((r) => ({ status: r.status, count: Number(r.count) }));
+      }
+      if (conditions.exits.length > 0) {
+        const exitsCount = await this.db
+          .select({ count: count() })
+          .from(schema.exits)
+          .where(and(...conditions.exits));
+        totalExits = Number(exitsCount[0]?.count || 0);
+        const byType = await this.db
+          .select({ exitType: schema.exits.exitType, count: count() })
+          .from(schema.exits)
+          .where(and(...conditions.exits))
+          .groupBy(schema.exits.exitType);
+        exitsByType = byType.map((r) => ({ exitType: r.exitType, count: Number(r.count) }));
+      }
 
       return {
-        summary: {
-          totalArrivals: Number(arrivalsCount[0]?.count || 0),
-          totalExits: Number(exitsCount[0]?.count || 0),
+        vehicles: {
+          total: Number(totalVehicles[0]?.count || 0),
+          byStatus: statusCounts,
+          inGarage: Number(vehiclesInGarage[0]?.count || 0),
+          atCenter: Number(vehiclesAtCenter[0]?.count || 0),
+          inTransit: Number(vehiclesInTransit[0]?.count || 0),
         },
-        arrivalsByStatus: arrivalsByStatus.map((item) => ({
-          status: item.status,
-          count: Number(item.count),
-        })),
-        exitsByType: exitsByType.map((item) => ({
-          exitType: item.exitType,
-          count: Number(item.count),
-        })),
+        trips: {
+          ongoing: Number(ongoingTrips[0]?.count || 0),
+          completedInPeriod: Number(completedTripsInPeriod[0]?.count || 0),
+          totalStartedInPeriod: Number(totalTripsInPeriod[0]?.count || 0),
+          byPurpose: tripsByPurpose.map((r) => ({ purpose: r.purpose, count: Number(r.count) })),
+          ongoingByPhase: tripsByPhase.map((r) => ({ phase: r.phase, count: Number(r.count) })),
+        },
+        queues: {
+          loadingActiveToday: Number(loadingQueueCount[0]?.count || 0),
+          unloadingActiveToday: Number(unloadingQueueCount[0]?.count || 0),
+        },
+        centers: {
+          total: Number(totalCenters[0]?.count || 0),
+        },
+        legacy: {
+          totalArrivals,
+          totalExits,
+          arrivalsByStatus,
+          exitsByType,
+        },
       };
     } catch (error: any) {
       this.logger.error(`Error generating dashboard summary: ${error.message}`, error.stack);
@@ -81,12 +232,42 @@ export class ReportsService {
   }
 
   /**
-   * Get arrival analytics
+   * Build date conditions for trips (startedAt / endedAt) and account
    */
-  async getArrivalAnalytics(query: ReportQueryDto = {}) {
-    
+  private buildTripDateConditions(query: ReportQueryDto, accountId: number): { started: SQL[]; completed: SQL[] } {
+    const started: SQL[] = [eq(schema.trips.accountId, accountId)];
+    const completed: SQL[] = [eq(schema.trips.accountId, accountId), eq(schema.trips.status, TripStatus.COMPLETED)];
+    if (query.startDate) {
+      const startDate = new Date(query.startDate);
+      started.push(gte(schema.trips.startedAt, startDate));
+      completed.push(gte(schema.trips.endedAt, startDate));
+    }
+    if (query.endDate) {
+      const endDate = new Date(query.endDate);
+      started.push(lte(schema.trips.startedAt, endDate));
+      completed.push(lte(schema.trips.endedAt, endDate));
+    }
+    if (query.centerId) {
+      started.push(
+        sql`(${schema.trips.originCenterId} = ${query.centerId} OR ${schema.trips.destinationCenterId} = ${query.centerId})`,
+      );
+      completed.push(
+        sql`(${schema.trips.originCenterId} = ${query.centerId} OR ${schema.trips.destinationCenterId} = ${query.centerId})`,
+      );
+    }
+    if (query.vehicleId) {
+      started.push(eq(schema.trips.vehicleId, query.vehicleId));
+      completed.push(eq(schema.trips.vehicleId, query.vehicleId));
+    }
+    return { started, completed };
+  }
+
+  /**
+   * Get arrival analytics (legacy, filtered by account)
+   */
+  async getArrivalAnalytics(query: ReportQueryDto = {}, accountId: number) {
     try {
-      const conditions = this.buildDateConditions(query);
+      const conditions = this.buildDateConditions(query, accountId);
 
       // Arrivals by center
       const arrivalsByCenter = await this.db
@@ -167,12 +348,11 @@ export class ReportsService {
   }
 
   /**
-   * Get exit analytics
+   * Get exit analytics (legacy, filtered by account)
    */
-  async getExitAnalytics(query: ReportQueryDto = {}) {
-    
+  async getExitAnalytics(query: ReportQueryDto = {}, accountId: number) {
     try {
-      const conditions = this.buildDateConditions(query);
+      const conditions = this.buildDateConditions(query, accountId);
 
       // Exits by center
       const exitsByCenter = await this.db
@@ -239,12 +419,11 @@ export class ReportsService {
   }
 
   /**
-   * Get processing stage analytics
+   * Get processing stage analytics (legacy, filtered by account)
    */
-  async getProcessingStageAnalytics(query: ReportQueryDto = {}) {
-    
+  async getProcessingStageAnalytics(query: ReportQueryDto = {}, accountId: number) {
     try {
-      const conditions = this.buildDateConditions(query);
+      const conditions = this.buildDateConditions(query, accountId);
 
       // Get arrival IDs based on query filters
       let arrivalIds: number[] = [];
@@ -325,56 +504,108 @@ export class ReportsService {
   }
 
   /**
-   * Get center performance metrics
+   * Get center performance metrics (trips as origin/destination, vehicles at center, queue counts)
    */
-  async getCenterPerformance(query: ReportQueryDto = {}) {
-    
+  async getCenterPerformance(query: ReportQueryDto = {}, accountId: number) {
     try {
-      const conditions = this.buildDateConditions(query);
+      const { start: todayStart, end: todayEnd } = this.getTodayDateRange();
 
-      // Get all centers or specific center
       let centers: any[] = [];
       if (query.centerId) {
         const center = await this.db
           .select()
           .from(schema.centers)
-          .where(eq(schema.centers.id, query.centerId))
+          .where(
+            and(
+              eq(schema.centers.id, query.centerId),
+              eq(schema.centers.accountId, accountId),
+            ),
+          )
           .limit(1);
         centers = center;
       } else {
-        centers = await this.db.select().from(schema.centers);
+        centers = await this.db
+          .select()
+          .from(schema.centers)
+          .where(eq(schema.centers.accountId, accountId));
       }
 
       const performanceMetrics = await Promise.all(
         centers.map(async (center) => {
-          // Arrivals count
-          const arrivalsCount = await this.db
+          const centerId = center.id;
+          const tripsAsOrigin = await this.db
             .select({ count: count() })
-            .from(schema.arrivals)
+            .from(schema.trips)
             .where(
               and(
-                eq(schema.arrivals.centerId, center.id),
-                ...conditions.arrivals.filter((c) => !c.toString().includes('center_id')),
+                eq(schema.trips.accountId, accountId),
+                eq(schema.trips.originCenterId, centerId),
               ),
             );
-
-          // Exits count
-          const exitsCount = await this.db
+          const tripsAsDestination = await this.db
             .select({ count: count() })
-            .from(schema.exits)
+            .from(schema.trips)
             .where(
               and(
-                eq(schema.exits.centerId, center.id),
-                ...conditions.exits.filter((c) => !c.toString().includes('center_id')),
+                eq(schema.trips.accountId, accountId),
+                eq(schema.trips.destinationCenterId, centerId),
+              ),
+            );
+          const completedTripsAtCenter = await this.db
+            .select({ count: count() })
+            .from(schema.trips)
+            .where(
+              and(
+                eq(schema.trips.accountId, accountId),
+                eq(schema.trips.status, TripStatus.COMPLETED),
+                eq(schema.trips.destinationCenterId, centerId),
+              ),
+            );
+          const vehiclesAtCenter = await this.db
+            .select({ count: count() })
+            .from(schema.vehicles)
+            .where(
+              and(
+                eq(schema.vehicles.accountId, accountId),
+                eq(schema.vehicles.currentCenterId, centerId),
+              ),
+            );
+          const loadingQueueNow = await this.db
+            .select({ count: count() })
+            .from(schema.centerQueues)
+            .where(
+              and(
+                eq(schema.centerQueues.accountId, accountId),
+                eq(schema.centerQueues.centerId, centerId),
+                eq(schema.centerQueues.queueType, QueueType.LOADING),
+                eq(schema.centerQueues.isActive, true),
+                gte(schema.centerQueues.queueDate, todayStart),
+                lt(schema.centerQueues.queueDate, todayEnd),
+              ),
+            );
+          const unloadingQueueNow = await this.db
+            .select({ count: count() })
+            .from(schema.centerQueues)
+            .where(
+              and(
+                eq(schema.centerQueues.accountId, accountId),
+                eq(schema.centerQueues.centerId, centerId),
+                eq(schema.centerQueues.queueType, QueueType.UNLOADING),
+                eq(schema.centerQueues.isActive, true),
+                gte(schema.centerQueues.queueDate, todayStart),
+                lt(schema.centerQueues.queueDate, todayEnd),
               ),
             );
 
           return {
             center,
             metrics: {
-              arrivals: Number(arrivalsCount[0]?.count || 0),
-              exits: Number(exitsCount[0]?.count || 0),
-              netFlow: Number(arrivalsCount[0]?.count || 0) - Number(exitsCount[0]?.count || 0),
+              tripsAsOrigin: Number(tripsAsOrigin[0]?.count || 0),
+              tripsAsDestination: Number(tripsAsDestination[0]?.count || 0),
+              completedTripsAtDestination: Number(completedTripsAtCenter[0]?.count || 0),
+              vehiclesAtCenter: Number(vehiclesAtCenter[0]?.count || 0),
+              loadingQueueActive: Number(loadingQueueNow[0]?.count || 0),
+              unloadingQueueActive: Number(unloadingQueueNow[0]?.count || 0),
             },
           };
         }),
@@ -388,56 +619,69 @@ export class ReportsService {
   }
 
   /**
-   * Get vehicle activity report
+   * Get vehicle activity report (trip-based, filtered by account)
    */
-  async getVehicleActivity(query: ReportQueryDto = {}) {
-    
+  async getVehicleActivity(query: ReportQueryDto = {}, accountId: number) {
     try {
-      const conditions = this.buildDateConditions(query);
-
-      // Get vehicles or specific vehicle
       let vehicles: any[] = [];
       if (query.vehicleId) {
         const vehicle = await this.db
           .select()
           .from(schema.vehicles)
-          .where(eq(schema.vehicles.id, query.vehicleId))
+          .where(
+            and(
+              eq(schema.vehicles.id, query.vehicleId),
+              eq(schema.vehicles.accountId, accountId),
+            ),
+          )
           .limit(1);
         vehicles = vehicle;
       } else {
-        vehicles = await this.db.select().from(schema.vehicles);
+        vehicles = await this.db
+          .select()
+          .from(schema.vehicles)
+          .where(eq(schema.vehicles.accountId, accountId));
       }
 
       const vehicleActivity = await Promise.all(
         vehicles.map(async (vehicle) => {
-          // Arrivals count
-          const arrivalsCount = await this.db
+          const totalTrips = await this.db
             .select({ count: count() })
-            .from(schema.arrivals)
+            .from(schema.trips)
             .where(
               and(
-                eq(schema.arrivals.vehicleId, vehicle.id),
-                ...conditions.arrivals.filter((c) => !c.toString().includes('vehicle_id')),
+                eq(schema.trips.accountId, accountId),
+                eq(schema.trips.vehicleId, vehicle.id),
               ),
             );
-
-          // Exits count
-          const exitsCount = await this.db
+          const completedCond: SQL[] = [
+            eq(schema.trips.accountId, accountId),
+            eq(schema.trips.vehicleId, vehicle.id),
+            eq(schema.trips.status, TripStatus.COMPLETED),
+          ];
+          if (query.startDate) completedCond.push(gte(schema.trips.endedAt, new Date(query.startDate)));
+          if (query.endDate) completedCond.push(lte(schema.trips.endedAt, new Date(query.endDate)));
+          const completedInPeriod = await this.db
             .select({ count: count() })
-            .from(schema.exits)
+            .from(schema.trips)
+            .where(and(...completedCond));
+          const ongoing = await this.db
+            .select({ count: count() })
+            .from(schema.trips)
             .where(
               and(
-                eq(schema.exits.vehicleId, vehicle.id),
-                ...conditions.exits.filter((c) => !c.toString().includes('vehicle_id')),
+                eq(schema.trips.accountId, accountId),
+                eq(schema.trips.vehicleId, vehicle.id),
+                eq(schema.trips.status, TripStatus.ONGOING),
               ),
             );
 
           return {
             vehicle,
             activity: {
-              arrivals: Number(arrivalsCount[0]?.count || 0),
-              exits: Number(exitsCount[0]?.count || 0),
-              totalMovements: Number(arrivalsCount[0]?.count || 0) + Number(exitsCount[0]?.count || 0),
+              totalTrips: Number(totalTrips[0]?.count || 0),
+              completedTripsInPeriod: Number(completedInPeriod[0]?.count || 0),
+              ongoingTrips: Number(ongoing[0]?.count || 0),
             },
           };
         }),
@@ -451,71 +695,63 @@ export class ReportsService {
   }
 
   /**
-   * Get agent activity report
+   * Get agent activity report (from trip_events, filtered by account)
    */
-  async getAgentActivity(query: ReportQueryDto = {}) {
-    
+  async getAgentActivity(query: ReportQueryDto = {}, accountId: number) {
     try {
-      const conditions = this.buildDateConditions(query);
+      const eventConditions: SQL[] = [eq(schema.tripEvents.accountId, accountId)];
+      if (query.startDate) {
+        eventConditions.push(gte(schema.tripEvents.timestamp, new Date(query.startDate)));
+      }
+      if (query.endDate) {
+        eventConditions.push(lte(schema.tripEvents.timestamp, new Date(query.endDate)));
+      }
+      if (query.agentId) {
+        eventConditions.push(eq(schema.tripEvents.agentId, query.agentId));
+      }
 
-      // Get unique agents from arrivals
-      const arrivalAgents = await this.db
+      const eventsByAgent = await this.db
         .select({
-          agentId: schema.arrivals.agentId,
+          agentId: schema.tripEvents.agentId,
           count: count(),
         })
-        .from(schema.arrivals)
-        .where(and(...conditions.arrivals))
-        .groupBy(schema.arrivals.agentId);
+        .from(schema.tripEvents)
+        .where(and(...eventConditions))
+        .groupBy(schema.tripEvents.agentId)
+        .orderBy(desc(count()));
 
-      // Get unique agents from exits
-      const exitAgents = await this.db
+      const eventsByType = await this.db
         .select({
-          agentId: schema.exits.agentId,
+          agentId: schema.tripEvents.agentId,
+          eventType: schema.tripEvents.eventType,
           count: count(),
         })
-        .from(schema.exits)
-        .where(and(...conditions.exits))
-        .groupBy(schema.exits.agentId);
+        .from(schema.tripEvents)
+        .where(and(...eventConditions))
+        .groupBy(schema.tripEvents.agentId, schema.tripEvents.eventType);
 
-      // Combine and aggregate
-      // Note: agentId is now integer (users.id equals subid)
-      const agentMap = new Map<number, { arrivals: number; exits: number }>();
-
-      arrivalAgents.forEach((item) => {
-        agentMap.set(item.agentId, {
-          arrivals: Number(item.count),
-          exits: 0,
-        });
-      });
-
-      exitAgents.forEach((item) => {
-        const existing = agentMap.get(item.agentId) || { arrivals: 0, exits: 0 };
-        agentMap.set(item.agentId, {
-          ...existing,
-          exits: Number(item.count),
-        });
-      });
-
-      // Get user details
-      // Note: agentId is now users.id (subid), not accid
-      const agentIds = Array.from(agentMap.keys());
+      const agentIds = eventsByAgent.map((r) => r.agentId);
       const users = agentIds.length > 0
         ? await this.db
             .select()
             .from(schema.users)
             .where(inArray(schema.users.id, agentIds))
         : [];
-
       const userMap = new Map(users.map((u) => [u.id, u]));
 
-      return Array.from(agentMap.entries()).map(([agentId, activity]) => ({
-        agentId,
-        user: userMap.get(agentId) || null,
+      const typeMap = new Map<number, Record<string, number>>();
+      eventsByType.forEach((r) => {
+        const existing = typeMap.get(r.agentId) || {};
+        existing[r.eventType] = Number(r.count);
+        typeMap.set(r.agentId, existing);
+      });
+
+      return eventsByAgent.map((row) => ({
+        agentId: row.agentId,
+        user: userMap.get(row.agentId) || null,
         activity: {
-          arrivals: activity.arrivals,
-          exits: activity.exits,
-          total: activity.arrivals + activity.exits,
+          totalEvents: Number(row.count),
+          byEventType: typeMap.get(row.agentId) || {},
         },
       }));
     } catch (error: any) {
@@ -525,15 +761,15 @@ export class ReportsService {
   }
 
   /**
-   * Build date conditions for queries
+   * Build date conditions for queries (arrivals/exits). Always include accountId.
    */
-  private buildDateConditions(query: ReportQueryDto) {
+  private buildDateConditions(query: ReportQueryDto, accountId: number) {
     const conditions: {
       arrivals: SQL[];
       exits: SQL[];
     } = {
-      arrivals: [],
-      exits: [],
+      arrivals: [eq(schema.arrivals.accountId, accountId)],
+      exits: [eq(schema.exits.accountId, accountId)],
     };
 
     if (query.startDate) {
@@ -559,7 +795,6 @@ export class ReportsService {
     }
 
     if (query.agentId) {
-      // agentId is now integer (users.id equals subid)
       conditions.arrivals.push(eq(schema.arrivals.agentId, Number(query.agentId)));
       conditions.exits.push(eq(schema.exits.agentId, Number(query.agentId)));
     }

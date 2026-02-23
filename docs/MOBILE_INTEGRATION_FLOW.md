@@ -2,6 +2,8 @@
 
 This document is the **primary guide for mobile app integration**. It describes how the app should work at each step, which APIs to call, and what to store.
 
+**Recommended:** Use the **trip-centric API** so everything is attached to the trip and the trip has an explicit **phase**. See **[TRIP_CENTRIC_API.md](./TRIP_CENTRIC_API.md)** for the full spec. In short: `GET /trips/:id` returns `phase`; use `POST /trips/:id/start-loading`, `POST /trips/:id/end-loading`, `POST /trips/:id/set-destination`, `POST /trips/:id/exit-origin`, `POST /trips/:id/arrive-destination`, `POST /trips/:id/start-unloading`, `POST /trips/:id/end-unloading`, and `POST /trips/:id/complete` for actions. No need to call vehicle queue/start or post raw events — the server updates phase and creates events for you.
+
 ---
 
 ## Table of Contents
