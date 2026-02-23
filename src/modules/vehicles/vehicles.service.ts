@@ -1608,6 +1608,7 @@ export class VehiclesService extends BaseService<Vehicle> {
         [VehicleStatus.WAITING_IN_QUEUE]: 0,
         [VehicleStatus.LOADING]: 0,
         [VehicleStatus.UNLOADING]: 0,
+        [VehicleStatus.IN_GARAGE]: 0,
       };
 
       // Fill in actual counts
