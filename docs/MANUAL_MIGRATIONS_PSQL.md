@@ -50,6 +50,7 @@ From the **psql** prompt, use `\i` to run a file. Paths are relative to the dire
 \i src/database/migrations/0015_use_subid_as_user_id.sql
 \i src/database/migrations/0016_create_trips_and_events.sql
 \i src/database/migrations/0017_add_queue_date_daily_reset.sql
+\i src/database/migrations/0018_add_trip_phase.sql
 ```
 
 **If you're inside the migrations folder** (e.g. `cd src/database/migrations` then `psql ...`):

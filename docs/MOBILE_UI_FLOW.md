@@ -1,6 +1,6 @@
 # Mobile UI flow — Screen-by-screen with suggestions
 
-This document maps the **trip flow** to concrete **mobile screens and UI suggestions**: what to show, what to tap, and how to transition. Use it with [MOBILE_INTEGRATION_FLOW.md](./MOBILE_INTEGRATION_FLOW.md) (APIs) and [ENDPOINT_TEST_FLOW_SCAN_TO_COMPLETION.md](./ENDPOINT_TEST_FLOW_SCAN_TO_COMPLETION.md) (testing).
+This document maps the **trip flow** to concrete **mobile screens and UI suggestions**: what to show, what to tap, and how to transition. Use it with **[TRIP_CENTRIC_API.md](./TRIP_CENTRIC_API.md)** (recommended trip-centric API with phase), [MOBILE_INTEGRATION_FLOW.md](./MOBILE_INTEGRATION_FLOW.md) (legacy API details), and [ENDPOINT_TEST_FLOW_SCAN_TO_COMPLETION.md](./ENDPOINT_TEST_FLOW_SCAN_TO_COMPLETION.md) (testing).
 
 ---
 
@@ -14,6 +14,26 @@ This document maps the **trip flow** to concrete **mobile screens and UI suggest
 6. [Trip complete & summary](#trip-complete--summary)
 7. [Error & edge-case UI](#error--edge-case-ui)
 8. [UI component checklist](#ui-component-checklist)
+
+---
+
+## Trip phase → UI (trip-centric API)
+
+If you use the **trip-centric API** ([TRIP_CENTRIC_API.md](./TRIP_CENTRIC_API.md)), drive your screens from `GET /trips/:id` and the `phase` field:
+
+| `trip.phase` | Screen / actions |
+|--------------|------------------|
+| `AT_ORIGIN_ARRIVED` | Vehicle card at origin: "Arrived at &lt;origin&gt;", **Start processing** |
+| `AT_ORIGIN_LOADING` | **End processing** (loading) |
+| `AT_ORIGIN_LOADING_ENDED` | **Set destination** (picker), then **Vehicle exited** |
+| `READY_TO_EXIT` | **Vehicle exited** |
+| `IN_TRANSIT` | "En route to &lt;destination&gt;"; at destination: **Record arrival** |
+| `AT_DESTINATION_ARRIVED` | Vehicle card at destination: "Arrived at &lt;destination&gt;", **Start processing** |
+| `AT_DESTINATION_UNLOADING` | **End processing** (unloading) |
+| `AT_DESTINATION_UNLOADING_ENDED` | **Complete trip** (PICKUP only) |
+| `COMPLETED` | Trip complete screen, **Done** |
+
+Actions: `POST /trips/:id/start-loading`, `end-loading`, `set-destination`, `exit-origin`, `arrive-destination`, `start-unloading`, `end-unloading`, `complete`.
 
 ---
 

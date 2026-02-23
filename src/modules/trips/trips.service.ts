@@ -7,7 +7,9 @@ import * as schema from '@modules/schemas';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { CreateTripEventDto } from './dto/create-trip-event.dto';
 import { FilterTripsDto } from './dto/filter-trips.dto';
+import { SetDestinationDto } from './dto/set-destination.dto';
 import { TripStatus } from '@common/enums/trip-status.enum';
+import { TripPhase } from '@common/enums/trip-phase.enum';
 import { TripEventType } from '@common/enums/trip-event-type.enum';
 import { TripPurpose } from '@common/enums/trip-purpose.enum';
 import { QueueType } from '@common/enums/queue-type.enum';
@@ -159,10 +161,11 @@ export class TripsService extends BaseService<Trip> {
       // Create trip - use center.id (which equals thirdPartyId) since trips.originCenterId references centers.id
       // vehicleId should already be the internal id (which equals thirdPartyId) since vehicles.id = vehicles.thirdPartyId
       const tripData: any = {
-        vehicleId: vehicle.id, // Use vehicle.id (which equals thirdPartyId) to match schema FK
-        originCenterId: originCenter.id, // Use center.id (which equals geozoneId) to match schema FK, not geozoneId
+        vehicleId: vehicle.id,
+        originCenterId: originCenter.id,
         purpose: data.purpose || 'DELIVERY',
         status: TripStatus.ONGOING,
+        phase: TripPhase.AT_ORIGIN_ARRIVED,
       };
 
       // Only include destinationCenterId if it's provided (not undefined)
@@ -391,10 +394,7 @@ export class TripsService extends BaseService<Trip> {
       }
     }
 
-    // Complete trip if ARRIVED_DESTINATION event and purpose is DELIVERY
-    if (data.eventType === TripEventType.ARRIVED_DESTINATION && tripData.purpose === 'DELIVERY') {
-      await this.completeTrip(tripId, accountId);
-    }
+    // Trip completion for DELIVERY happens on UNLOADING_ENDED (handled in endUnloading action)
 
     return event[0];
   }
@@ -461,28 +461,26 @@ export class TripsService extends BaseService<Trip> {
   }
 
   /**
-   * Complete a trip
+   * Complete a trip (e.g. PICKUP after end-unloading).
+   * Allowed when phase is AT_DESTINATION_UNLOADING_ENDED or already COMPLETED (no-op).
    */
   async completeTrip(tripId: number, accountId: number): Promise<Trip> {
-    const trip = await this.dbConnection
-      .select()
-      .from(schema.trips)
-      .where(
-        and(
-          eq(schema.trips.id, tripId),
-          eq(schema.trips.accountId, accountId)
-        )
-      )
-      .limit(1);
-
-    if (trip.length === 0) {
-      throw new NotFoundException(`Trip ${tripId} not found`);
+    const trip = await this.getTripOrThrow(tripId, accountId);
+    const phase = (trip as any).phase as TripPhase;
+    if (phase === TripPhase.COMPLETED) {
+      return trip;
+    }
+    if (phase !== TripPhase.AT_DESTINATION_UNLOADING_ENDED) {
+      throw new BadRequestException(
+        `Trip can only be completed when phase is AT_DESTINATION_UNLOADING_ENDED (e.g. after end-unloading for PICKUP). Current phase: ${phase}`
+      );
     }
 
     const updated = await this.dbConnection
       .update(schema.trips)
       .set({
         status: TripStatus.COMPLETED,
+        phase: TripPhase.COMPLETED,
         endedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -498,12 +496,211 @@ export class TripsService extends BaseService<Trip> {
       })
       .where(
         and(
-          eq(schema.vehicles.id, trip[0].vehicleId),
+          eq(schema.vehicles.id, trip.vehicleId),
           eq(schema.vehicles.accountId, accountId)
         )
       );
 
     return updated[0];
+  }
+
+  /**
+   * Get trip by ID or throw
+   */
+  private async getTripOrThrow(tripId: number, accountId: number): Promise<Trip> {
+    const [trip] = await this.dbConnection
+      .select()
+      .from(schema.trips)
+      .where(
+        and(
+          eq(schema.trips.id, tripId),
+          eq(schema.trips.accountId, accountId)
+        )
+      )
+      .limit(1);
+    if (!trip) {
+      throw new NotFoundException(`Trip ${tripId} not found`);
+    }
+    return trip as Trip;
+  }
+
+  /**
+   * Ensure trip is in one of the allowed phases; throw otherwise
+   */
+  private ensurePhase(trip: Trip, allowedPhases: TripPhase[]): void {
+    const current = (trip as any).phase as TripPhase;
+    if (!allowedPhases.includes(current)) {
+      throw new BadRequestException(
+        `Trip is in phase ${current}. Allowed for this action: ${allowedPhases.join(', ')}`
+      );
+    }
+  }
+
+  /**
+   * Update trip phase
+   */
+  private async updateTripPhase(tripId: number, phase: TripPhase): Promise<void> {
+    await this.dbConnection
+      .update(schema.trips)
+      .set({ phase, updatedAt: new Date() })
+      .where(eq(schema.trips.id, tripId));
+  }
+
+  /**
+   * Trip-centric action: Start loading at origin.
+   * Valid phase: AT_ORIGIN_ARRIVED. Updates phase to AT_ORIGIN_LOADING, starts queue service, creates SERVICE_STARTED event.
+   */
+  async startLoading(tripId: number, accountId: number, agentId: number): Promise<Trip> {
+    const trip = await this.getTripOrThrow(tripId, accountId);
+    this.ensurePhase(trip, [TripPhase.AT_ORIGIN_ARRIVED]);
+    await this.queuesService.startServiceByVehicleId(
+      trip.vehicleId,
+      { queueType: QueueType.LOADING },
+      accountId,
+      agentId
+    );
+    await this.updateTripPhase(tripId, TripPhase.AT_ORIGIN_LOADING);
+    return (await this.getTripOrThrow(tripId, accountId)) as Trip;
+  }
+
+  /**
+   * Trip-centric action: End loading at origin.
+   * Valid phase: AT_ORIGIN_LOADING. Creates LOADING_ENDED event, updates phase to AT_ORIGIN_LOADING_ENDED.
+   */
+  async endLoading(tripId: number, accountId: number, agentId: number): Promise<Trip> {
+    const trip = await this.getTripOrThrow(tripId, accountId);
+    this.ensurePhase(trip, [TripPhase.AT_ORIGIN_LOADING]);
+    await this.createTripEvent(
+      tripId,
+      {
+        eventType: TripEventType.LOADING_ENDED,
+        centerId: trip.originCenterId,
+        metadata: {},
+      },
+      accountId,
+      agentId
+    );
+    await this.updateTripPhase(tripId, TripPhase.AT_ORIGIN_LOADING_ENDED);
+    return (await this.getTripOrThrow(tripId, accountId)) as Trip;
+  }
+
+  /**
+   * Trip-centric action: Set destination and mark ready to exit.
+   * Valid phase: AT_ORIGIN_LOADING_ENDED. Creates READY_TO_EXIT event with destinationCenterId, updates trip.destinationCenterId and phase to READY_TO_EXIT.
+   */
+  async setDestination(
+    tripId: number,
+    dto: SetDestinationDto,
+    accountId: number,
+    agentId: number
+  ): Promise<Trip> {
+    const trip = await this.getTripOrThrow(tripId, accountId);
+    this.ensurePhase(trip, [TripPhase.AT_ORIGIN_LOADING_ENDED]);
+    await this.createTripEvent(
+      tripId,
+      {
+        eventType: TripEventType.READY_TO_EXIT,
+        centerId: trip.originCenterId,
+        metadata: { destinationCenterId: dto.destinationCenterId },
+      },
+      accountId,
+      agentId
+    );
+    await this.updateTripPhase(tripId, TripPhase.READY_TO_EXIT);
+    return (await this.getTripOrThrow(tripId, accountId)) as Trip;
+  }
+
+  /**
+   * Trip-centric action: Vehicle exited origin.
+   * Valid phase: READY_TO_EXIT. Creates EXITED event, updates phase to IN_TRANSIT.
+   */
+  async exitOrigin(tripId: number, accountId: number, agentId: number): Promise<Trip> {
+    const trip = await this.getTripOrThrow(tripId, accountId);
+    this.ensurePhase(trip, [TripPhase.READY_TO_EXIT]);
+    await this.createTripEvent(
+      tripId,
+      { eventType: TripEventType.EXITED, centerId: trip.originCenterId, metadata: {} },
+      accountId,
+      agentId
+    );
+    await this.updateTripPhase(tripId, TripPhase.IN_TRANSIT);
+    return (await this.getTripOrThrow(tripId, accountId)) as Trip;
+  }
+
+  /**
+   * Trip-centric action: Record arrival at destination.
+   * Valid phase: IN_TRANSIT. Creates ARRIVED_DESTINATION event, adds vehicle to UNLOADING queue, updates phase to AT_DESTINATION_ARRIVED.
+   */
+  async arriveDestination(tripId: number, accountId: number, agentId: number): Promise<Trip> {
+    const trip = await this.getTripOrThrow(tripId, accountId);
+    this.ensurePhase(trip, [TripPhase.IN_TRANSIT]);
+    if (!trip.destinationCenterId) {
+      throw new BadRequestException('Trip has no destination center set. Set destination before exiting origin.');
+    }
+    await this.createTripEvent(
+      tripId,
+      {
+        eventType: TripEventType.ARRIVED_DESTINATION,
+        centerId: trip.destinationCenterId,
+        metadata: {},
+      },
+      accountId,
+      agentId
+    );
+    await this.addVehicleToQueueAutomatically(
+      trip.destinationCenterId,
+      trip.vehicleId,
+      tripId,
+      QueueType.UNLOADING,
+      accountId,
+      agentId
+    ).catch((err) => {
+      this.logger.warn(`Queue add after arrival failed (trip ${tripId}): ${err?.message}`);
+    });
+    await this.updateTripPhase(tripId, TripPhase.AT_DESTINATION_ARRIVED);
+    return (await this.getTripOrThrow(tripId, accountId)) as Trip;
+  }
+
+  /**
+   * Trip-centric action: Start unloading at destination.
+   * Valid phase: AT_DESTINATION_ARRIVED. Starts queue service, updates phase to AT_DESTINATION_UNLOADING.
+   */
+  async startUnloading(tripId: number, accountId: number, agentId: number): Promise<Trip> {
+    const trip = await this.getTripOrThrow(tripId, accountId);
+    this.ensurePhase(trip, [TripPhase.AT_DESTINATION_ARRIVED]);
+    await this.queuesService.startServiceByVehicleId(
+      trip.vehicleId,
+      { queueType: QueueType.UNLOADING },
+      accountId,
+      agentId
+    );
+    await this.updateTripPhase(tripId, TripPhase.AT_DESTINATION_UNLOADING);
+    return (await this.getTripOrThrow(tripId, accountId)) as Trip;
+  }
+
+  /**
+   * Trip-centric action: End unloading at destination.
+   * Valid phase: AT_DESTINATION_UNLOADING. Creates UNLOADING_ENDED event. DELIVERY: auto-completes trip. PICKUP: phase -> AT_DESTINATION_UNLOADING_ENDED.
+   */
+  async endUnloading(tripId: number, accountId: number, agentId: number): Promise<Trip> {
+    const trip = await this.getTripOrThrow(tripId, accountId);
+    this.ensurePhase(trip, [TripPhase.AT_DESTINATION_UNLOADING]);
+    await this.createTripEvent(
+      tripId,
+      {
+        eventType: TripEventType.UNLOADING_ENDED,
+        centerId: trip.destinationCenterId!,
+        metadata: {},
+      },
+      accountId,
+      agentId
+    );
+    if (trip.purpose === TripPurpose.DELIVERY) {
+      await this.completeTrip(tripId, accountId);
+      return (await this.getTripOrThrow(tripId, accountId)) as Trip;
+    }
+    await this.updateTripPhase(tripId, TripPhase.AT_DESTINATION_UNLOADING_ENDED);
+    return (await this.getTripOrThrow(tripId, accountId)) as Trip;
   }
 
   /**

@@ -18,6 +18,7 @@ import { TripsService } from './trips.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { CreateTripEventDto } from './dto/create-trip-event.dto';
 import { FilterTripsDto } from './dto/filter-trips.dto';
+import { SetDestinationDto } from './dto/set-destination.dto';
 
 @ApiTags('Trips')
 @Controller('trips')
@@ -71,6 +72,92 @@ export class TripsController {
       throw new NotFoundException('Trip not found');
     }
     return trip;
+  }
+
+  // ---- Trip-centric actions (update phase + create events). Use these from mobile. ----
+  @Post(':id/start-loading')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Start loading at origin' })
+  @ApiResponse({ status: 200, description: 'Trip updated; phase AT_ORIGIN_LOADING' })
+  @ApiResponse({ status: 400, description: 'Trip not in AT_ORIGIN_ARRIVED phase' })
+  async startLoading(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserCredentials() credentials: any,
+  ) {
+    return this.tripsService.startLoading(id, credentials.accid, credentials.subid);
+  }
+
+  @Post(':id/end-loading')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'End loading at origin' })
+  @ApiResponse({ status: 200, description: 'Trip updated; phase AT_ORIGIN_LOADING_ENDED' })
+  @ApiResponse({ status: 400, description: 'Trip not in AT_ORIGIN_LOADING phase' })
+  async endLoading(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserCredentials() credentials: any,
+  ) {
+    return this.tripsService.endLoading(id, credentials.accid, credentials.subid);
+  }
+
+  @Post(':id/set-destination')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Set destination center and mark ready to exit' })
+  @ApiResponse({ status: 200, description: 'Trip updated; phase READY_TO_EXIT' })
+  @ApiResponse({ status: 400, description: 'Trip not in AT_ORIGIN_LOADING_ENDED phase' })
+  async setDestination(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetDestinationDto,
+    @CurrentUserCredentials() credentials: any,
+  ) {
+    return this.tripsService.setDestination(id, dto, credentials.accid, credentials.subid);
+  }
+
+  @Post(':id/exit-origin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Record vehicle exited origin' })
+  @ApiResponse({ status: 200, description: 'Trip updated; phase IN_TRANSIT' })
+  @ApiResponse({ status: 400, description: 'Trip not in READY_TO_EXIT phase' })
+  async exitOrigin(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserCredentials() credentials: any,
+  ) {
+    return this.tripsService.exitOrigin(id, credentials.accid, credentials.subid);
+  }
+
+  @Post(':id/arrive-destination')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Record arrival at destination' })
+  @ApiResponse({ status: 200, description: 'Trip updated; phase AT_DESTINATION_ARRIVED' })
+  @ApiResponse({ status: 400, description: 'Trip not in IN_TRANSIT or no destination set' })
+  async arriveDestination(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserCredentials() credentials: any,
+  ) {
+    return this.tripsService.arriveDestination(id, credentials.accid, credentials.subid);
+  }
+
+  @Post(':id/start-unloading')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Start unloading at destination' })
+  @ApiResponse({ status: 200, description: 'Trip updated; phase AT_DESTINATION_UNLOADING' })
+  @ApiResponse({ status: 400, description: 'Trip not in AT_DESTINATION_ARRIVED phase' })
+  async startUnloading(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserCredentials() credentials: any,
+  ) {
+    return this.tripsService.startUnloading(id, credentials.accid, credentials.subid);
+  }
+
+  @Post(':id/end-unloading')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'End unloading at destination' })
+  @ApiResponse({ status: 200, description: 'Trip updated; DELIVERY auto-completes, PICKUP -> AT_DESTINATION_UNLOADING_ENDED' })
+  @ApiResponse({ status: 400, description: 'Trip not in AT_DESTINATION_UNLOADING phase' })
+  async endUnloading(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserCredentials() credentials: any,
+  ) {
+    return this.tripsService.endUnloading(id, credentials.accid, credentials.subid);
   }
 
   @Post(':id/events')
