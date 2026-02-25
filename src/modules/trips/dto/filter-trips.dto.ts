@@ -3,6 +3,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { TripStatus } from '@common/enums/trip-status.enum';
 import { TripPurpose } from '@common/enums/trip-purpose.enum';
+import { TripPhase } from '@common/enums/trip-phase.enum';
 
 export class FilterTripsDto {
   @ApiPropertyOptional({ description: 'Page number', example: 1, default: 1 })
@@ -11,7 +12,7 @@ export class FilterTripsDto {
   @IsNumber()
   page?: number;
 
-  @ApiPropertyOptional({ description: 'Items per page', example: 10, default: 10 })
+  @ApiPropertyOptional({ description: 'Items per page', example: 20, default: 20 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -35,6 +36,15 @@ export class FilterTripsDto {
   @IsNumber()
   destinationCenterId?: number;
 
+  @ApiPropertyOptional({
+    description: 'Filter by center ID (OR: trips where this center is origin OR destination)',
+    example: 4115,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  centerId?: number;
+
   @ApiPropertyOptional({ description: 'Filter by trip status', enum: TripStatus })
   @IsOptional()
   @IsEnum(TripStatus)
@@ -44,6 +54,11 @@ export class FilterTripsDto {
   @IsOptional()
   @IsEnum(TripPurpose)
   purpose?: TripPurpose;
+
+  @ApiPropertyOptional({ description: 'Filter by trip phase (lifecycle state)', enum: TripPhase })
+  @IsOptional()
+  @IsEnum(TripPhase)
+  phase?: TripPhase;
 
   @ApiPropertyOptional({ description: 'Search term (searches in vehicle plate, center names)' })
   @IsOptional()
@@ -59,6 +74,14 @@ export class FilterTripsDto {
   @IsOptional()
   @IsString()
   sortOrder?: 'asc' | 'desc';
+
+  @ApiPropertyOptional({
+    description: 'Filter by trip creation date (YYYY-MM-DD). Defaults to today when not provided.',
+    example: '2025-02-25',
+  })
+  @IsOptional()
+  @IsString()
+  createdAt?: string;
 
   @ApiPropertyOptional({ description: 'Include related entities (comma-separated: vehicle,originCenter,destinationCenter,events)' })
   @IsOptional()

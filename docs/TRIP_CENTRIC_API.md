@@ -30,6 +30,105 @@ Every trip has a `phase` field. Use it to decide what to show and which buttons 
 
 ---
 
+## PICKUP vs DELIVERY — What they mean and example scenarios
+
+**Purpose** is set when you create the trip (`POST /trips` with `"purpose": "DELIVERY"` or `"PICKUP"`). It describes **why** the vehicle is moving from origin to destination. The flow (loading at origin → transit → unloading at destination) is the same; the difference is **how the trip is closed** after unloading.
+
+### DELIVERY
+
+**Meaning:** The vehicle is **delivering goods** to the destination. Once unloading at destination is finished, the job is done — no extra step.
+
+| Step | What happens |
+|------|-------------------------------|
+| Origin | Vehicle **loads** (goods put on at origin). |
+| Destination | Vehicle **unloads** (goods taken off at destination). |
+| After **End unloading** | Trip is **completed automatically**. Phase goes to `COMPLETED`. No extra API call. |
+
+**Example scenario:**  
+*Warehouse A (origin) sends a truck with timber to Site B (destination). At A the truck is loaded; at B it is unloaded. When the agent taps “End processing” (unloading) at B, the trip is done.*
+
+- Create trip: `purpose: "DELIVERY"`, origin = Warehouse A, later set destination = Site B.  
+- At destination: **End unloading** → API completes the trip → show “Trip completed”, **Done**.
+
+---
+
+### PICKUP
+
+**Meaning:** The vehicle is **picking up goods** at the destination (e.g. empty truck goes to a site, loads there, and will be used for something else later). After unloading is “ended” in the system, you may still need to confirm paperwork or release the vehicle — so the trip is **not** auto-completed; the app must call **Complete trip** when ready.
+
+| Step | What happens |
+|------|-------------------------------|
+| Origin | Vehicle may load or just “check in” at origin (still uses **loading** queue at origin). |
+| Destination | Vehicle **unloads** (or is “processed”) at destination. |
+| After **End unloading** | Phase becomes `AT_DESTINATION_UNLOADING_ENDED`. You **must** call **Complete trip** to set phase to `COMPLETED`. |
+
+**Example scenario:**  
+*Empty truck leaves Depot (origin), arrives at Customer C (destination) to pick up a return load. At C the agent processes the vehicle (unloading in the system). When done, the agent taps “End processing”, then later taps “Complete trip” after confirming the pickup.*
+
+- Create trip: `purpose: "PICKUP"`, origin = Depot, destination = Customer C.  
+- At destination: **End unloading** → phase `AT_DESTINATION_UNLOADING_ENDED` → show **Complete trip** → user taps it → **Complete trip** → phase `COMPLETED` → “Trip completed”, **Done**.
+
+---
+
+### Summary
+
+| | DELIVERY | PICKUP |
+|---|----------|--------|
+| **Typical use** | Deliver goods from A to B; trip done when unloaded at B. | Go to B to pick up (or process); trip done when you confirm completion. |
+| **After “End unloading”** | Trip **auto-completes** (`COMPLETED`). | Trip stays **AT_DESTINATION_UNLOADING_ENDED** until you call **Complete trip**. |
+| **Extra step?** | No. | Yes: `POST /trips/:id/complete` after end-unloading. |
+
+---
+
+### Real-world scenario (same company, two trip types)
+
+**Company:** A timber/logistics operator with a **sawmill** (origin depot), **storage yards**, and **customer sites**. Vehicles move between centers; agents scan vehicles and record loading/unloading.
+
+---
+
+**DELIVERY — “We’re bringing timber to the site”**
+
+1. **Morning at Sawmill (origin)**  
+   Truck **T-101** arrives at the sawmill to load timber for a construction site. Agent scans the truck → creates trip: origin = Sawmill, purpose = **DELIVERY**.  
+2. **Loading**  
+   Truck is loaded (Start processing → End processing). Agent sets destination = **Site North**, then records “Vehicle exited”.  
+3. **On the road**  
+   Trip is IN_TRANSIT. No API calls.  
+4. **Afternoon at Site North (destination)**  
+   Truck arrives. Agent scans T-101 again → “Record arrival” → truck is in UNLOADING queue. Agent taps “Start processing” (unloading), crew unloads timber, then “End processing”.  
+5. **Done**  
+   System **completes the trip automatically**. The delivery is finished: goods were taken from Sawmill to Site North and unloaded. No further action.
+
+**Why DELIVERY:** The business outcome is “goods delivered and unloaded.” Once unloading is done, the trip is closed.
+
+---
+
+**PICKUP — “We’re sending the truck to collect something”**
+
+1. **Morning at Sawmill (origin)**  
+   Empty truck **T-102** is prepared for a pickup run. Agent scans T-102 → creates trip: origin = Sawmill, purpose = **PICKUP**.  
+2. **At origin**  
+   Maybe a quick “loading” (e.g. equipment) or just check-in. Agent sets destination = **Storage Yard East**, then “Vehicle exited”.  
+3. **On the road**  
+   Trip is IN_TRANSIT.  
+4. **At Storage Yard East (destination)**  
+   Truck arrives to pick up pallets. Agent scans T-102 → “Record arrival” → “Start processing” (unloading in the system = processing the vehicle at this center). Crew loads the truck. Agent taps “End processing”.  
+5. **Not done yet**  
+   Phase becomes **AT_DESTINATION_UNLOADING_ENDED**. The yard may still need to close paperwork, hand over documents, or confirm the pickup. When the agent is ready, they tap **“Complete trip”**.  
+6. **Done**  
+   Trip goes to **COMPLETED**. The pickup run is officially closed.
+
+**Why PICKUP:** The business outcome is “we went to the yard and picked up goods.” Ending “unloading” (processing) doesn’t automatically close the trip; an explicit **Complete trip** reflects that someone confirmed the pickup is fully done (docs, count, etc.).
+
+---
+
+**In short**
+
+- **DELIVERY:** Origin → load → destination → unload → **trip auto-completes**.  
+- **PICKUP:** Origin → (load/check-in) → destination → process/“unload” → **agent taps Complete trip** when everything is confirmed.
+
+---
+
 ## Endpoints
 
 ### Get trip (drive UI from this)

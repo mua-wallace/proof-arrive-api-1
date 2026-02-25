@@ -2,7 +2,7 @@ import { Injectable, Inject, NotFoundException, Logger, BadRequestException, for
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { PaginateQuery, PaginateResult, BaseEntity } from '@common/interfaces';
 import { BaseService } from '@common/services/base.service';
-import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
+import { eq, and, or, SQL, desc, asc, count, sql, inArray, gte, lt } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { CreateTripEventDto } from './dto/create-trip-event.dto';
@@ -788,7 +788,7 @@ export class TripsService extends BaseService<Trip> {
   ): Promise<PaginateResult<Trip>> {
     const filterDto = options?.filterDto || {};
     const page = query.page || filterDto.page || 1;
-    const limit = query.limit || filterDto.limit || 10;
+    const limit = query.limit || filterDto.limit || 20;
     const offset = (page - 1) * limit;
 
     const conditions: SQL[] = [];
@@ -807,12 +807,32 @@ export class TripsService extends BaseService<Trip> {
     if (filterDto.destinationCenterId) {
       conditions.push(eq(schema.trips.destinationCenterId, Number(filterDto.destinationCenterId)));
     }
+    if (filterDto.centerId) {
+      const cid = Number(filterDto.centerId);
+      conditions.push(
+        or(
+          eq(schema.trips.originCenterId, cid),
+          eq(schema.trips.destinationCenterId, cid),
+        ) as SQL,
+      );
+    }
     if (filterDto.status) {
       conditions.push(eq(schema.trips.status, filterDto.status));
     }
     if (filterDto.purpose) {
       conditions.push(eq(schema.trips.purpose, filterDto.purpose));
     }
+    if (filterDto.phase) {
+      conditions.push(eq(schema.trips.phase, filterDto.phase));
+    }
+    // createdAt filter: default to today when not provided
+    const createdAtDate = filterDto.createdAt ? new Date(filterDto.createdAt) : new Date();
+    const startOfDay = new Date(createdAtDate);
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const endOfDay = new Date(startOfDay);
+    endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
+    conditions.push(gte(schema.trips.createdAt, startOfDay));
+    conditions.push(lt(schema.trips.createdAt, endOfDay));
 
     // Search functionality
     const searchTerm = query.search || filterDto.search;
@@ -886,6 +906,14 @@ export class TripsService extends BaseService<Trip> {
             .where(eq(schema.centers.id, trip.destinationCenterId))
             .limit(1);
           (trip as any).destinationCenter = center[0] || null;
+        }
+        if (options.include.includes('events')) {
+          const events = await this.dbConnection
+            .select()
+            .from(schema.tripEvents)
+            .where(eq(schema.tripEvents.tripId, trip.id))
+            .orderBy(asc(schema.tripEvents.timestamp));
+          (trip as any).events = events;
         }
       }
     }
