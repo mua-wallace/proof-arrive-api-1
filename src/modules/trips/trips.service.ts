@@ -462,7 +462,8 @@ export class TripsService extends BaseService<Trip> {
 
   /**
    * Complete a trip (e.g. PICKUP after end-unloading).
-   * Allowed when phase is AT_DESTINATION_UNLOADING_ENDED or already COMPLETED (no-op).
+   * Allowed only when phase is AT_DESTINATION_UNLOADING_ENDED or already COMPLETED (no-op).
+   * Call POST /trips/:id/end-unloading first when phase is AT_DESTINATION_UNLOADING.
    */
   async completeTrip(tripId: number, accountId: number): Promise<Trip> {
     const trip = await this.getTripOrThrow(tripId, accountId);
@@ -472,7 +473,7 @@ export class TripsService extends BaseService<Trip> {
     }
     if (phase !== TripPhase.AT_DESTINATION_UNLOADING_ENDED) {
       throw new BadRequestException(
-        `Trip can only be completed when phase is AT_DESTINATION_UNLOADING_ENDED (e.g. after end-unloading for PICKUP). Current phase: ${phase}`
+        `Trip can only be completed when phase is AT_DESTINATION_UNLOADING_ENDED (call POST /trips/:id/end-unloading first). Current phase: ${phase}`
       );
     }
 
@@ -683,23 +684,30 @@ export class TripsService extends BaseService<Trip> {
    * Valid phase: AT_DESTINATION_UNLOADING. Creates UNLOADING_ENDED event. DELIVERY: auto-completes trip. PICKUP: phase -> AT_DESTINATION_UNLOADING_ENDED.
    */
   async endUnloading(tripId: number, accountId: number, agentId: number): Promise<Trip> {
+    if (agentId == null || Number(agentId) <= 0) {
+      throw new BadRequestException('Agent ID is required for end-unloading (record who ended unloading).');
+    }
     const trip = await this.getTripOrThrow(tripId, accountId);
     this.ensurePhase(trip, [TripPhase.AT_DESTINATION_UNLOADING]);
+    if (!trip.destinationCenterId) {
+      throw new BadRequestException('Trip has no destination center set; cannot record UNLOADING_ENDED.');
+    }
     await this.createTripEvent(
       tripId,
       {
         eventType: TripEventType.UNLOADING_ENDED,
-        centerId: trip.destinationCenterId!,
+        centerId: trip.destinationCenterId,
         metadata: {},
       },
       accountId,
       agentId
     );
+    // Update phase first so completeTrip (for DELIVERY) sees AT_DESTINATION_UNLOADING_ENDED
+    await this.updateTripPhase(tripId, TripPhase.AT_DESTINATION_UNLOADING_ENDED);
     if (trip.purpose === TripPurpose.DELIVERY) {
       await this.completeTrip(tripId, accountId);
       return (await this.getTripOrThrow(tripId, accountId)) as Trip;
     }
-    await this.updateTripPhase(tripId, TripPhase.AT_DESTINATION_UNLOADING_ENDED);
     return (await this.getTripOrThrow(tripId, accountId)) as Trip;
   }
 

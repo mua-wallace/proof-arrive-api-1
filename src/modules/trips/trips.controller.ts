@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@modules/auth/guards/jwt-auth.guard';
@@ -152,12 +153,17 @@ export class TripsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'End unloading at destination' })
   @ApiResponse({ status: 200, description: 'Trip updated; DELIVERY auto-completes, PICKUP -> AT_DESTINATION_UNLOADING_ENDED' })
-  @ApiResponse({ status: 400, description: 'Trip not in AT_DESTINATION_UNLOADING phase' })
+  @ApiResponse({ status: 400, description: 'Trip not in AT_DESTINATION_UNLOADING phase or missing destination' })
   async endUnloading(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUserCredentials() credentials: any,
   ) {
-    return this.tripsService.endUnloading(id, credentials.accid, credentials.subid);
+    const accountId = Number(credentials?.accid);
+    const agentId = Number(credentials?.subid);
+    if (!accountId || isNaN(accountId) || !agentId || isNaN(agentId)) {
+      throw new BadRequestException('Authentication context (account and agent) is required for end-unloading');
+    }
+    return this.tripsService.endUnloading(id, accountId, agentId);
   }
 
   @Post(':id/events')
@@ -180,8 +186,12 @@ export class TripsController {
 
   @Post(':id/complete')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Complete a trip' })
+  @ApiOperation({
+    summary: 'Complete a trip',
+    description: 'Allowed only when phase is AT_DESTINATION_UNLOADING_ENDED. Call POST /trips/:id/end-unloading first when in AT_DESTINATION_UNLOADING.',
+  })
   @ApiResponse({ status: 200, description: 'Trip completed successfully' })
+  @ApiResponse({ status: 400, description: 'Wrong phase (must be AT_DESTINATION_UNLOADING_ENDED)' })
   @ApiResponse({ status: 404, description: 'Trip not found' })
   async completeTrip(
     @Param('id', ParseIntPipe) id: number,
