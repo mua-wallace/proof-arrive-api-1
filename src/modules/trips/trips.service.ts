@@ -813,6 +813,9 @@ export class TripsService extends BaseService<Trip> {
     if (filterDto.purpose) {
       conditions.push(eq(schema.trips.purpose, filterDto.purpose));
     }
+    if (filterDto.phase) {
+      conditions.push(eq(schema.trips.phase, filterDto.phase));
+    }
 
     // Search functionality
     const searchTerm = query.search || filterDto.search;
@@ -886,6 +889,14 @@ export class TripsService extends BaseService<Trip> {
             .where(eq(schema.centers.id, trip.destinationCenterId))
             .limit(1);
           (trip as any).destinationCenter = center[0] || null;
+        }
+        if (options.include.includes('events')) {
+          const events = await this.dbConnection
+            .select()
+            .from(schema.tripEvents)
+            .where(eq(schema.tripEvents.tripId, trip.id))
+            .orderBy(asc(schema.tripEvents.timestamp));
+          (trip as any).events = events;
         }
       }
     }

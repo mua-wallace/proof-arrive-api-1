@@ -3,6 +3,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { TripStatus } from '@common/enums/trip-status.enum';
 import { TripPurpose } from '@common/enums/trip-purpose.enum';
+import { TripPhase } from '@common/enums/trip-phase.enum';
 
 export class FilterTripsDto {
   @ApiPropertyOptional({ description: 'Page number', example: 1, default: 1 })
@@ -44,6 +45,11 @@ export class FilterTripsDto {
   @IsOptional()
   @IsEnum(TripPurpose)
   purpose?: TripPurpose;
+
+  @ApiPropertyOptional({ description: 'Filter by trip phase (lifecycle state)', enum: TripPhase })
+  @IsOptional()
+  @IsEnum(TripPhase)
+  phase?: TripPhase;
 
   @ApiPropertyOptional({ description: 'Search term (searches in vehicle plate, center names)' })
   @IsOptional()
