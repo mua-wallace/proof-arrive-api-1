@@ -12,7 +12,7 @@ export class FilterTripsDto {
   @IsNumber()
   page?: number;
 
-  @ApiPropertyOptional({ description: 'Items per page', example: 10, default: 10 })
+  @ApiPropertyOptional({ description: 'Items per page', example: 20, default: 20 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -35,6 +35,15 @@ export class FilterTripsDto {
   @Type(() => Number)
   @IsNumber()
   destinationCenterId?: number;
+
+  @ApiPropertyOptional({
+    description: 'Filter by center ID (OR: trips where this center is origin OR destination)',
+    example: 4115,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  centerId?: number;
 
   @ApiPropertyOptional({ description: 'Filter by trip status', enum: TripStatus })
   @IsOptional()
@@ -65,6 +74,14 @@ export class FilterTripsDto {
   @IsOptional()
   @IsString()
   sortOrder?: 'asc' | 'desc';
+
+  @ApiPropertyOptional({
+    description: 'Filter by trip creation date (YYYY-MM-DD). Defaults to today when not provided.',
+    example: '2025-02-25',
+  })
+  @IsOptional()
+  @IsString()
+  createdAt?: string;
 
   @ApiPropertyOptional({ description: 'Include related entities (comma-separated: vehicle,originCenter,destinationCenter,events)' })
   @IsOptional()
