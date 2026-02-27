@@ -760,6 +760,368 @@ export class ReportsService {
     }
   }
 
+  // ========== Trips stats (dashboard) ==========
+
+  /**
+   * Trip stats summary: counts by status, purpose, phase; ongoing/completed in period.
+   * Optional: startDate, endDate, centerId, vehicleId.
+   */
+  async getTripsStatsSummary(query: ReportQueryDto = {}, accountId: number) {
+    try {
+      const tripConditions = this.buildTripDateConditions(query, accountId);
+
+      const [ongoing, completedInPeriod, totalStartedInPeriod, byStatus, byPurpose, ongoingByPhase] = await Promise.all([
+        this.db.select({ count: count() }).from(schema.trips).where(and(eq(schema.trips.accountId, accountId), eq(schema.trips.status, TripStatus.ONGOING))),
+        this.db.select({ count: count() }).from(schema.trips).where(and(...tripConditions.completed)),
+        this.db.select({ count: count() }).from(schema.trips).where(and(...tripConditions.started)),
+        this.db.select({ status: schema.trips.status, count: count() }).from(schema.trips).where(and(...tripConditions.started)).groupBy(schema.trips.status),
+        this.db.select({ purpose: schema.trips.purpose, count: count() }).from(schema.trips).where(and(...tripConditions.started)).groupBy(schema.trips.purpose),
+        this.db.select({ phase: schema.trips.phase, count: count() }).from(schema.trips).where(and(eq(schema.trips.accountId, accountId), eq(schema.trips.status, TripStatus.ONGOING))).groupBy(schema.trips.phase),
+      ]);
+
+      const startedCount = Number(totalStartedInPeriod[0]?.count || 0);
+      const completedCount = Number(completedInPeriod[0]?.count || 0);
+
+      return {
+        ongoing: Number(ongoing[0]?.count || 0),
+        completedInPeriod: completedCount,
+        totalStartedInPeriod: startedCount,
+        completionRatePercent: startedCount > 0 ? Number(((completedCount / startedCount) * 100).toFixed(2)) : null,
+        byStatus: byStatus.map((r) => ({ status: r.status, count: Number(r.count) })),
+        byPurpose: byPurpose.map((r) => ({ purpose: r.purpose, count: Number(r.count) })),
+        ongoingByPhase: ongoingByPhase.map((r) => ({ phase: r.phase, count: Number(r.count) })),
+      };
+    } catch (error: any) {
+      this.logger.error(`Error generating trips stats summary: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to generate trips stats summary');
+    }
+  }
+
+  /**
+   * Trip counts over time (grouped by day/week/month). For charts.
+   */
+  async getTripsStatsByDate(query: ReportQueryDto = {}, accountId: number) {
+    try {
+      const baseStarted: SQL[] = [eq(schema.trips.accountId, accountId)];
+      const baseCompleted: SQL[] = [eq(schema.trips.accountId, accountId), eq(schema.trips.status, TripStatus.COMPLETED)];
+      if (query.startDate) {
+        baseStarted.push(gte(schema.trips.startedAt, new Date(query.startDate)));
+        baseCompleted.push(gte(schema.trips.endedAt, new Date(query.startDate)));
+      }
+      if (query.endDate) {
+        baseStarted.push(lte(schema.trips.startedAt, new Date(query.endDate)));
+        baseCompleted.push(lte(schema.trips.endedAt, new Date(query.endDate)));
+      }
+      if (query.centerId) {
+        baseStarted.push(sql`(${schema.trips.originCenterId} = ${query.centerId} OR ${schema.trips.destinationCenterId} = ${query.centerId})`);
+        baseCompleted.push(sql`(${schema.trips.originCenterId} = ${query.centerId} OR ${schema.trips.destinationCenterId} = ${query.centerId})`);
+      }
+      if (query.vehicleId) {
+        baseStarted.push(eq(schema.trips.vehicleId, query.vehicleId));
+        baseCompleted.push(eq(schema.trips.vehicleId, query.vehicleId));
+      }
+
+      const groupBy = this.getDateGrouping(query.groupBy || 'day');
+
+      const startedByDate = await this.db
+        .select({
+          date: sql<string>`DATE_TRUNC(${sql.raw(`'${groupBy}'`)}, ${schema.trips.startedAt})`,
+          count: count(),
+        })
+        .from(schema.trips)
+        .where(and(...baseStarted))
+        .groupBy(sql`DATE_TRUNC(${sql.raw(`'${groupBy}'`)}, ${schema.trips.startedAt})`)
+        .orderBy(asc(sql`DATE_TRUNC(${sql.raw(`'${groupBy}'`)}, ${schema.trips.startedAt})`));
+
+      const completedByDate = await this.db
+        .select({
+          date: sql<string>`DATE_TRUNC(${sql.raw(`'${groupBy}'`)}, ${schema.trips.endedAt})`,
+          count: count(),
+        })
+        .from(schema.trips)
+        .where(and(...baseCompleted))
+        .groupBy(sql`DATE_TRUNC(${sql.raw(`'${groupBy}'`)}, ${schema.trips.endedAt})`)
+        .orderBy(asc(sql`DATE_TRUNC(${sql.raw(`'${groupBy}'`)}, ${schema.trips.endedAt})`));
+
+      const dateMap = new Map<string, { started: number; completed: number }>();
+      startedByDate.forEach((r) => dateMap.set(String(r.date), { started: Number(r.count), completed: 0 }));
+      completedByDate.forEach((r) => {
+        const cur = dateMap.get(String(r.date)) || { started: 0, completed: 0 };
+        dateMap.set(String(r.date), { ...cur, completed: Number(r.count) });
+      });
+      const byDate = Array.from(dateMap.entries()).map(([date, v]) => ({ date, ...v })).sort((a, b) => (a.date < b.date ? -1 : 1));
+
+      return { byDate };
+    } catch (error: any) {
+      this.logger.error(`Error generating trips stats by date: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to generate trips stats by date');
+    }
+  }
+
+  /**
+   * Trips by center: as origin, as destination, completed at destination. Optional date range.
+   */
+  async getTripsStatsByCenter(query: ReportQueryDto = {}, accountId: number) {
+    try {
+      const tripConditions = this.buildTripDateConditions(query, accountId);
+
+      const centers = query.centerId
+        ? await this.db.select().from(schema.centers).where(and(eq(schema.centers.id, query.centerId), eq(schema.centers.accountId, accountId)))
+        : await this.db.select().from(schema.centers).where(eq(schema.centers.accountId, accountId));
+
+      const byCenter = await Promise.all(
+        centers.map(async (center) => {
+          const [asOrigin, asDestination, completedAtDestination] = await Promise.all([
+            this.db.select({ count: count() }).from(schema.trips).where(and(...tripConditions.started, eq(schema.trips.originCenterId, center.id))),
+            this.db.select({ count: count() }).from(schema.trips).where(and(...tripConditions.started, eq(schema.trips.destinationCenterId, center.id))),
+            this.db.select({ count: count() }).from(schema.trips).where(and(...tripConditions.completed, eq(schema.trips.destinationCenterId, center.id))),
+          ]);
+          return {
+            centerId: center.id,
+            center: { id: center.id, name: center.name, fullname: center.fullname },
+            asOrigin: Number(asOrigin[0]?.count || 0),
+            asDestination: Number(asDestination[0]?.count || 0),
+            completedAtDestination: Number(completedAtDestination[0]?.count || 0),
+          };
+        }),
+      );
+
+      return { byCenter };
+    } catch (error: any) {
+      this.logger.error(`Error generating trips stats by center: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to generate trips stats by center');
+    }
+  }
+
+  /**
+   * Origin–destination matrix: trip counts by (originCenterId, destinationCenterId). For route volume charts.
+   */
+  async getTripsStatsByOriginDestination(query: ReportQueryDto = {}, accountId: number) {
+    try {
+      const tripConditions = this.buildTripDateConditions(query, accountId);
+
+      const rows = await this.db
+        .select({
+          originCenterId: schema.trips.originCenterId,
+          destinationCenterId: schema.trips.destinationCenterId,
+          count: count(),
+        })
+        .from(schema.trips)
+        .where(and(...tripConditions.started))
+        .groupBy(schema.trips.originCenterId, schema.trips.destinationCenterId)
+        .orderBy(desc(count()));
+
+      const centerIds = [...new Set(rows.flatMap((r) => [r.originCenterId, r.destinationCenterId]).filter(Boolean))] as number[];
+      const centers = centerIds.length > 0
+        ? await this.db.select().from(schema.centers).where(inArray(schema.centers.id, centerIds))
+        : [];
+      const centerMap = new Map(centers.map((c) => [c.id, c]));
+
+      return {
+        rows: rows.map((r) => ({
+          originCenterId: r.originCenterId,
+          destinationCenterId: r.destinationCenterId,
+          originCenter: centerMap.get(r.originCenterId) || null,
+          destinationCenter: r.destinationCenterId != null ? (centerMap.get(r.destinationCenterId) || null) : null,
+          count: Number(r.count),
+        })),
+      };
+    } catch (error: any) {
+      this.logger.error(`Error generating trips stats by origin-destination: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to generate trips stats by origin-destination');
+    }
+  }
+
+  /**
+   * Completion rate in period: completed / started (percentage) and raw counts.
+   */
+  async getTripsCompletionRate(query: ReportQueryDto = {}, accountId: number) {
+    try {
+      const tripConditions = this.buildTripDateConditions(query, accountId);
+      const [started, completed] = await Promise.all([
+        this.db.select({ count: count() }).from(schema.trips).where(and(...tripConditions.started)),
+        this.db.select({ count: count() }).from(schema.trips).where(and(...tripConditions.completed)),
+      ]);
+      const startedCount = Number(started[0]?.count || 0);
+      const completedCount = Number(completed[0]?.count || 0);
+      return {
+        startedInPeriod: startedCount,
+        completedInPeriod: completedCount,
+        completionRatePercent: startedCount > 0 ? Number(((completedCount / startedCount) * 100).toFixed(2)) : null,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error generating trips completion rate: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to generate trips completion rate');
+    }
+  }
+
+  // ========== Center queue stats (dashboard) ==========
+
+  /**
+   * Queue stats summary: global loading/unloading active counts; per-center breakdown. Optional date (default today).
+   */
+  async getQueueStatsSummary(query: ReportQueryDto = {}, accountId: number) {
+    try {
+      const today = this.getTodayDateRange();
+      const rangeStart = query.startDate ? new Date(query.startDate) : today.start;
+      const rangeEnd = query.endDate ? new Date(query.endDate) : today.end;
+
+      const baseQueueConditions: SQL[] = [
+        eq(schema.centerQueues.accountId, accountId),
+        eq(schema.centerQueues.isActive, true),
+        gte(schema.centerQueues.queueDate, rangeStart),
+        lt(schema.centerQueues.queueDate, rangeEnd),
+      ];
+      if (query.centerId) baseQueueConditions.push(eq(schema.centerQueues.centerId, query.centerId));
+
+      const [loadingTotal, unloadingTotal, byCenterRows] = await Promise.all([
+        this.db.select({ count: count() }).from(schema.centerQueues).where(and(...baseQueueConditions, eq(schema.centerQueues.queueType, QueueType.LOADING))),
+        this.db.select({ count: count() }).from(schema.centerQueues).where(and(...baseQueueConditions, eq(schema.centerQueues.queueType, QueueType.UNLOADING))),
+        this.db
+          .select({
+            centerId: schema.centerQueues.centerId,
+            queueType: schema.centerQueues.queueType,
+            count: count(),
+          })
+          .from(schema.centerQueues)
+          .where(and(...baseQueueConditions))
+          .groupBy(schema.centerQueues.centerId, schema.centerQueues.queueType),
+      ]);
+
+      const centerIds = [...new Set(byCenterRows.map((r) => r.centerId))];
+      const centers = centerIds.length > 0
+        ? await this.db.select().from(schema.centers).where(inArray(schema.centers.id, centerIds))
+        : [];
+      const centerMap = new Map(centers.map((c) => [c.id, c]));
+
+      const byCenterMap = new Map<number, { loadingActive: number; unloadingActive: number }>();
+      byCenterRows.forEach((r) => {
+        const cur = byCenterMap.get(r.centerId) || { loadingActive: 0, unloadingActive: 0 };
+        if (r.queueType === QueueType.LOADING) cur.loadingActive = Number(r.count);
+        else cur.unloadingActive = Number(r.count);
+        byCenterMap.set(r.centerId, cur);
+      });
+
+      return {
+        loadingActive: Number(loadingTotal[0]?.count || 0),
+        unloadingActive: Number(unloadingTotal[0]?.count || 0),
+        dateFrom: rangeStart,
+        dateTo: rangeEnd,
+        byCenter: centerIds.map((cid) => ({
+          centerId: cid,
+          center: centerMap.get(cid) || null,
+          loadingActive: byCenterMap.get(cid)?.loadingActive ?? 0,
+          unloadingActive: byCenterMap.get(cid)?.unloadingActive ?? 0,
+        })),
+      };
+    } catch (error: any) {
+      this.logger.error(`Error generating queue stats summary: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to generate queue stats summary');
+    }
+  }
+
+  /**
+   * Queue stats per center: loading/unloading total and active. Optional date range (default today).
+   */
+  async getQueueStatsByCenter(query: ReportQueryDto = {}, accountId: number) {
+    try {
+      const today = this.getTodayDateRange();
+      const rangeStart = query.startDate ? new Date(query.startDate) : today.start;
+      const rangeEnd = query.endDate ? new Date(query.endDate) : today.end;
+
+      const centers = query.centerId
+        ? await this.db.select().from(schema.centers).where(and(eq(schema.centers.id, query.centerId), eq(schema.centers.accountId, accountId)))
+        : await this.db.select().from(schema.centers).where(eq(schema.centers.accountId, accountId));
+
+      const baseCond: SQL[] = [
+        eq(schema.centerQueues.accountId, accountId),
+        gte(schema.centerQueues.queueDate, rangeStart),
+        lt(schema.centerQueues.queueDate, rangeEnd),
+      ];
+
+      const result = await Promise.all(
+        centers.map(async (center) => {
+          const [loadingTotal, loadingActive, unloadingTotal, unloadingActive] = await Promise.all([
+            this.db.select({ count: count() }).from(schema.centerQueues).where(and(...baseCond, eq(schema.centerQueues.centerId, center.id), eq(schema.centerQueues.queueType, QueueType.LOADING))),
+            this.db.select({ count: count() }).from(schema.centerQueues).where(and(...baseCond, eq(schema.centerQueues.centerId, center.id), eq(schema.centerQueues.queueType, QueueType.LOADING), eq(schema.centerQueues.isActive, true))),
+            this.db.select({ count: count() }).from(schema.centerQueues).where(and(...baseCond, eq(schema.centerQueues.centerId, center.id), eq(schema.centerQueues.queueType, QueueType.UNLOADING))),
+            this.db.select({ count: count() }).from(schema.centerQueues).where(and(...baseCond, eq(schema.centerQueues.centerId, center.id), eq(schema.centerQueues.queueType, QueueType.UNLOADING), eq(schema.centerQueues.isActive, true))),
+          ]);
+          return {
+            centerId: center.id,
+            center: { id: center.id, name: center.name, fullname: center.fullname },
+            loading: { total: Number(loadingTotal[0]?.count || 0), active: Number(loadingActive[0]?.count || 0) },
+            unloading: { total: Number(unloadingTotal[0]?.count || 0), active: Number(unloadingActive[0]?.count || 0) },
+          };
+        }),
+      );
+
+      return { byCenter: result, dateFrom: rangeStart, dateTo: rangeEnd };
+    } catch (error: any) {
+      this.logger.error(`Error generating queue stats by center: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to generate queue stats by center');
+    }
+  }
+
+  /**
+   * Queue activity over time (by day). For charts. Optional centerId. Default last 7 days.
+   */
+  async getQueueStatsByDate(query: ReportQueryDto = {}, accountId: number) {
+    try {
+      const rangeStart = query.startDate ? new Date(query.startDate) : (() => { const d = new Date(); d.setDate(d.getDate() - 6); d.setHours(0, 0, 0, 0); return d; })();
+      const rangeEnd = query.endDate ? new Date(query.endDate) : (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(0, 0, 0, 0); return d; })();
+
+      const baseCond: SQL[] = [
+        eq(schema.centerQueues.accountId, accountId),
+        eq(schema.centerQueues.isActive, true),
+        gte(schema.centerQueues.queueDate, rangeStart),
+        lt(schema.centerQueues.queueDate, rangeEnd),
+      ];
+      if (query.centerId) baseCond.push(eq(schema.centerQueues.centerId, query.centerId));
+
+      const loadingByDate = await this.db
+        .select({
+          date: sql<string>`DATE(${schema.centerQueues.queueDate})`,
+          count: count(),
+        })
+        .from(schema.centerQueues)
+        .where(and(...baseCond, eq(schema.centerQueues.queueType, QueueType.LOADING)))
+        .groupBy(sql`DATE(${schema.centerQueues.queueDate})`)
+        .orderBy(asc(sql`DATE(${schema.centerQueues.queueDate})`));
+
+      const unloadingByDate = await this.db
+        .select({
+          date: sql<string>`DATE(${schema.centerQueues.queueDate})`,
+          count: count(),
+        })
+        .from(schema.centerQueues)
+        .where(and(...baseCond, eq(schema.centerQueues.queueType, QueueType.UNLOADING)))
+        .groupBy(sql`DATE(${schema.centerQueues.queueDate})`)
+        .orderBy(asc(sql`DATE(${schema.centerQueues.queueDate})`));
+
+      const dateSet = new Set<string>([
+        ...loadingByDate.map((r) => String(r.date)),
+        ...unloadingByDate.map((r) => String(r.date)),
+      ]);
+      const dates = Array.from(dateSet).sort();
+      const loadingMap = new Map(loadingByDate.map((r) => [String(r.date), Number(r.count)]));
+      const unloadingMap = new Map(unloadingByDate.map((r) => [String(r.date), Number(r.count)]));
+
+      return {
+        byDate: dates.map((date) => ({
+          date,
+          loadingActive: loadingMap.get(date) ?? 0,
+          unloadingActive: unloadingMap.get(date) ?? 0,
+        })),
+        dateFrom: rangeStart,
+        dateTo: rangeEnd,
+      };
+    } catch (error: any) {
+      this.logger.error(`Error generating queue stats by date: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to generate queue stats by date');
+    }
+  }
+
   /**
    * Build date conditions for queries (arrivals/exits). Always include accountId.
    */

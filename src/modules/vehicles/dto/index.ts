@@ -4,4 +4,5 @@ export * from './vehicle-group.dto';
 export * from './bulk-qr-code.dto';
 export * from './update-vehicle-status.dto';
 export * from './update-vehicle-assignment.dto';
+export * from './bulk-vehicle-assignment.dto';
 

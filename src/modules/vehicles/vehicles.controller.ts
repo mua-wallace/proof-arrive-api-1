@@ -6,7 +6,7 @@ import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-cr
 import { Roles } from '@modules/auth/decorators/roles.decorator';
 import { RolesGuard } from '@modules/auth/guards/roles.guard';
 import { Credentials, PaginateQuery, PaginateResult } from '@common/interfaces';
-import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto, UpdateVehicleStatusDto, UpdateVehicleAssignmentDto } from './dto';
+import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto, UpdateVehicleStatusDto, UpdateVehicleAssignmentDto, BulkVehicleAssignmentDto } from './dto';
 import { VehicleStatus } from '@common/enums/vehicle-status.enum';
 import * as schema from '@modules/schemas';
 
@@ -641,6 +641,28 @@ export class VehiclesController {
       accountIdNum,
       credentials.accid.toString(),
     );
+  }
+
+  @Put('assignments/bulk')
+  @ApiOperation({
+    summary: 'Bulk update vehicle current center',
+    description:
+      'Updates the current center (currentCenterId) for multiple vehicles in one request. Send an array of { vehicleId, centerId }; each vehicle can be at only one center at a time. centerId can be null to clear current location. Returns per-item success/error for dashboard feedback.',
+  })
+  @ApiResponse({ status: 200, description: 'Bulk update completed; check results array for per-item success or errors' })
+  @ApiResponse({ status: 400, description: 'Invalid request (e.g. empty assignments array)' })
+  async bulkUpdateVehicleAssignments(
+    @Body() bulkDto: BulkVehicleAssignmentDto,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<{ updatedCount: number; results: Array<{ vehicleId: number; centerId: number | null; success: boolean; error?: string }> }> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    if (!bulkDto.assignments?.length) {
+      throw new BadRequestException('At least one assignment (vehicleId and centerId) is required');
+    }
+    return this.vehiclesService.bulkUpdateVehicleAssignments(bulkDto.assignments, accountIdNum);
   }
 
   @Put(':id/assignment')
