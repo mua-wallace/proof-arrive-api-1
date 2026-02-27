@@ -6,7 +6,8 @@ import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-cr
 import { Roles } from '@modules/auth/decorators/roles.decorator';
 import { RolesGuard } from '@modules/auth/guards/roles.guard';
 import { Credentials, PaginateQuery, PaginateResult } from '@common/interfaces';
-import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto, UpdateVehicleStatusDto, VehicleStatus } from './dto';
+import { FilterVehiclesDto, FilterVehicleGroupsDto, VehicleGroupDto, BulkQrCodeDto, UpdateVehicleStatusDto, UpdateVehicleAssignmentDto, BulkVehicleAssignmentDto } from './dto';
+import { VehicleStatus } from '@common/enums/vehicle-status.enum';
 import * as schema from '@modules/schemas';
 
 type Vehicle = typeof schema.vehicles.$inferSelect;
@@ -24,14 +25,14 @@ export class VehiclesController {
   @Get()
   @ApiOperation({
     summary: 'List all synced vehicles in the system with filtering and pagination',
-    description: 'Retrieves a paginated list of vehicles that have been synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (arrivals, exits, qrCodes, group).',
+    description: 'Retrieves a paginated list of vehicles that have been synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (qrCodes, group, assignedCenter, currentCenter).',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, qrCodes, group)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (qrCodes, group, assignedCenter, currentCenter)' })
   async findAll(
     @Query() filterDto: FilterVehiclesDto,
     @CurrentUserCredentials() credentials: Credentials,
@@ -335,7 +336,7 @@ export class VehiclesController {
     summary: 'Get vehicle details by ID',
     description: 'Provides access to view the details of a specific vehicle by its internal ID (serial integer).',
   })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits, qrCodes, group)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (qrCodes, group, assignedCenter, currentCenter)' })
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,
@@ -639,6 +640,51 @@ export class VehiclesController {
       updateDto,
       accountIdNum,
       credentials.accid.toString(),
+    );
+  }
+
+  @Put('assignments/bulk')
+  @ApiOperation({
+    summary: 'Bulk update vehicle current center',
+    description:
+      'Updates the current center (currentCenterId) for multiple vehicles in one request. Send an array of { vehicleId, centerId }; each vehicle can be at only one center at a time. centerId can be null to clear current location. Returns per-item success/error for dashboard feedback.',
+  })
+  @ApiResponse({ status: 200, description: 'Bulk update completed; check results array for per-item success or errors' })
+  @ApiResponse({ status: 400, description: 'Invalid request (e.g. empty assignments array)' })
+  async bulkUpdateVehicleAssignments(
+    @Body() bulkDto: BulkVehicleAssignmentDto,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<{ updatedCount: number; results: Array<{ vehicleId: number; centerId: number | null; success: boolean; error?: string }> }> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    if (!bulkDto.assignments?.length) {
+      throw new BadRequestException('At least one assignment (vehicleId and centerId) is required');
+    }
+    return this.vehiclesService.bulkUpdateVehicleAssignments(bulkDto.assignments, accountIdNum);
+  }
+
+  @Put(':id/assignment')
+  @ApiOperation({
+    summary: 'Update vehicle center assignment',
+    description: 'Updates the center assignment for a vehicle. A vehicle can be assigned to one center (or none). This is separate from currentCenterId which tracks the vehicle\'s current location. Set centerId to null to remove assignment.',
+  })
+  @ApiResponse({ status: 200, description: 'Vehicle center assignment updated successfully' })
+  @ApiResponse({ status: 404, description: 'Vehicle or center not found' })
+  async updateVehicleAssignment(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateVehicleAssignmentDto,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<Vehicle> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+    return this.vehiclesService.updateVehicleAssignment(
+      Number(id),
+      updateDto,
+      accountIdNum,
     );
   }
 }

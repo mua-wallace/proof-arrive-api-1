@@ -34,7 +34,12 @@ export class VehiclesSyncService {
     groupId?: number;
   }, accountId: number): Promise<void> {
     try {
+      // Validate thirdPartyId from Malambi API
+      // id column uses thirdPartyId value (not auto-generated)
       const thirdPartyId = vehicleData.id;
+      if (!thirdPartyId || typeof thirdPartyId !== 'number' || thirdPartyId <= 0 || !Number.isInteger(thirdPartyId)) {
+        throw new Error(`Invalid thirdPartyId from Malambi API: "${vehicleData.id}" must be a positive integer for vehicle id`);
+      }
       
       // Check if vehicle already exists by thirdPartyId and accountId
       const existingVehicle = await this.dbConnection
@@ -53,7 +58,10 @@ export class VehiclesSyncService {
       }
 
       // Insert vehicle with data from Malambi API
+      // Note: id uses thirdPartyId value from Malambi API (not auto-generated)
+      // centerId is set to null initially - can be assigned manually later
       const vehicleRecord = {
+        id: thirdPartyId, // Use thirdPartyId as id value (from Malambi API)
         accountId: accountId, // Multi-tenant: account ID
         thirdPartyId,
         plate: vehicleData.plate || `PLATE_${thirdPartyId}`,
@@ -62,6 +70,7 @@ export class VehiclesSyncService {
         year: vehicleData.year || null,
         tag2: vehicleData.tag2 || null,
         groupId: vehicleData.groupId || null,
+        centerId: null, // Initially null - can be assigned manually later
         isActive: true,
         lastSyncedAt: new Date(),
       };

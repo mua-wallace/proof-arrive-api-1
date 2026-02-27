@@ -10,6 +10,8 @@ import { CentersModule } from '@modules/centers/centers.module';
 import { UsersModule } from '@modules/users/users.module';
 import { ReportsModule } from '@modules/reports/reports.module';
 import { AuthModule } from '@modules/auth/auth.module';
+import { TripsModule } from '@modules/trips/trips.module';
+import { QueuesModule } from '@modules/queues/queues.module';
 import { ThirdPartyModule } from '@integrations/third-party/third-party.module';
 import { MalambiApiModule } from '@integrations/malambi-api/malambi-api.module';
 import { QueueModule } from '@common/queue/queue.module';
@@ -60,6 +62,8 @@ import { MalambiAuthMiddleware } from '@common/middleware/malambi-auth.middlewar
     CentersModule,
     UsersModule,
     ReportsModule,
+    TripsModule,
+    QueuesModule,
     ThirdPartyModule,
   ],
   controllers: [],

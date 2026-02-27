@@ -308,7 +308,7 @@ export class ExitsService extends BaseService<Exit> {
     }
   }
 
-  async createExit(createDto: CreateExitDto, agentId: string, accountId: number): Promise<Exit> {
+  async createExit(createDto: CreateExitDto, agentId: number, accountId: number): Promise<Exit> {
 
     try {
       // Validate vehicle exists and belongs to the account
@@ -373,8 +373,8 @@ export class ExitsService extends BaseService<Exit> {
           accountId: accountId, // Multi-tenant: account ID from logged-in user
           vehicleId: vehicle.thirdPartyId, // Use thirdPartyId to match schema FK
           centerId: center.geozoneId, // Use geozoneId to match schema FK
-          agentId: agentId,
-          createdBy: agentId, // The logged-in user who created the record
+          agentId: Number(agentId), // Use subid (users.id equals subid)
+          createdBy: Number(agentId), // The logged-in user who created the record (users.id equals subid)
           exitType: createDto.exitType,
           status: createDto.status,
           destinationCenterId: destinationCenterId,

@@ -47,19 +47,22 @@ export class CentersSyncService {
     timeoutin_muros_str?: string;
   }, accountId: number): Promise<void> {
     try {
+      // Validate geozoneId from Malambi API
+      // id column uses geozoneId value (not auto-generated)
+      const geozoneId = centerData.gzone_id;
+      if (!geozoneId || typeof geozoneId !== 'number' || geozoneId <= 0 || !Number.isInteger(geozoneId)) {
+        throw new Error(`Invalid geozoneId (gzone_id) from Malambi API: "${centerData.gzone_id}" must be a positive integer for center id`);
+      }
+      
       const thirdPartyId = centerData.id;
       const siteid = centerData.siteid;
       
-      // Check if center already exists by thirdPartyId, siteid, or geozoneId
-      const geozoneId = centerData.gzone_id;
+      // Check if center already exists by geozoneId, thirdPartyId, or siteid
       const conditions = [
+        eq(schema.centers.geozoneId, geozoneId),
         eq(schema.centers.thirdPartyId, thirdPartyId),
         eq(schema.centers.siteid, siteid),
       ];
-      
-      if (geozoneId) {
-        conditions.push(eq(schema.centers.geozoneId, geozoneId));
-      }
 
       const existingCenter = await this.dbConnection
         .select()
@@ -72,14 +75,16 @@ export class CentersSyncService {
       }
 
       // Insert center with data from Malambi API
+      // Note: id uses geozoneId value from Malambi API (not auto-generated)
       const centerRecord = {
+        id: geozoneId, // Use geozoneId as id value (from Malambi API gzone_id)
         accountId: accountId, // Multi-tenant: account ID
         thirdPartyId,
         siteid,
-        name: centerData.name || `Center_${thirdPartyId}`,
+        name: centerData.name || `Center_${geozoneId}`,
         fullname: centerData.fullname || null,
         geozone: centerData.geozone || null,
-        geozoneId: centerData.gzone_id || null,
+        geozoneId: geozoneId, // Use validated geozoneId (from Malambi API gzone_id)
         manager: centerData.manager || null,
         groupid: centerData.groupid || null,
         groupname: centerData.groupname || null,
@@ -270,6 +275,91 @@ export class CentersSyncService {
     const exists = await this.centerExists(thirdPartyId, siteid);
     if (!exists) {
       await this.queueService.add('center-sync', 'sync-center', { thirdPartyId, siteid });
+    }
+  }
+
+  /**
+   * Bulk sync centers from API response
+   * Processes all centers and triggers background sync jobs for centers that don't exist
+   * @param centers - Array of centers from Malambi API
+   * @param accountId - Account ID for multi-tenancy
+   * @returns Summary of sync operation
+   */
+  async bulkSyncCenters(
+    centers: any[],
+    accountId: number,
+  ): Promise<{
+    totalCenters: number;
+    synced: number;
+    skipped: number;
+    errors: number;
+    message: string;
+  }> {
+    let synced = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    try {
+      for (const center of centers) {
+        try {
+          // Check if center already exists (with accountId check)
+          const exists = await this.centerExists(center.id, center.siteid);
+          if (exists) {
+            skipped++;
+            continue;
+          }
+
+          // Trigger background sync job with center data
+          await this.queueService.add('center-sync', 'sync-center', {
+            centerData: {
+              id: center.id,
+              siteid: center.siteid,
+              name: center.name,
+              fullname: center.fullname,
+              geozone: center.geozone,
+              gzone_id: center.gzone_id,
+              manager: center.manager,
+              groupid: center.groupid,
+              groupname: center.groupname,
+              sitetype: center.sitetype,
+              distance: center.distance,
+              time1: center.time1,
+              time2: center.time2,
+              saturday: center.saturday,
+              sunday: center.sunday,
+              breakstart: center.breakstart,
+              breakstop: center.breakstop,
+              timeoutin: center.timeoutin,
+              timeoutin_str: center.timeoutin_str,
+              timeoutin_muros: center.timeoutin_muros,
+              timeoutin_muros_str: center.timeoutin_muros_str,
+            },
+            accountId: accountId,
+          });
+
+          synced++;
+        } catch (error) {
+          this.logger.error(
+            `Error syncing center ${center.id}:`,
+            error instanceof Error ? error.stack : error,
+          );
+          errors++;
+        }
+      }
+
+      return {
+        totalCenters: centers.length,
+        synced,
+        skipped,
+        errors,
+        message: `Bulk sync completed: ${synced} synced, ${skipped} skipped, ${errors} errors`,
+      };
+    } catch (error) {
+      this.logger.error(
+        'Error in bulk sync centers:',
+        error instanceof Error ? error.stack : error,
+      );
+      throw error;
     }
   }
 }

@@ -299,7 +299,7 @@ export class ArrivalsService extends BaseService<Arrival> {
     }
   }
 
-  async createArrival(createDto: CreateArrivalDto, agentId: string, accountId: number): Promise<Arrival> {
+  async createArrival(createDto: CreateArrivalDto, agentId: number, accountId: number): Promise<Arrival> {
 
     try {
       // Validate vehicle exists and belongs to the account
@@ -344,8 +344,8 @@ export class ArrivalsService extends BaseService<Arrival> {
           accountId: accountId, // Multi-tenant: account ID from logged-in user
           vehicleId: vehicle.thirdPartyId, // Use thirdPartyId to match schema FK
           centerId: center.geozoneId, // Use geozoneId to match schema FK
-          agentId: agentId,
-          createdBy: agentId, // The logged-in user who created the record
+          agentId: Number(agentId), // Use subid (users.id equals subid)
+          createdBy: Number(agentId), // The logged-in user who created the record (users.id equals subid)
           status: createDto.status || ArrivalStatus.ARRIVED,
           latitude: createDto.latitude || null,
           longitude: createDto.longitude || null,

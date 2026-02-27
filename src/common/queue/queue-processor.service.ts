@@ -18,7 +18,57 @@ export class QueueProcessorService implements OnModuleInit {
     private readonly centersSeederService: CentersSeederService,
   ) {}
 
-  onModuleInit() {
+  async onModuleInit() {
+    // Wait a bit for migrations to complete before starting queue processing
+    // This ensures migration 0005 (user fields) runs before user sync operations
+    this.logger.log('Waiting for migrations to complete before starting queue processing...');
+    
+    // Give migrations time to run (MigrationService runs on module init)
+    // Wait up to 30 seconds for migrations to complete
+    let migrationsReady = false;
+    for (let i = 0; i < 30; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Check if user columns exist (migration 0005 indicator)
+      try {
+        const { Client } = require('pg');
+        const client = new Client({
+          host: process.env.DATABASE_HOST,
+          port: parseInt(process.env.DATABASE_PORT || '5432'),
+          user: process.env.DATABASE_USERNAME || 'postgres',
+          password: process.env.DATABASE_PASSWORD,
+          database: process.env.DATABASE_NAME,
+        });
+        
+        await client.connect();
+        const result = await client.query(`
+          SELECT column_name 
+          FROM information_schema.columns 
+          WHERE table_schema='public' 
+          AND table_name='users' 
+          AND column_name IN ('email', 'role', 'fullname')
+        `);
+        await client.end();
+        
+        const foundColumns = result.rows.map((r: any) => r.column_name);
+        if (foundColumns.length === 3) {
+          migrationsReady = true;
+          this.logger.log('✓ Migrations ready - user columns exist');
+          break;
+        }
+      } catch (err: any) {
+        // Database might not be ready yet, continue waiting
+        if (i === 0 || i % 5 === 0) {
+          this.logger.debug(`Waiting for migrations... (attempt ${i + 1}/30)`);
+        }
+      }
+    }
+    
+    if (!migrationsReady) {
+      this.logger.warn('⚠️  Migrations may not have completed. Queue processing will start anyway.');
+      this.logger.warn('⚠️  User operations may fail if migration 0005 hasn\'t run.');
+    }
+    
     // Start processing queue
     this.startProcessing();
   }

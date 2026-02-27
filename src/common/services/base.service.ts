@@ -42,8 +42,16 @@ export class BaseService<T extends BaseEntity> {
     data: Partial<Omit<T, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>>,
     accountId?: number,
   ): Promise<T> {
+    // Filter out undefined values to avoid issues with Drizzle ORM
+    const filteredData: any = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        filteredData[key] = value;
+      }
+    }
+
     const insertData: any = {
-      ...data,
+      ...filteredData,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -53,11 +61,32 @@ export class BaseService<T extends BaseEntity> {
       insertData.accountId = accountId;
     }
 
-    const [entity] = await this.db
-      .insert(this.table)
-      .values(insertData)
-      .returning();
-    return entity as unknown as T;
+    try {
+      const [entity] = await this.db
+        .insert(this.table)
+        .values(insertData)
+        .returning();
+      return entity as unknown as T;
+    } catch (error: any) {
+      // Log the actual error for debugging
+      const errorMessage = error?.message || String(error);
+      const errorCode = error?.code;
+      const errorDetail = error?.detail;
+      
+      // Log full error details
+      console.error('Database insert error:', {
+        message: errorMessage,
+        code: errorCode,
+        detail: errorDetail,
+        table: (this.table as any).name || 'unknown',
+        data: insertData,
+      });
+      
+      // Re-throw with more context
+      throw new Error(
+        `Failed query: insert into "${(this.table as any).name || 'table'}" - ${errorMessage}${errorDetail ? ` - ${errorDetail}` : ''}`
+      );
+    }
   }
 
   async findAll(
