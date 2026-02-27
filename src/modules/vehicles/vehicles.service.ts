@@ -7,7 +7,7 @@ import { BaseService } from '@common/services/base.service';
 import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
 import { VehicleGroupDto, VehicleDto } from './dto/vehicle-group.dto';
-import { UpdateVehicleStatusDto, UpdateVehicleAssignmentDto } from './dto';
+import { UpdateVehicleStatusDto, UpdateVehicleAssignmentDto, BulkVehicleAssignmentItemDto } from './dto';
 import { VehicleStatus } from '@common/enums/vehicle-status.enum';
 import { QrCodeService } from './qr-code.service';
 import { EncryptionService } from '@common/services/encryption.service';
@@ -1395,7 +1395,155 @@ export class VehiclesService extends BaseService<Vehicle> {
   }
 
   /**
-   * Get vehicle status history
+   * Bulk update vehicle current center (currentCenterId).
+   * Each item updates one vehicle's currentCenterId (where the vehicle is currently located). A vehicle can be at only one center at a time.
+   * @param assignments - Array of { vehicleId, centerId } (centerId can be null to clear current location)
+   * @param accountId - Account ID for multi-tenancy
+   * @returns Summary with updatedCount and per-item results
+   */
+  async bulkUpdateVehicleAssignments(
+    assignments: BulkVehicleAssignmentItemDto[],
+    accountId: number,
+  ): Promise<{
+    updatedCount: number;
+    results: Array<{
+      vehicleId: number;
+      centerId: number | null;
+      success: boolean;
+      error?: string;
+    }>;
+  }> {
+    if (!assignments?.length) {
+      throw new BadRequestException('At least one assignment (vehicleId and centerId) is required');
+    }
+
+    const results: Array<{
+      vehicleId: number;
+      centerId: number | null;
+      success: boolean;
+      error?: string;
+    }> = [];
+    let updatedCount = 0;
+
+    for (const item of assignments) {
+      const vehicleId = item.vehicleId;
+      const centerIdInput = item.centerId;
+
+      if (!vehicleId || vehicleId <= 0) {
+        results.push({
+          vehicleId,
+          centerId: centerIdInput ?? null,
+          success: false,
+          error: `Invalid vehicle ID: ${vehicleId}`,
+        });
+        continue;
+      }
+
+      try {
+        // Ensure vehicle exists and belongs to account
+        const [vehicle] = await this.dbConnection
+          .select()
+          .from(schema.vehicles)
+          .where(
+            and(
+              eq(schema.vehicles.id, vehicleId),
+              eq(schema.vehicles.accountId, accountId),
+            ),
+          )
+          .limit(1);
+
+        if (!vehicle) {
+          results.push({
+            vehicleId,
+            centerId: centerIdInput ?? null,
+            success: false,
+            error: `Vehicle with ID ${vehicleId} not found`,
+          });
+          continue;
+        }
+
+        let centerIdToSet: number | null = null;
+        if (centerIdInput !== undefined && centerIdInput !== null) {
+          const [centerById] = await this.dbConnection
+            .select()
+            .from(schema.centers)
+            .where(
+              and(
+                eq(schema.centers.id, centerIdInput),
+                eq(schema.centers.accountId, accountId),
+              ),
+            )
+            .limit(1);
+
+          let center = centerById;
+          if (!center) {
+            const [centerByGeozone] = await this.dbConnection
+              .select()
+              .from(schema.centers)
+              .where(
+                and(
+                  eq(schema.centers.geozoneId, centerIdInput),
+                  eq(schema.centers.accountId, accountId),
+                ),
+              )
+              .limit(1);
+            center = centerByGeozone;
+          }
+
+          if (!center) {
+            results.push({
+              vehicleId,
+              centerId: centerIdInput,
+              success: false,
+              error: `Center with ID ${centerIdInput} not found for this account`,
+            });
+            continue;
+          }
+          centerIdToSet = center.id;
+        }
+
+        await this.dbConnection
+          .update(schema.vehicles)
+          .set({
+            currentCenterId: centerIdToSet,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(schema.vehicles.id, vehicleId),
+              eq(schema.vehicles.accountId, accountId),
+            ),
+          );
+
+        updatedCount++;
+        results.push({
+          vehicleId,
+          centerId: centerIdToSet,
+          success: true,
+        });
+        this.logger.log(
+          `Vehicle ${vehicleId} current center updated to currentCenterId=${centerIdToSet ?? 'null'}`,
+        );
+      } catch (error: any) {
+        this.logger.warn(
+          `Bulk assignment failed for vehicle ${vehicleId}: ${error?.message || 'Unknown error'}`,
+        );
+        results.push({
+          vehicleId,
+          centerId: centerIdInput ?? null,
+          success: false,
+          error: error?.message || 'Unknown error',
+        });
+      }
+    }
+
+    this.logger.log(
+      `Bulk vehicle current center update completed: ${updatedCount}/${assignments.length} updated`,
+    );
+    return { updatedCount, results };
+  }
+
+  /**
    * @param vehicleId - Vehicle ID (internal database ID or thirdPartyId)
    * @param accountId - Account ID for multi-tenancy
    * @param limit - Maximum number of history records to return (default: 100)
