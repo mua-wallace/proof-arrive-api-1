@@ -1,18 +1,21 @@
 # Dashboard Integration Workflow
 
-This document describes how to integrate a web dashboard with the Proof Arrive API to monitor vehicle movements, manage queues, track trips, and view real-time operational data.
+This document describes how to integrate a web dashboard with the Proof Arrive API to monitor vehicle movements, manage queues, track trips, and view real-time operational data. It reflects the **refactored trip-centric API**: trips use **phase**-based lifecycle; vehicle status is derived from trip events; stats and reports live under `/reports`.
 
 ## Table of Contents
 1. [Overview](#overview)
 2. [Dashboard Architecture](#dashboard-architecture)
 3. [Authentication & Setup](#authentication--setup) *(Reference - Already Implemented)*
-4. [Key Dashboard Views](#key-dashboard-views)
-5. [Real-Time Monitoring](#real-time-monitoring)
-6. [Data Refresh Strategies](#data-refresh-strategies)
-7. [Filtering & Search Patterns](#filtering--search-patterns)
-8. [Error Handling](#error-handling)
-9. [Performance Optimization](#performance-optimization)
-10. [Example Dashboard Flows](#example-dashboard-flows)
+4. [Dashboard API Endpoints Reference](#dashboard-api-endpoints-reference)
+5. [Dashboard Reporting & Stats](#dashboard-reporting--stats-reference-for-implementation) *(endpoints + filter options for stats implementation)*
+6. [Copy-paste for dashboard](#copy-paste-for-dashboard-update-when-api-changes) *(paste into dashboard repo; update when API changes)*
+7. [Key Dashboard Views](#key-dashboard-views)
+8. [Real-Time Monitoring](#real-time-monitoring)
+9. [Data Refresh Strategies](#data-refresh-strategies)
+10. [Filtering & Search Patterns](#filtering--search-patterns)
+11. [Error Handling](#error-handling)
+12. [Performance Optimization](#performance-optimization)
+13. [Example Dashboard Flows](#example-dashboard-flows)
 
 ---
 
@@ -105,17 +108,254 @@ All dashboard endpoints require a valid JWT token in the `Authorization` header.
 
 ---
 
+## Dashboard API Endpoints Reference
+
+Base URL for all endpoints: **`/api/v1`**. All require **JWT** in `Authorization: Bearer <token>` unless noted.
+
+### Trips
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/trips` | Create a new trip. Body: `{ vehicleId, originCenterId, purpose: "DELIVERY" \| "PICKUP" }`. Trip starts in phase `AT_ORIGIN_ARRIVED`. |
+| `GET` | `/trips` | List trips with filters and pagination. Query: `page`, `limit`, `vehicleId`, `originCenterId`, `destinationCenterId`, `centerId`, `status` (ONGOING \| COMPLETED), `purpose` (DELIVERY \| PICKUP), `phase`, `search`, `sortBy`, `sortOrder`, `createdAt`, `include` (vehicle,originCenter,destinationCenter,events). |
+| `GET` | `/trips/:id` | Get one trip. Query: `include` (vehicle,originCenter,destinationCenter,events). Response includes `phase` and `status`. |
+| `POST` | `/trips/:id/start-loading` | Start loading at origin. Valid phase: `AT_ORIGIN_ARRIVED` → `AT_ORIGIN_LOADING`. |
+| `POST` | `/trips/:id/end-loading` | End loading at origin. Valid phase: `AT_ORIGIN_LOADING` → `AT_ORIGIN_LOADING_ENDED`. |
+| `POST` | `/trips/:id/set-destination` | Set destination and mark ready to exit. Body: `{ destinationCenterId }`. Valid phase: `AT_ORIGIN_LOADING_ENDED` → `READY_TO_EXIT`. |
+| `POST` | `/trips/:id/exit-origin` | Record vehicle exited origin. Valid phase: `READY_TO_EXIT` → `IN_TRANSIT`. |
+| `POST` | `/trips/:id/arrive-destination` | Record arrival at destination. Valid phase: `IN_TRANSIT` → `AT_DESTINATION_ARRIVED`. |
+| `POST` | `/trips/:id/start-unloading` | Start unloading at destination. Valid phase: `AT_DESTINATION_ARRIVED` → `AT_DESTINATION_UNLOADING`. |
+| `POST` | `/trips/:id/end-unloading` | End unloading; DELIVERY auto-completes, PICKUP → `AT_DESTINATION_UNLOADING_ENDED`. |
+| `POST` | `/trips/:id/complete` | Manually complete trip. Valid phase: `AT_DESTINATION_UNLOADING_ENDED` → `COMPLETED`. |
+
+### Trip events
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/trips/:id/events` | Create a trip event. Body: `{ eventType, centerId, metadata? }`. Events are immutable; vehicle status is updated from trip phase/events. |
+
+### Stats (reports)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/reports/dashboard` | Dashboard summary: vehicles by status (incl. IN_GARAGE), trips (ongoing, completed, by purpose/phase), queue counts, centers. Query: `startDate`, `endDate`, `centerId`, `vehicleId`, `agentId`, `groupBy`. **If no `startDate`/`endDate` are provided, trip-related metrics default to the current day.** |
+| `GET` | `/reports/trips/summary` | Trips stats: ongoing count, completed in period, total started, completion rate, by status/purpose/phase. Query: `startDate`, `endDate`, `centerId`, `vehicleId`. **If no `startDate`/`endDate` are provided, the report defaults to trips for the current day.** |
+| `GET` | `/reports/trips/by-date` | Trip counts grouped by day/week/month (for charts). Query: `startDate`, `endDate`, `centerId`, `vehicleId`, `groupBy` (day \| week \| month). **If no `startDate`/`endDate` are provided, the range defaults to the current day.** |
+| `GET` | `/reports/trips/by-center` | Per-center trip counts: as origin, as destination, completed at destination. Query: `startDate`, `endDate`, `centerId`, `vehicleId`. **Defaults to current day when no dates are provided.** |
+| `GET` | `/reports/trips/by-origin-destination` | OD matrix: trip counts by (originCenterId, destinationCenterId). Query: `startDate`, `endDate`, `centerId`, `vehicleId`. **Defaults to current day when no dates are provided.** |
+| `GET` | `/reports/trips/completion-rate` | In period: started count, completed count, completion rate (%). Query: `startDate`, `endDate`, `centerId`, `vehicleId`. **Defaults to current day when no dates are provided.** |
+| `GET` | `/reports/queues/summary` | Queue stats: global loading/unloading active counts, per-center breakdown. Query: `startDate`, `endDate`, `centerId`. |
+| `GET` | `/reports/queues/by-center` | Per-center: loading total/active, unloading total/active. Query: `startDate`, `endDate`, `centerId`. |
+| `GET` | `/reports/queues/by-date` | Queue activity over time (for charts). Query: `startDate`, `endDate`, `centerId`. |
+
+### Vehicles – availability by status
+
+Vehicle status values: `AVAILABLE`, `IN_TRANSIT`, `WAITING_IN_QUEUE`, `LOADING`, `UNLOADING`, `IN_GARAGE`. Status is derived from the latest trip/event, not set manually.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/vehicles` | List vehicles with pagination, search, sort, **status filter**. Query: `page`, `limit`, **`status`** (enum: AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING, IN_GARAGE), `search`, `searchBy`, `sortBy`, `include` (qrCodes, group, assignedCenter, currentCenter). |
+| `GET` | `/vehicles/status-summary` | Counts by status: `{ AVAILABLE: n, IN_TRANSIT: n, WAITING_IN_QUEUE: n, LOADING: n, UNLOADING: n, IN_GARAGE: n }`. Use for dashboard availability cards. |
+| `GET` | `/vehicles/by-status/:status` | All vehicles with the given status. **Path param `status`**: enum (AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING, IN_GARAGE); case-insensitive. Use for “Vehicles by status” lists; Swagger shows dropdown. |
+| `GET` | `/vehicles/by-center/:centerId` | All vehicles currently at the given center (`currentCenterId`). |
+| `GET` | `/vehicles/:id` | Single vehicle details. Query: `include` (qrCodes, group, assignedCenter, currentCenter). |
+| `PUT` | `/vehicles/:id/assignment` | Update single vehicle’s center assignment. Body: `{ centerId }` or `{ centerId: null }` to clear. |
+
+### Bulk assign vehicles to centers
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `PUT` | `/vehicles/assignments/bulk` | Assign multiple vehicles to centers in one request. Body: `{ assignments: [ { vehicleId, centerId }, ... ] }`. `centerId` can be `null` to clear current location. Returns `{ updatedCount, results: [ { vehicleId, centerId, success, error? } ] }`. |
+
+---
+
+## Dashboard Reporting & Stats (reference for implementation)
+
+Use this section when implementing stats and reporting on the dashboard. All report endpoints are under **`/api/v1/reports`**. Trip reports **default to the current day** when `startDate` and `endDate` are omitted.
+
+### Report endpoints and filter options
+
+| Endpoint | Method | Filter options (query params) | Default / notes |
+|----------|--------|-------------------------------|------------------|
+| `/reports/dashboard` | `GET` | `startDate`, `endDate` (ISO), `centerId`, `vehicleId`, `agentId`, `groupBy` (day \| week \| month) | Trip metrics default to **today** if no dates. Returns vehicles by status, trips (ongoing/completed/by purpose/phase), queues, centers. |
+| `/reports/trips/summary` | `GET` | `startDate`, `endDate`, `centerId`, `vehicleId` | **Today** if no dates. Returns ongoing count, completed in period, total started, completion rate %, by status/purpose/phase. |
+| `/reports/trips/by-date` | `GET` | `startDate`, `endDate`, `centerId`, `vehicleId`, `groupBy` (day \| week \| month) | **Today** if no dates. Returns trip counts grouped by period (for charts). |
+| `/reports/trips/by-center` | `GET` | `startDate`, `endDate`, `centerId`, `vehicleId` | **Today** if no dates. Per-center: as origin, as destination, completed at destination. |
+| `/reports/trips/by-origin-destination` | `GET` | `startDate`, `endDate`, `centerId`, `vehicleId` | **Today** if no dates. OD matrix: counts by (originCenterId, destinationCenterId). |
+| `/reports/trips/completion-rate` | `GET` | `startDate`, `endDate`, `centerId`, `vehicleId` | **Today** if no dates. Returns startedInPeriod, completedInPeriod, completionRatePercent. |
+| `/reports/queues/summary` | `GET` | `startDate`, `endDate`, `centerId` | Default range: today. Loading/unloading active counts (global + per-center). |
+| `/reports/queues/by-center` | `GET` | `startDate`, `endDate`, `centerId` | Default range: today. Per-center loading/unloading total and active. |
+| `/reports/queues/by-date` | `GET` | `startDate`, `endDate`, `centerId` | Default: last 7 days. Queue activity over time (for charts). |
+
+### Vehicle status (for filters and dropdowns)
+
+Use these values for **vehicle status** filters and UI dropdowns (e.g. `GET /vehicles?status=...`, `GET /vehicles/by-status/:status`). Swagger exposes them as enums for both the list filter and the by-status path param.
+
+| Value | Label (for UI) |
+|-------|----------------|
+| `AVAILABLE` | Available |
+| `IN_TRANSIT` | In transit |
+| `WAITING_IN_QUEUE` | Waiting in queue |
+| `LOADING` | Loading |
+| `UNLOADING` | Unloading |
+| `IN_GARAGE` | In garage |
+
+**Endpoints using vehicle status:**
+- **List with filter:** `GET /api/v1/vehicles?status=AVAILABLE` (optional query param; Swagger dropdown).
+- **By status:** `GET /api/v1/vehicles/by-status/AVAILABLE` (path param; Swagger dropdown; case-insensitive).
+- **Counts:** `GET /api/v1/vehicles/status-summary` returns `{ AVAILABLE: n, IN_TRANSIT: n, ... }`.
+
+### Quick copy-paste: report query params
+
+- **Date range:** `startDate`, `endDate` — ISO 8601 (e.g. `2025-03-01`, `2025-03-02T23:59:59Z`).
+- **Scope:** `centerId`, `vehicleId`, `agentId` (where applicable).
+- **Grouping:** `groupBy` = `day` | `week` | `month` (for by-date endpoints).
+
+---
+
+## Copy-paste for dashboard (update when API changes)
+
+**Use this:** Copy the block below into your dashboard project (e.g. `src/api/dashboardEndpoints.ts` or `DASHBOARD_API_REFERENCE.md`). When the Proof Arrive API is updated, re-copy from this doc to keep your dashboard in sync.
+
+**Base URL:** `https://your-api-host/api/v1` (or `process.env.VITE_API_BASE_URL` / `NEXT_PUBLIC_API_URL`). All requests need `Authorization: Bearer <token>`.
+
+---
+
+### Block 1: Endpoints config (paste into dashboard codebase)
+
+```javascript
+// Proof Arrive API – dashboard endpoints
+// Update this when the API changes (see docs/DASHBOARD_INTEGRATION_FLOW.md)
+
+const API_BASE = '/api/v1'; // or your full base URL
+
+export const DASHBOARD_ENDPOINTS = {
+  // —— Auth ——
+  auth: {
+    login: () => `${API_BASE}/auth/login`,
+    refresh: () => `${API_BASE}/auth/refresh-token`,
+    check: () => `${API_BASE}/auth/check`,
+  },
+
+  // —— Overview ——
+  overview: {
+    dashboard: (params = {}) => `${API_BASE}/reports/dashboard?${new URLSearchParams(params)}`,
+    vehicleStatusSummary: () => `${API_BASE}/vehicles/status-summary`,
+    activeTrips: (params = { limit: 10 }) => `${API_BASE}/trips?${new URLSearchParams({ status: 'ONGOING', ...params })}`,
+    centers: (params = {}) => `${API_BASE}/centers?${new URLSearchParams(params)}`,
+  },
+
+  // —— Trips ——
+  trips: {
+    list: (params = {}) => `${API_BASE}/trips?${new URLSearchParams(params)}`,
+    one: (id, params = {}) => `${API_BASE}/trips/${id}?${new URLSearchParams(params)}`,
+  },
+
+  // —— Reports / stats (trip reports default to today if no startDate/endDate) ——
+  reports: {
+    dashboard: (params = {}) => `${API_BASE}/reports/dashboard?${new URLSearchParams(params)}`,
+    tripsSummary: (params = {}) => `${API_BASE}/reports/trips/summary?${new URLSearchParams(params)}`,
+    tripsByDate: (params = {}) => `${API_BASE}/reports/trips/by-date?${new URLSearchParams(params)}`,
+    tripsByCenter: (params = {}) => `${API_BASE}/reports/trips/by-center?${new URLSearchParams(params)}`,
+    tripsByOriginDestination: (params = {}) => `${API_BASE}/reports/trips/by-origin-destination?${new URLSearchParams(params)}`,
+    tripsCompletionRate: (params = {}) => `${API_BASE}/reports/trips/completion-rate?${new URLSearchParams(params)}`,
+    queuesSummary: (params = {}) => `${API_BASE}/reports/queues/summary?${new URLSearchParams(params)}`,
+    queuesByCenter: (params = {}) => `${API_BASE}/reports/queues/by-center?${new URLSearchParams(params)}`,
+    queuesByDate: (params = {}) => `${API_BASE}/reports/queues/by-date?${new URLSearchParams(params)}`,
+  },
+
+  // —— Vehicles ——
+  vehicles: {
+    list: (params = {}) => `${API_BASE}/vehicles?${new URLSearchParams(params)}`,
+    byStatus: (status) => `${API_BASE}/vehicles/by-status/${status}`,
+    byCenter: (centerId) => `${API_BASE}/vehicles/by-center/${centerId}`,
+    statusSummary: () => `${API_BASE}/vehicles/status-summary`,
+    one: (id, params = {}) => `${API_BASE}/vehicles/${id}?${new URLSearchParams(params)}`,
+    assignment: (id) => `${API_BASE}/vehicles/${id}/assignment`,
+    bulkAssignments: () => `${API_BASE}/vehicles/assignments/bulk`,
+  },
+
+  // —— Centers & queues ——
+  centers: {
+    list: (params = {}) => `${API_BASE}/centers?${new URLSearchParams(params)}`,
+    one: (id) => `${API_BASE}/centers/${id}`,
+    queue: (centerId, params = {}) => `${API_BASE}/centers/${centerId}/queue?${new URLSearchParams(params)}`,
+    queueSummary: (centerId) => `${API_BASE}/centers/${centerId}/queue/summary`,
+    queueNext: (centerId) => `${API_BASE}/centers/${centerId}/queue/next`,
+  },
+};
+
+// Report query params (use when calling reports.*)
+// startDate, endDate (ISO); centerId, vehicleId, agentId; groupBy: 'day'|'week'|'month'
+
+// Vehicle status – use for filters and dropdowns
+export const VEHICLE_STATUS_OPTIONS = [
+  { value: 'AVAILABLE', label: 'Available' },
+  { value: 'IN_TRANSIT', label: 'In transit' },
+  { value: 'WAITING_IN_QUEUE', label: 'Waiting in queue' },
+  { value: 'LOADING', label: 'Loading' },
+  { value: 'UNLOADING', label: 'Unloading' },
+  { value: 'IN_GARAGE', label: 'In garage' },
+];
+
+// Trips list filter params: page, limit, status (ONGOING|COMPLETED), phase, vehicleId,
+// originCenterId, destinationCenterId, centerId, purpose (DELIVERY|PICKUP), search, sortBy, sortOrder, createdAt, include
+```
+
+---
+
+### Block 2: One-page reference (paste into a .md file in dashboard repo)
+
+```markdown
+# Dashboard API reference (Proof Arrive)
+Update from: proof-arrive-api/docs/DASHBOARD_INTEGRATION_FLOW.md when API changes.
+
+Base: GET/POST/PUT to /api/v1 with header: Authorization: Bearer <token>
+
+| What | Method | Path | Key params |
+|------|--------|------|------------|
+| Overview | GET | /reports/dashboard | startDate, endDate, centerId, vehicleId (default: today) |
+| Vehicle status counts | GET | /vehicles/status-summary | — |
+| Active trips | GET | /trips | status=ONGOING, limit |
+| Centers list | GET | /centers | page, limit |
+| Trips list | GET | /trips | page, limit, status, phase, vehicleId, originCenterId, destinationCenterId, centerId, purpose, search, sortBy, sortOrder, createdAt, include |
+| Trip detail | GET | /trips/:id | include=vehicle,originCenter,destinationCenter,events |
+| Trips summary | GET | /reports/trips/summary | startDate, endDate, centerId, vehicleId (default: today) |
+| Trips by date | GET | /reports/trips/by-date | startDate, endDate, centerId, vehicleId, groupBy (day|week|month) |
+| Trips by center | GET | /reports/trips/by-center | startDate, endDate, centerId, vehicleId |
+| Trips completion rate | GET | /reports/trips/completion-rate | startDate, endDate, centerId, vehicleId |
+| Queues summary | GET | /reports/queues/summary | startDate, endDate, centerId |
+| Queues by center | GET | /reports/queues/by-center | startDate, endDate, centerId |
+| Queues by date | GET | /reports/queues/by-date | startDate, endDate, centerId |
+| Vehicles list | GET | /vehicles | page, limit, status (enum), search, searchBy, sortBy, include |
+| Vehicles by status | GET | /vehicles/by-status/:status | status: AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING, IN_GARAGE |
+| Vehicles by center | GET | /vehicles/by-center/:centerId | — |
+| Vehicle detail | GET | /vehicles/:id | include |
+| Update assignment | PUT | /vehicles/:id/assignment | body: { centerId } or { centerId: null } |
+| Bulk assign to centers | PUT | /vehicles/assignments/bulk | body: { assignments: [ { vehicleId, centerId } ] } |
+| Center queue | GET | /centers/:centerId/queue | type, isActive, date |
+| Queue summary | GET | /centers/:centerId/queue/summary | — |
+| Start next service | POST | /centers/:centerId/queue/next | body: { queueType: "LOADING"|"UNLOADING" } |
+```
+
+---
+
+When the API changes, update the blocks above in this doc and re-copy into your dashboard.
+
+---
+
 ## Key Dashboard Views
 
 ### 1. Overview Dashboard
 
 **Purpose**: High-level operational metrics and status overview
 
-**Endpoints Used**:
-- `GET /api/v1/reports/dashboard` - Summary metrics
-- `GET /api/v1/vehicles/status-summary` - Vehicle status breakdown
+**Endpoints Used** (see [Dashboard API Endpoints Reference](#dashboard-api-endpoints-reference) for full list):
+- `GET /api/v1/reports/dashboard` - Summary metrics (vehicles by status, trips, queues, centers)
+- `GET /api/v1/vehicles/status-summary` - Vehicle counts by status (AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING, IN_GARAGE)
 - `GET /api/v1/trips?status=ONGOING&limit=10` - Recent active trips
 - `GET /api/v1/centers` - List all centers
+- `GET /api/v1/reports/trips/summary` - Trips stats (ongoing, completed, completion rate)
 
 **Example Implementation**:
 
@@ -139,9 +379,9 @@ async function loadDashboardSummary(accountId) {
 ```
 
 **Display Components**:
-- Total vehicles by status (cards)
-- Active trips count
-- Queue summary (total waiting)
+- Total vehicles by status (cards) — use `GET /api/v1/vehicles/status-summary`
+- Active trips count — use `GET /api/v1/reports/trips/summary` or `GET /api/v1/trips?status=ONGOING&limit=10`
+- Queue summary — use `GET /api/v1/reports/queues/summary` or `GET /api/v1/reports/dashboard`
 - Recent activity feed
 - Center status map/list
 
@@ -149,20 +389,22 @@ async function loadDashboardSummary(accountId) {
 
 ### 2. Trips View
 
-**Purpose**: View and filter all trips (ongoing and completed)
+**Purpose**: View and filter all trips (ongoing and completed). Trips are **phase-based**; use `phase` and `status` from the API to drive the UI.
 
-**Endpoints Used**:
-- `GET /api/v1/trips` - List trips with filtering
-- `GET /api/v1/trips/:id?include=vehicle,originCenter,destinationCenter,events` - Trip details
+**Endpoints Used** (see [Dashboard API Endpoints Reference](#dashboard-api-endpoints-reference)):
+- `GET /api/v1/trips` - List trips with filtering and pagination
+- `GET /api/v1/trips/:id?include=vehicle,originCenter,destinationCenter,events` - Trip details (includes `phase` and event timeline)
 
 **Filtering Options**:
 - `status`: ONGOING | COMPLETED
-- `vehicleId`: Filter by specific vehicle
-- `originCenterId`: Filter by origin center
-- `destinationCenterId`: Filter by destination center
+- `phase`: Trip phase (e.g. AT_ORIGIN_ARRIVED, IN_TRANSIT, COMPLETED)
+- `vehicleId`, `originCenterId`, `destinationCenterId`, `centerId` (origin or destination)
 - `purpose`: DELIVERY | PICKUP
 - `page`, `limit`: Pagination
 - `sortBy`, `sortOrder`: Sorting
+- `search`: Vehicle plate, center names
+- `createdAt`: YYYY-MM-DD (trip creation date)
+- `include`: vehicle, originCenter, destinationCenter, events
 
 **Example Implementation**:
 
@@ -194,17 +436,40 @@ async function loadTripDetails(tripId) {
   - Vehicle (plate number)
   - Origin Center
   - Destination Center
-  - Status
+  - Phase / Status
   - Started At
   - Duration
   - Actions (View Details)
-- Filters sidebar
+- Filters sidebar (status, phase, center, purpose, date)
 - Pagination controls
-- Trip timeline view (when viewing details)
+- Trip timeline view (when viewing details) — events from `GET /api/v1/trips/:id?include=events`
 
 ---
 
-### 3. Queue Management View
+### 3. Stats & Reports (Dashboard metrics)
+
+**Purpose**: Power dashboard KPIs, charts, and analytics. All under **`/api/v1/reports`**.  
+**Full reference**: See [Dashboard Reporting & Stats (reference for implementation)](#dashboard-reporting--stats-reference-for-implementation) for endpoint table and filter options.
+
+**Endpoints and filter options:**
+
+| Endpoint | Filter options | Default |
+|----------|----------------|--------|
+| `GET /reports/dashboard` | `startDate`, `endDate`, `centerId`, `vehicleId`, `agentId`, `groupBy` | Trip metrics → **today** if no dates |
+| `GET /reports/trips/summary` | `startDate`, `endDate`, `centerId`, `vehicleId` | **Today** if no dates |
+| `GET /reports/trips/by-date` | `startDate`, `endDate`, `centerId`, `vehicleId`, `groupBy` (day \| week \| month) | **Today** if no dates |
+| `GET /reports/trips/by-center` | `startDate`, `endDate`, `centerId`, `vehicleId` | **Today** if no dates |
+| `GET /reports/trips/by-origin-destination` | `startDate`, `endDate`, `centerId`, `vehicleId` | **Today** if no dates |
+| `GET /reports/trips/completion-rate` | `startDate`, `endDate`, `centerId`, `vehicleId` | **Today** if no dates |
+| `GET /reports/queues/summary` | `startDate`, `endDate`, `centerId` | Today |
+| `GET /reports/queues/by-center` | `startDate`, `endDate`, `centerId` | Today |
+| `GET /reports/queues/by-date` | `startDate`, `endDate`, `centerId` | Last 7 days |
+
+**Display**: Summary cards, time-series charts, center/OD tables. Use the filter options above; omit dates to get current-day (trip reports) or default ranges (queue reports).
+
+---
+
+### 4. Queue Management View
 
 **Purpose**: Monitor and manage queues at centers
 
@@ -261,18 +526,19 @@ async function startNextService(centerId, queueType) {
 
 ---
 
-### 4. Vehicles View
+### 5. Vehicles View
 
-**Purpose**: Track vehicle status and location, manage vehicle center assignments
+**Purpose**: Track vehicle status and location, display **vehicles availability by status**, manage center assignments (single and **bulk**).
 
-**Endpoints Used**:
-- `GET /api/v1/vehicles` - List vehicles
+**Endpoints Used** (see [Dashboard API Endpoints Reference](#dashboard-api-endpoints-reference)):
+- `GET /api/v1/vehicles` - List vehicles with pagination, search, sort
+- `GET /api/v1/vehicles/status-summary` - **Vehicle availability by status** (counts per status: AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING, IN_GARAGE)
+- `GET /api/v1/vehicles/by-status/:status` - **List vehicles for a given status** (e.g. all AVAILABLE or all IN_TRANSIT)
+- `GET /api/v1/vehicles/by-center/:centerId` - Vehicles currently at a center
 - `GET /api/v1/vehicles/:id` - Vehicle details
-- `GET /api/v1/vehicles/by-status/:status` - Vehicles by status
-- `GET /api/v1/vehicles/by-center/:centerId` - Vehicles at center
-- `GET /api/v1/vehicles/status-summary` - Status breakdown
-- `PUT /api/v1/vehicles/:id/assignment` - Update vehicle center assignment
-- `PUT /api/v1/vehicles/:id/status` - Update vehicle status and location
+- `PUT /api/v1/vehicles/:id/assignment` - Update single vehicle center assignment
+- `PUT /api/v1/vehicles/assignments/bulk` - **Bulk assign vehicles to centers** (body: `{ assignments: [ { vehicleId, centerId } ] }`; `centerId` can be `null` to clear)
+- `PUT /api/v1/vehicles/:id/status` - Update vehicle status and location (use sparingly; status is usually derived from trips)
 
 **Filtering Options**:
 - `search`: Search by plate number, name
@@ -299,10 +565,23 @@ async function loadVehicles(filters = {}) {
   return response.data;
 }
 
-// Load vehicles by status
+// Load vehicles by status (for "availability by status" view)
 async function loadVehiclesByStatus(status) {
   const response = await apiClient.get(`/vehicles/by-status/${status}`);
   return response.data;
+}
+
+// Load vehicle availability summary (counts per status)
+async function loadVehiclesStatusSummary() {
+  const response = await apiClient.get('/vehicles/status-summary');
+  return response.data;
+}
+
+// Bulk assign vehicles to centers
+async function bulkAssignVehiclesToCenters(assignments) {
+  // assignments: [ { vehicleId: 17589, centerId: 3656 }, { vehicleId: 16982, centerId: null } ]
+  const response = await apiClient.put('/vehicles/assignments/bulk', { assignments });
+  return response.data; // { updatedCount, results: [ { vehicleId, centerId, success, error? } ] }
 }
 
 // Load vehicles at a center
@@ -331,22 +610,24 @@ async function updateVehicleStatus(vehicleId, status, centerId = null, notes = n
 ```
 
 **Display Components**:
+- **Vehicles availability by status**: Cards or table using `GET /api/v1/vehicles/status-summary`; drill-down per status with `GET /api/v1/vehicles/by-status/:status`.
 - Vehicles table/grid with columns:
   - Plate number
   - Model/Brand
   - Current status
   - Current center (location)
   - Assigned center (assignment)
-  - Actions (View Details, Update Center, Update Status)
-- Status filter chips
-- Center filter dropdown
-- Search bar
+  - Actions (View Details, Update Center, Bulk Assign)
+- Status filter chips — call `GET /api/v1/vehicles/by-status/AVAILABLE` etc.
+- Center filter — `GET /api/v1/vehicles/by-center/:centerId`
+- Search bar — `GET /api/v1/vehicles?search=...`
+- **Bulk assign to centers**: Multi-select vehicles, choose center, call `PUT /api/v1/vehicles/assignments/bulk` with `assignments: [ { vehicleId, centerId } ]`; show per-item success/error from response.
 - Vehicle detail modal with:
   - Full vehicle information
   - Current trip details
   - Update center assignment form
-  - Update status form
-- Status summary cards
+  - Update status form (optional)
+- Status summary cards — `GET /api/v1/vehicles/status-summary`
 
 **Update Center Assignment Flow**:
 
@@ -477,7 +758,7 @@ function VehicleCenterAssignmentModal({ vehicle, centers, onClose, onUpdate }) {
 
 ---
 
-### 5. Centers View
+### 6. Centers View
 
 **Purpose**: Monitor center operations and vehicle counts
 
@@ -1292,8 +1573,9 @@ function handleAction(action, params) {
 
 This dashboard integration workflow provides:
 
-✅ **Complete API Coverage**: All endpoints for trips, queues, vehicles, and centers  
-✅ **Vehicle Management**: Update vehicle center assignments and status from dashboard  
+✅ **Complete API Coverage**: Trips (phase-based), trip events, stats (`/reports/*`), vehicles (including availability by status), bulk vehicle assignment, queues, centers  
+✅ **Dashboard API Endpoints Reference**: Single place for [Trips](#trips), [Trip events](#trip-events), [Stats](#stats-reports), [Vehicles availability](#vehicles--availability-by-status), [Bulk assign](#bulk-assign-vehicles-to-centers) with method and path for each  
+✅ **Vehicle Management**: Single and bulk center assignment; vehicle availability by status  
 ✅ **Real-Time Updates**: Polling strategies for live data  
 ✅ **Performance Optimization**: Batching, pagination, caching  
 ✅ **Error Handling**: Robust error management and retry logic  
@@ -1302,15 +1584,21 @@ This dashboard integration workflow provides:
 
 ### Key Vehicle Management Features
 
-- **Update Center Assignment**: Assign vehicles to centers or remove assignments
-- **Update Vehicle Status**: Change vehicle status and location (currentCenterId)
-- **View Vehicle Details**: See full vehicle information, trips, and history
-- **Filter by Center**: View all vehicles at a specific center
-- **Filter by Status**: View vehicles by operational status
+- **Vehicle availability by status**: Use `GET /api/v1/vehicles/status-summary` for counts and `GET /api/v1/vehicles/by-status/:status` to list vehicles per status (AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING, IN_GARAGE).
+- **Bulk assign to centers**: Use `PUT /api/v1/vehicles/assignments/bulk` with `{ assignments: [ { vehicleId, centerId } ] }`; response includes per-item success/error.
+- **Update Center Assignment**: Assign single vehicle to a center or remove assignment.
+- **Update Vehicle Status**: Change vehicle status and location (currentCenterId).
+- **View Vehicle Details**: See full vehicle information, trips, and history.
+- **Filter by Center**: View all vehicles at a specific center (`GET /api/v1/vehicles/by-center/:centerId`).
+- **Filter by Status**: View vehicles by operational status (`GET /api/v1/vehicles/by-status/:status`).
 
 ### Available Vehicle Update Endpoints
 
-- `PUT /api/v1/vehicles/:id/assignment` - Update center assignment (centerId)
+- `GET /api/v1/vehicles/status-summary` - Vehicle availability by status (counts)
+- `GET /api/v1/vehicles/by-status/:status` - List vehicles by status
+- `GET /api/v1/vehicles/by-center/:centerId` - List vehicles at a center
+- `PUT /api/v1/vehicles/:id/assignment` - Update single vehicle center assignment (centerId)
+- `PUT /api/v1/vehicles/assignments/bulk` - Bulk assign vehicles to centers (body: `{ assignments: [ { vehicleId, centerId } ] }`)
 - `PUT /api/v1/vehicles/:id/status` - Update status and location (currentCenterId)
 
 **Note**: 

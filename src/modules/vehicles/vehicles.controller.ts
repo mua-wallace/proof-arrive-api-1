@@ -1,5 +1,5 @@
 import { Controller, Post, Get, Put, Delete, Query, Param, Body, BadRequestException, NotFoundException, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery, ApiResponse, ApiBody, ApiParam } from '@nestjs/swagger';
 import { VehiclesService } from './vehicles.service';
 import { QrCodeService } from './qr-code.service';
 import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-credentials.decorator';
@@ -25,10 +25,16 @@ export class VehiclesController {
   @Get()
   @ApiOperation({
     summary: 'List all synced vehicles in the system with filtering and pagination',
-    description: 'Retrieves a paginated list of vehicles that have been synced from the Malambi API. Supports filtering, searching, sorting, and optional relation loading (qrCodes, group, assignedCenter, currentCenter).',
+    description: 'Retrieves a paginated list of vehicles that have been synced from the Malambi API. Supports filtering by status, searching, sorting, and optional relation loading (qrCodes, group, assignedCenter, currentCenter).',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: VehicleStatus,
+    description: 'Filter by vehicle status. Options: AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING, IN_GARAGE',
+  })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
@@ -58,7 +64,8 @@ export class VehiclesController {
 
     const options = {
       include: filterDto.include ? filterDto.include.split(',') : undefined,
-      accountId: accountIdNum, // Multi-tenant: filter by account ID
+      accountId: accountIdNum,
+      status: filterDto.status,
     };
 
     return this.vehiclesService.findAll(query, options);
@@ -273,20 +280,28 @@ export class VehiclesController {
   @Get('by-status/:status')
   @ApiOperation({
     summary: 'Get vehicles by status',
-    description: 'Retrieves all vehicles with a specific status. Useful for dashboard queries (e.g., all available vehicles, all vehicles in transit).',
+    description: 'Retrieves all vehicles with a specific status. Status is case-insensitive (e.g. AVAILABLE, available). Useful for dashboard queries.',
+  })
+  @ApiParam({
+    name: 'status',
+    enum: VehicleStatus,
+    description: 'Vehicle status. One of: AVAILABLE, IN_TRANSIT, WAITING_IN_QUEUE, LOADING, UNLOADING, IN_GARAGE',
   })
   @ApiResponse({ status: 200, description: 'Vehicles retrieved successfully' })
   @ApiResponse({ status: 400, description: 'Invalid status or account ID' })
   async getVehiclesByStatus(
-    @Param('status') status: VehicleStatus,
+    @Param('status') statusParam: string,
     @CurrentUserCredentials() credentials: Credentials,
   ): Promise<Vehicle[]> {
     const accountIdNum = Number(credentials.accid);
     if (isNaN(accountIdNum) || accountIdNum <= 0) {
       throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
     }
-    if (!Object.values(VehicleStatus).includes(status)) {
-      throw new BadRequestException(`Invalid vehicle status: ${status}`);
+    const status = statusParam?.toUpperCase() as VehicleStatus;
+    if (!status || !Object.values(VehicleStatus).includes(status)) {
+      throw new BadRequestException(
+        `Invalid vehicle status: ${statusParam}. Valid values: ${Object.values(VehicleStatus).join(', ')}`,
+      );
     }
     return this.vehiclesService.getVehiclesByStatus(status, accountIdNum);
   }
