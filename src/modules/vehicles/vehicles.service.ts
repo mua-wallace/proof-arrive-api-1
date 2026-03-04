@@ -35,7 +35,7 @@ export class VehiclesService extends BaseService<Vehicle> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[]; accountId?: number },
+    options?: { include?: string[]; accountId?: number; status?: VehicleStatus },
   ): Promise<PaginateResult<Vehicle>> {
     try {
       const page = query.page || 1;
@@ -57,6 +57,11 @@ export class VehiclesService extends BaseService<Vehicle> {
         } catch (error) {
           this.logger.warn('Failed to access accountId column, skipping accountId filter:', error);
         }
+      }
+
+      // Filter by status if provided
+      if (options?.status !== undefined && options.status !== null && options.status !== '') {
+        conditions.push(eq(schema.vehicles.status, options.status));
       }
 
       // Add search functionality

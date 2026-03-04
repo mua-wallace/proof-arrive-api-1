@@ -25,7 +25,7 @@ export class ReportsService {
   ) {}
 
   /**
-   * Get today's date range (start of day to start of next day) for queue stats
+   * Get today's date range (start of day to start of next day)
    */
   private getTodayDateRange(): { start: Date; end: Date } {
     const start = new Date();
@@ -33,6 +33,26 @@ export class ReportsService {
     const end = new Date(start);
     end.setDate(end.getDate() + 1);
     return { start, end };
+  }
+
+  /**
+   * Resolve trip report date range from query.
+   * - If startDate/endDate are provided, use them.
+   * - If neither is provided, default to "today" (current day) so trip reports are scoped to today by default.
+   */
+  private getTripReportDateRange(query: ReportQueryDto): { startDate?: Date; endDate?: Date } {
+    const hasStart = !!query.startDate;
+    const hasEnd = !!query.endDate;
+
+    if (hasStart || hasEnd) {
+      return {
+        startDate: hasStart ? new Date(query.startDate as string) : undefined,
+        endDate: hasEnd ? new Date(query.endDate as string) : undefined,
+      };
+    }
+
+    const { start, end } = this.getTodayDateRange();
+    return { startDate: start, endDate: end };
   }
 
   /**
@@ -237,13 +257,13 @@ export class ReportsService {
   private buildTripDateConditions(query: ReportQueryDto, accountId: number): { started: SQL[]; completed: SQL[] } {
     const started: SQL[] = [eq(schema.trips.accountId, accountId)];
     const completed: SQL[] = [eq(schema.trips.accountId, accountId), eq(schema.trips.status, TripStatus.COMPLETED)];
-    if (query.startDate) {
-      const startDate = new Date(query.startDate);
+
+    const { startDate, endDate } = this.getTripReportDateRange(query);
+    if (startDate) {
       started.push(gte(schema.trips.startedAt, startDate));
       completed.push(gte(schema.trips.endedAt, startDate));
     }
-    if (query.endDate) {
-      const endDate = new Date(query.endDate);
+    if (endDate) {
       started.push(lte(schema.trips.startedAt, endDate));
       completed.push(lte(schema.trips.endedAt, endDate));
     }
@@ -804,13 +824,15 @@ export class ReportsService {
     try {
       const baseStarted: SQL[] = [eq(schema.trips.accountId, accountId)];
       const baseCompleted: SQL[] = [eq(schema.trips.accountId, accountId), eq(schema.trips.status, TripStatus.COMPLETED)];
-      if (query.startDate) {
-        baseStarted.push(gte(schema.trips.startedAt, new Date(query.startDate)));
-        baseCompleted.push(gte(schema.trips.endedAt, new Date(query.startDate)));
+
+      const { startDate, endDate } = this.getTripReportDateRange(query);
+      if (startDate) {
+        baseStarted.push(gte(schema.trips.startedAt, startDate));
+        baseCompleted.push(gte(schema.trips.endedAt, startDate));
       }
-      if (query.endDate) {
-        baseStarted.push(lte(schema.trips.startedAt, new Date(query.endDate)));
-        baseCompleted.push(lte(schema.trips.endedAt, new Date(query.endDate)));
+      if (endDate) {
+        baseStarted.push(lte(schema.trips.startedAt, endDate));
+        baseCompleted.push(lte(schema.trips.endedAt, endDate));
       }
       if (query.centerId) {
         baseStarted.push(sql`(${schema.trips.originCenterId} = ${query.centerId} OR ${schema.trips.destinationCenterId} = ${query.centerId})`);
