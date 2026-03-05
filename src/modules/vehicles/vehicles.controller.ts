@@ -303,7 +303,10 @@ export class VehiclesController {
         `Invalid vehicle status: ${statusParam}. Valid values: ${Object.values(VehicleStatus).join(', ')}`,
       );
     }
-    return this.vehiclesService.getVehiclesByStatus(status, accountIdNum);
+    // Always include currentCenter relation for dashboard usage
+    return this.vehiclesService.getVehiclesByStatus(status, accountIdNum, {
+      include: ['currentCenter'],
+    });
   }
 
   @Get('by-center/:centerId')
