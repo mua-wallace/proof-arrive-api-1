@@ -60,7 +60,7 @@ export class VehiclesService extends BaseService<Vehicle> {
       }
 
       // Filter by status if provided
-      if (options?.status !== undefined && options.status !== null && options.status !== '') {
+      if (options?.status !== undefined && options.status !== null) {
         conditions.push(eq(schema.vehicles.status, options.status));
       }
 
