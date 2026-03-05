@@ -35,7 +35,7 @@ export class VehiclesService extends BaseService<Vehicle> {
 
   async findAll(
     query: PaginateQuery = {},
-    options?: { include?: string[]; accountId?: number },
+    options?: { include?: string[]; accountId?: number; status?: VehicleStatus },
   ): Promise<PaginateResult<Vehicle>> {
     try {
       const page = query.page || 1;
@@ -57,6 +57,11 @@ export class VehiclesService extends BaseService<Vehicle> {
         } catch (error) {
           this.logger.warn('Failed to access accountId column, skipping accountId filter:', error);
         }
+      }
+
+      // Filter by status if provided
+      if (options?.status !== undefined && options.status !== null) {
+        conditions.push(eq(schema.vehicles.status, options.status));
       }
 
       // Add search functionality
@@ -1648,11 +1653,63 @@ export class VehiclesService extends BaseService<Vehicle> {
         eq(schema.vehicles.status, status),
       ];
 
-      const vehicles = await this.dbConnection
-        .select()
-        .from(schema.vehicles)
-        .where(and(...conditions))
-        .orderBy(asc(schema.vehicles.plate));
+      const whereClause = and(...conditions);
+
+      // Build relations object for Drizzle query API
+      const withRelations: any = {};
+      if (options?.include) {
+        if (options.include.includes('qrCodes')) {
+          withRelations.qrCode = true;
+        }
+        if (options.include.includes('group')) {
+          withRelations.group = true;
+        }
+        if (options.include.includes('assignedCenter') || options.include.includes('center')) {
+          withRelations.assignedCenter = true;
+        }
+        if (options.include.includes('currentCenter')) {
+          withRelations.currentCenter = true;
+        }
+      }
+
+      let vehicles: any[] = [];
+
+      if (Object.keys(withRelations).length > 0) {
+        // When relations are requested, first get the IDs that match the conditions in the desired order
+        const matchingIds = await this.dbConnection
+          .select({ id: schema.vehicles.id })
+          .from(schema.vehicles)
+          .where(whereClause)
+          .orderBy(asc(schema.vehicles.plate));
+
+        const ids = matchingIds.map((row: any) => row.id);
+
+        if (ids.length > 0) {
+          // Use relational query API to get data with relations
+          const allData = await this.dbConnection.query.vehicles.findMany({
+            where: (vehiclesTable: any, { inArray: inArrayFn }: any) =>
+              inArrayFn(vehiclesTable.id, ids),
+            with: withRelations,
+          });
+
+          // Re-sort to match original order by plate
+          const idMap = new Map<number, number>(ids.map((id: number, idx: number) => [id, idx]));
+          allData.sort((a: any, b: any) => {
+            const aIdx: number = idMap.get(a.id) ?? 0;
+            const bIdx: number = idMap.get(b.id) ?? 0;
+            return aIdx - bIdx;
+          });
+
+          vehicles = allData;
+        }
+      } else {
+        // Use standard query when no relations are requested
+        vehicles = await this.dbConnection
+          .select()
+          .from(schema.vehicles)
+          .where(whereClause)
+          .orderBy(asc(schema.vehicles.plate));
+      }
 
       return vehicles as Vehicle[];
     } catch (error: any) {

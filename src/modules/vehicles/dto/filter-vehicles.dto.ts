@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsNumber, IsString, Min, Max } from 'class-validator';
+import { IsOptional, IsNumber, IsString, Min, Max, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
+import { VehicleStatus } from '@common/enums/vehicle-status.enum';
 
 export class FilterVehiclesDto {
   @ApiPropertyOptional({
@@ -25,6 +26,15 @@ export class FilterVehiclesDto {
   @Min(1)
   @Max(1000)
   limit?: number = 100;
+
+  @ApiPropertyOptional({
+    enum: VehicleStatus,
+    description: 'Filter by vehicle status',
+    example: VehicleStatus.AVAILABLE,
+  })
+  @IsOptional()
+  @IsEnum(VehicleStatus)
+  status?: VehicleStatus;
 
   @ApiPropertyOptional({
     example: 'ABC123',
