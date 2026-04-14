@@ -57,6 +57,26 @@ export class TripsController {
     });
   }
 
+  @Get('pending')
+  @ApiOperation({
+    summary: 'Get pending trips',
+    description: 'Returns ongoing trips created before the start of today (UTC)',
+  })
+  @ApiResponse({ status: 200, description: 'List of pending trips' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async findPending(
+    @CurrentUserCredentials() credentials: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.tripsService.findPendingTrips(
+      credentials.accid,
+      page ? Number(page) : 1,
+      limit ? Number(limit) : 20,
+    );
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a trip by ID' })
   @ApiResponse({ status: 200, description: 'Trip details' })
