@@ -940,6 +940,54 @@ export class TripsService extends BaseService<Trip> {
   }
 
   /**
+   * Find pending trips: status ONGOING and createdAt strictly before start of today (UTC)
+   */
+  async findPendingTrips(
+    accountId: number,
+    page = 1,
+    limit = 20,
+  ): Promise<PaginateResult<Trip>> {
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+
+    const conditions: SQL[] = [
+      eq(schema.trips.accountId, accountId),
+      eq(schema.trips.status, TripStatus.ONGOING),
+      lt(schema.trips.createdAt, startOfToday),
+    ];
+
+    const offset = (page - 1) * limit;
+
+    const totalResult = await this.dbConnection
+      .select({ count: count() })
+      .from(schema.trips)
+      .where(and(...conditions));
+    const total = totalResult[0]?.count || 0;
+
+    const trips = await this.dbConnection
+      .select()
+      .from(schema.trips)
+      .where(and(...conditions))
+      .orderBy(desc(schema.trips.startedAt))
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      data: trips,
+      meta: {
+        itemsPerPage: limit,
+        totalItems: total,
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        sortBy: [['startedAt', 'DESC']],
+      },
+      links: {
+        current: `?page=${page}&limit=${limit}`,
+      },
+    };
+  }
+
+  /**
    * Find all trips with FilterTripsDto (convenience method)
    * Converts FilterTripsDto to PaginateQuery format and calls findAll
    */
