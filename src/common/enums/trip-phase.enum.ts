@@ -22,4 +22,24 @@ export enum TripPhase {
   AT_DESTINATION_UNLOADING_ENDED = 'AT_DESTINATION_UNLOADING_ENDED',
   /** Trip finished */
   COMPLETED = 'COMPLETED',
+
+  // --- Exception phases (set when an exception is reported on an IN_TRANSIT trip) ---
+  /** Vehicle mechanically failed on route. Trip paused pending resolution. */
+  BREAKDOWN = 'BREAKDOWN',
+  /** Road accident confirmed. Incident reference issued. */
+  ACCIDENT = 'ACCIDENT',
+  /** Technician dispatched and en route or on site */
+  AWAITING_REPAIR = 'AWAITING_REPAIR',
+  /** Cargo being moved to rescue vehicle. Original trip will close on confirmation. */
+  TRANSFER_IN_PROGRESS = 'TRANSFER_IN_PROGRESS',
+  /** Truck has not arrived within expected window. Investigation needed. */
+  OVERDUE = 'OVERDUE',
+  /** Exception closed. Trip is back in transit towards destination. */
+  RESOLVED_RESUMED = 'RESOLVED_RESUMED',
+  /** Original trip sealed. Goods moved to rescue vehicle. Read-only record. */
+  CLOSED_TRANSFERRED = 'CLOSED_TRANSFERRED',
+  /** Goods sent back to origin. Trip cancelled. */
+  CLOSED_RETURNED = 'CLOSED_RETURNED',
+  /** Driver unreachable. Escalated — possible no-show. */
+  NO_SHOW_ESCALATED = 'NO_SHOW_ESCALATED',
 }

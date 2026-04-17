@@ -14,4 +14,7 @@ export * from './exits.schema';
 export * from './trips.schema';
 export * from './trip-events.schema';
 export * from './center-queues.schema';
+export * from './trip-exceptions.schema';
+export * from './exception-events.schema';
+export * from './exception-photos.schema';
 export * from './relations';
