@@ -20,6 +20,7 @@ import { CreateTripDto } from './dto/create-trip.dto';
 import { CreateTripEventDto } from './dto/create-trip-event.dto';
 import { FilterTripsDto } from './dto/filter-trips.dto';
 import { SetDestinationDto } from './dto/set-destination.dto';
+import { UpdateTripEtaDto } from '@modules/exceptions/dto/update-trip-eta.dto';
 
 @ApiTags('Trips')
 @Controller('trips')
@@ -184,6 +185,25 @@ export class TripsController {
       throw new BadRequestException('Authentication context (account and agent) is required for end-unloading');
     }
     return this.tripsService.endUnloading(id, accountId, agentId);
+  }
+
+  @Post(':id/set-eta')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Set or update the estimated arrival time for a trip',
+    description:
+      'Sets the estimated arrival time at the destination. Should be called at dispatch (exit-origin) or when ' +
+      'the dispatcher updates the ETA after a delay. The overdue detection timer runs against this value. ' +
+      'Without an ETA, overdue alerts cannot run.',
+  })
+  @ApiResponse({ status: 200, description: 'ETA updated on the trip.' })
+  @ApiResponse({ status: 404, description: 'Trip not found' })
+  async setEta(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateTripEtaDto,
+    @CurrentUserCredentials() credentials: any,
+  ) {
+    return this.tripsService.updateEta(id, dto.estimatedArrivalAt, credentials.accid);
   }
 
   @Post(':id/events')

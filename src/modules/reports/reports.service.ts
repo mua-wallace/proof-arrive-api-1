@@ -12,6 +12,8 @@ import { VehicleStatus } from '@common/enums/vehicle-status.enum';
 import { TripStatus } from '@common/enums/trip-status.enum';
 import { TripPurpose } from '@common/enums/trip-purpose.enum';
 import { QueueType } from '@common/enums/queue-type.enum';
+import { ExceptionStatus } from '@common/enums/exception-status.enum';
+import { ExceptionType } from '@common/enums/exception-type.enum';
 
 type DrizzleDatabase = ReturnType<typeof import('drizzle-orm/postgres-js').drizzle>;
 
@@ -124,6 +126,17 @@ export class ReportsService {
           ),
         );
 
+      const pendingTrips = await this.db
+        .select({ count: count() })
+        .from(schema.trips)
+        .where(
+          and(
+            eq(schema.trips.accountId, accountId),
+            eq(schema.trips.status, TripStatus.ONGOING),
+            lt(schema.trips.createdAt, todayStart),
+          ),
+        );
+
       const completedTripsInPeriod = await this.db
         .select({ count: count() })
         .from(schema.trips)
@@ -184,6 +197,40 @@ export class ReportsService {
         .from(schema.centers)
         .where(eq(schema.centers.accountId, accountId));
 
+      // --- Exceptions ---
+      const activeExceptionStatuses = [ExceptionStatus.ACTIVE, ExceptionStatus.IN_PROGRESS];
+      const activeExceptions = await this.db
+        .select({ count: count() })
+        .from(schema.tripExceptions)
+        .where(
+          and(
+            eq(schema.tripExceptions.accountId, accountId),
+            inArray(schema.tripExceptions.status, activeExceptionStatuses),
+          ),
+        );
+
+      const exceptionsByType = await this.db
+        .select({ type: schema.tripExceptions.type, count: count() })
+        .from(schema.tripExceptions)
+        .where(
+          and(
+            eq(schema.tripExceptions.accountId, accountId),
+            inArray(schema.tripExceptions.status, activeExceptionStatuses),
+          ),
+        )
+        .groupBy(schema.tripExceptions.type);
+
+      const resolvedExceptionsToday = await this.db
+        .select({ count: count() })
+        .from(schema.tripExceptions)
+        .where(
+          and(
+            eq(schema.tripExceptions.accountId, accountId),
+            gte(schema.tripExceptions.resolvedAt, todayStart),
+            lt(schema.tripExceptions.resolvedAt, todayEnd),
+          ),
+        );
+
       // --- Legacy (arrivals/exits in date range) ---
       let totalArrivals = 0;
       let totalExits = 0;
@@ -226,6 +273,7 @@ export class ReportsService {
         },
         trips: {
           ongoing: Number(ongoingTrips[0]?.count || 0),
+          pending: Number(pendingTrips[0]?.count || 0),
           completedInPeriod: Number(completedTripsInPeriod[0]?.count || 0),
           totalStartedInPeriod: Number(totalTripsInPeriod[0]?.count || 0),
           byPurpose: tripsByPurpose.map((r) => ({ purpose: r.purpose, count: Number(r.count) })),
@@ -237,6 +285,11 @@ export class ReportsService {
         },
         centers: {
           total: Number(totalCenters[0]?.count || 0),
+        },
+        exceptions: {
+          totalActive: Number(activeExceptions[0]?.count || 0),
+          byType: exceptionsByType.map((r) => ({ type: r.type, count: Number(r.count) })),
+          resolvedToday: Number(resolvedExceptionsToday[0]?.count || 0),
         },
         legacy: {
           totalArrivals,
@@ -790,8 +843,11 @@ export class ReportsService {
     try {
       const tripConditions = this.buildTripDateConditions(query, accountId);
 
-      const [ongoing, completedInPeriod, totalStartedInPeriod, byStatus, byPurpose, ongoingByPhase] = await Promise.all([
+      const { start: todayStart } = this.getTodayDateRange();
+
+      const [ongoing, pending, completedInPeriod, totalStartedInPeriod, byStatus, byPurpose, ongoingByPhase] = await Promise.all([
         this.db.select({ count: count() }).from(schema.trips).where(and(eq(schema.trips.accountId, accountId), eq(schema.trips.status, TripStatus.ONGOING))),
+        this.db.select({ count: count() }).from(schema.trips).where(and(eq(schema.trips.accountId, accountId), eq(schema.trips.status, TripStatus.ONGOING), lt(schema.trips.createdAt, todayStart))),
         this.db.select({ count: count() }).from(schema.trips).where(and(...tripConditions.completed)),
         this.db.select({ count: count() }).from(schema.trips).where(and(...tripConditions.started)),
         this.db.select({ status: schema.trips.status, count: count() }).from(schema.trips).where(and(...tripConditions.started)).groupBy(schema.trips.status),
@@ -804,6 +860,7 @@ export class ReportsService {
 
       return {
         ongoing: Number(ongoing[0]?.count || 0),
+        pending: Number(pending[0]?.count || 0),
         completedInPeriod: completedCount,
         totalStartedInPeriod: startedCount,
         completionRatePercent: startedCount > 0 ? Number(((completedCount / startedCount) * 100).toFixed(2)) : null,

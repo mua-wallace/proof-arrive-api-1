@@ -712,6 +712,19 @@ export class TripsService extends BaseService<Trip> {
   }
 
   /**
+   * Update estimated arrival time on a trip.
+   * Called at dispatch or when dispatcher updates ETA after a delay.
+   */
+  async updateEta(tripId: number, estimatedArrivalAt: string, accountId: number): Promise<Trip> {
+    const trip = await this.getTripOrThrow(tripId, accountId);
+    await this.dbConnection
+      .update(schema.trips)
+      .set({ estimatedArrivalAt: new Date(estimatedArrivalAt), updatedAt: new Date() })
+      .where(eq(schema.trips.id, tripId));
+    return (await this.getTripOrThrow(tripId, accountId)) as Trip;
+  }
+
+  /**
    * Find trip by ID with optional relations
    */
   async findTripById(id: number, accountId: number, include?: string[]): Promise<Trip | null> {

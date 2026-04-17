@@ -1,0 +1,633 @@
+  <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ProofArrive API — Complete Endpoint Flow Guide</title>
+<style>
+@page { size: A4; margin: 20mm 18mm 20mm 18mm; }
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+:root {
+  --teal:#0B7B8F; --teal-l:#E6F4F7; --teal-b:rgba(11,123,143,.15);
+  --amber:#D97706; --amber-l:#FFFBEB; --amber-b:rgba(217,119,6,.15);
+  --red:#DC2626; --red-l:#FEF2F2; --red-b:rgba(220,38,38,.15);
+  --blue:#2563EB; --blue-l:#EFF6FF; --blue-b:rgba(37,99,235,.15);
+  --orange:#EA580C; --orange-l:#FFF7ED; --orange-b:rgba(234,88,12,.15);
+  --green:#059669; --green-l:#ECFDF5; --green-b:rgba(5,150,105,.15);
+  --purple:#7C3AED; --purple-l:#F5F3FF; --purple-b:rgba(124,58,237,.15);
+  --gray:#64748B; --gray-l:#F1F5F9; --gray-b:rgba(100,116,139,.15);
+  --bg:#FFFFFF; --tx:#0F172A; --tx2:#334155; --tx3:#64748B;
+  --b1:#E2E8F0; --b2:#CBD5E1;
+}
+html,body { font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; background:var(--bg); color:var(--tx); line-height:1.55; font-size:11px; }
+.wrapper { max-width:100%; padding:0; }
+
+/* COVER */
+.cover { text-align:center; padding:60px 40px 40px; border-bottom:3px solid var(--teal); margin-bottom:30px; page-break-after:always; }
+.cover-logo { font-size:36px; font-weight:800; color:var(--teal); letter-spacing:-1px; }
+.cover-sub { font-size:14px; color:var(--tx2); margin-top:8px; }
+.cover-title { font-size:22px; font-weight:700; color:var(--tx); margin-top:40px; }
+.cover-desc { font-size:12px; color:var(--tx3); margin-top:10px; max-width:500px; margin-left:auto; margin-right:auto; line-height:1.7; }
+.cover-meta { display:flex; justify-content:center; gap:8px; margin-top:30px; flex-wrap:wrap; }
+.cover-meta span { font-size:9px; color:var(--tx3); background:var(--gray-l); border:1px solid var(--b1); border-radius:5px; padding:3px 10px; }
+.cover-meta .rev { background:var(--teal-l); border-color:var(--teal-b); color:var(--teal); font-weight:600; }
+
+/* TOC */
+.toc { page-break-after:always; padding:20px 0; }
+.toc h2 { font-size:16px; font-weight:700; color:var(--teal); margin-bottom:14px; }
+.toc-list { list-style:none; padding:0; }
+.toc-list li { padding:6px 0; border-bottom:1px dotted var(--b2); font-size:11px; color:var(--tx2); display:flex; justify-content:space-between; }
+.toc-list li span { color:var(--teal); font-weight:600; }
+
+/* SECTION */
+.section { margin-bottom:28px; }
+h2 { font-size:15px; font-weight:700; color:var(--teal); margin-bottom:10px; padding-bottom:5px; border-bottom:2px solid var(--teal); display:flex; align-items:center; gap:8px; page-break-after:avoid; }
+h2 .sec-num { width:22px; height:22px; border-radius:50%; background:var(--teal); color:#fff; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+h3 { font-size:12px; font-weight:700; color:var(--tx); margin:14px 0 6px; page-break-after:avoid; }
+h4 { font-size:10px; font-weight:700; color:var(--tx2); margin:10px 0 4px; text-transform:uppercase; letter-spacing:.04em; }
+p { color:var(--tx2); margin-bottom:6px; line-height:1.65; }
+ul, ol { padding-left:16px; color:var(--tx2); margin-bottom:6px; }
+li { margin-bottom:3px; line-height:1.55; }
+li strong, p strong { color:var(--tx); }
+code { background:#F1F5F9; border:1px solid var(--b1); border-radius:3px; padding:1px 4px; font-family:'SF Mono','Courier New',monospace; font-size:10px; color:var(--teal); }
+
+/* BADGE */
+.badge { display:inline-flex; align-items:center; font-size:8px; font-weight:700; padding:2px 7px; border-radius:10px; text-transform:uppercase; letter-spacing:.04em; border:1px solid; white-space:nowrap; vertical-align:middle; }
+.b-new { background:var(--orange-l); color:var(--orange); border-color:var(--orange-b); }
+.b-existing { background:var(--gray-l); color:var(--gray); border-color:var(--gray-b); }
+.b-teal { background:var(--teal-l); color:var(--teal); border-color:var(--teal-b); }
+.b-blue { background:var(--blue-l); color:var(--blue); border-color:var(--blue-b); }
+.b-amber { background:var(--amber-l); color:var(--amber); border-color:var(--amber-b); }
+.b-red { background:var(--red-l); color:var(--red); border-color:var(--red-b); }
+.b-green { background:var(--green-l); color:var(--green); border-color:var(--green-b); }
+.b-purple { background:var(--purple-l); color:var(--purple); border-color:var(--purple-b); }
+
+/* TABLE */
+table { width:100%; border-collapse:collapse; font-size:10px; margin:8px 0 14px; }
+th { background:#F1F5F9; padding:6px 8px; text-align:left; font-size:8px; font-weight:700; color:var(--tx3); text-transform:uppercase; letter-spacing:.05em; border-bottom:1.5px solid var(--b1); }
+td { padding:5px 8px; border-bottom:1px solid var(--b1); color:var(--tx2); vertical-align:top; line-height:1.45; }
+tr:last-child td { border-bottom:none; }
+td strong { color:var(--tx); }
+td code { font-size:9px; }
+
+/* FLOW BOX */
+.flow-box { border-radius:8px; padding:10px 12px; margin:8px 0; border:1.5px solid; page-break-inside:avoid; }
+.flow-box.teal { background:var(--teal-l); border-color:var(--teal-b); }
+.flow-box.amber { background:var(--amber-l); border-color:var(--amber-b); }
+.flow-box.red { background:var(--red-l); border-color:var(--red-b); }
+.flow-box.blue { background:var(--blue-l); border-color:var(--blue-b); }
+.flow-box.orange { background:var(--orange-l); border-color:var(--orange-b); }
+.flow-box.green { background:var(--green-l); border-color:var(--green-b); }
+.flow-box.purple { background:var(--purple-l); border-color:var(--purple-b); }
+.flow-box.gray { background:var(--gray-l); border-color:var(--gray-b); }
+.flow-box h4 { margin-top:0; color:var(--tx); font-size:10px; }
+.flow-box p { font-size:10px; }
+.flow-box code { font-size:9px; }
+
+/* CALLOUT */
+.callout { border-radius:6px; padding:8px 10px; margin:8px 0; display:flex; gap:8px; align-items:flex-start; border:1px solid; font-size:10px; page-break-inside:avoid; }
+.callout.info { background:var(--blue-l); border-color:var(--blue-b); }
+.callout.warn { background:var(--amber-l); border-color:var(--amber-b); }
+.callout.note { background:var(--teal-l); border-color:var(--teal-b); }
+.ci { font-size:12px; flex-shrink:0; }
+.cb { flex:1; color:var(--tx2); line-height:1.55; }
+.cb strong { color:var(--tx); }
+
+/* ARROW */
+.arrow { text-align:center; color:var(--teal); font-size:16px; margin:4px 0; }
+.arrow-label { text-align:center; font-size:9px; color:var(--tx3); margin:-2px 0 4px; }
+
+/* STEP */
+.step { display:flex; gap:8px; margin:6px 0; align-items:flex-start; }
+.step-num { width:18px; height:18px; border-radius:50%; background:var(--teal); color:#fff; font-size:9px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
+.step-body { flex:1; font-size:10px; color:var(--tx2); }
+.step-body strong { color:var(--tx); }
+
+/* PHASE LINE */
+.phase-line { display:flex; align-items:center; gap:4px; margin:3px 0; flex-wrap:wrap; }
+.phase { display:inline-flex; align-items:center; font-size:8px; font-weight:600; padding:2px 6px; border-radius:4px; background:var(--teal-l); color:var(--teal); border:1px solid var(--teal-b); }
+.phase.active { background:var(--teal); color:#fff; }
+.phase-arrow { color:var(--b2); font-size:10px; }
+
+hr { border:none; border-top:1px solid var(--b1); margin:20px 0; }
+
+@media print {
+  .section, .flow-box, .callout, table { page-break-inside:avoid; }
+  h2, h3 { page-break-after:avoid; }
+}
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+<!-- ========== COVER ========== -->
+<div class="cover">
+  <div class="cover-logo">ProofArrive</div>
+  <div class="cover-sub">by Malambi</div>
+  <div class="cover-title">Complete API Endpoint Flow Guide</div>
+  <div class="cover-desc">
+    Full integration reference for the web dashboard and mobile app.<br>
+    Covers the normal trip lifecycle and all exception handling flows:<br>
+    Breakdown, Accident, Goods Transfer, Overdue, and Escalation.
+  </div>
+  <div class="cover-meta">
+    <span>API Base: <strong>/api/v1</strong></span>
+    <span>Auth: <strong>Bearer JWT</strong></span>
+    <span class="rev">v2.0 — Exception Handling</span>
+    <span>April 2026</span>
+  </div>
+</div>
+
+<!-- ========== TOC ========== -->
+<div class="toc">
+  <h2>Table of Contents</h2>
+  <ul class="toc-list">
+    <li>1. Normal Trip Lifecycle (Happy Path) <span>3</span></li>
+    <li>2. Flow A — Vehicle Breakdown <span>4</span></li>
+    <li>3. Flow B — Road Accident <span>5</span></li>
+    <li>4. Flow C — Goods Transfer to Rescue Vehicle <span>6</span></li>
+    <li>5. Flow D — Overdue / No-Show <span>7</span></li>
+    <li>6. Flow E — Police Stop / Other <span>8</span></li>
+    <li>7. Dashboard Page Integration Map <span>8</span></li>
+    <li>8. Mobile App Integration Map <span>10</span></li>
+    <li>9. Overdue Detection (Frontend Logic) <span>11</span></li>
+    <li>10. Complete Endpoint Reference Table <span>11</span></li>
+  </ul>
+</div>
+
+<!-- ========== 1. NORMAL TRIP LIFECYCLE ========== -->
+<div class="section">
+  <h2><span class="sec-num">1</span> Normal Trip Lifecycle (Happy Path)</h2>
+  <p>This is the standard flow when no exceptions occur. Both mobile and dashboard use the same endpoints.</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body"><strong>Create trip</strong> &mdash; Vehicle arrives at origin center<br><code>POST /trips</code> &nbsp; body: <code>{ vehicleId, originCenterId, purpose }</code><br>Phase: <strong>AT_ORIGIN_ARRIVED</strong> &bull; Auto-adds vehicle to LOADING queue</div>
+  </div>
+  <div class="arrow">&darr;</div>
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body"><strong>Start loading</strong><br><code>POST /trips/:id/start-loading</code><br>Phase: <strong>AT_ORIGIN_LOADING</strong> &bull; Starts queue service</div>
+  </div>
+  <div class="arrow">&darr;</div>
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body"><strong>End loading</strong><br><code>POST /trips/:id/end-loading</code><br>Phase: <strong>AT_ORIGIN_LOADING_ENDED</strong></div>
+  </div>
+  <div class="arrow">&darr;</div>
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-body"><strong>Set destination &amp; mark ready to exit</strong><br><code>POST /trips/:id/set-destination</code> &nbsp; body: <code>{ destinationCenterId }</code><br>Phase: <strong>READY_TO_EXIT</strong></div>
+  </div>
+  <div class="arrow">&darr;</div>
+  <div class="step">
+    <div class="step-num">5</div>
+    <div class="step-body"><strong>Exit origin</strong> &mdash; Vehicle leaves center<br><code>POST /trips/:id/exit-origin</code><br>Phase: <strong>IN_TRANSIT</strong> &bull; vehicle.status = IN_TRANSIT</div>
+  </div>
+  <div class="arrow">&darr;</div>
+  <div class="step">
+    <div class="step-num" style="background:var(--orange)">5b</div>
+    <div class="step-body"><strong>Set ETA</strong> <span class="badge b-new">NEW</span> &mdash; Optional but recommended for overdue detection<br><code>POST /trips/:id/set-eta</code> &nbsp; body: <code>{ estimatedArrivalAt: "2026-04-17T15:30:00Z" }</code></div>
+  </div>
+  <div class="arrow">&darr;</div>
+
+  <div class="callout note">
+    <div class="ci">&#128666;</div>
+    <div class="cb"><strong>Vehicle is on the road.</strong> If anything goes wrong during transit, see Flows A-E below.</div>
+  </div>
+
+  <div class="arrow">&darr;</div>
+  <div class="step">
+    <div class="step-num">6</div>
+    <div class="step-body"><strong>Arrive at destination</strong><br><code>POST /trips/:id/arrive-destination</code><br>Phase: <strong>AT_DESTINATION_ARRIVED</strong> &bull; Auto-adds to UNLOADING queue</div>
+  </div>
+  <div class="arrow">&darr;</div>
+  <div class="step">
+    <div class="step-num">7</div>
+    <div class="step-body"><strong>Start unloading</strong><br><code>POST /trips/:id/start-unloading</code><br>Phase: <strong>AT_DESTINATION_UNLOADING</strong></div>
+  </div>
+  <div class="arrow">&darr;</div>
+  <div class="step">
+    <div class="step-num">8</div>
+    <div class="step-body"><strong>End unloading</strong><br><code>POST /trips/:id/end-unloading</code><br>Phase: <strong>AT_DESTINATION_UNLOADING_ENDED</strong> &bull; DELIVERY auto-completes to COMPLETED</div>
+  </div>
+  <div class="arrow">&darr;</div>
+  <div class="step">
+    <div class="step-num">9</div>
+    <div class="step-body"><strong>Complete trip</strong> (only needed for PICKUP purpose)<br><code>POST /trips/:id/complete</code><br>Phase: <strong>COMPLETED</strong></div>
+  </div>
+
+  <h4>Read endpoints used throughout</h4>
+  <table>
+    <thead><tr><th>Endpoint</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /trips/:id?include=vehicle,originCenter,destinationCenter,events</code></td><td>Trip detail page with all relations</td></tr>
+      <tr><td><code>GET /trips?status=ONGOING&amp;include=vehicle</code></td><td>Trips list page</td></tr>
+      <tr><td><code>GET /trips/pending</code></td><td>Trips started before today, still ongoing</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ========== 2. FLOW A — BREAKDOWN ========== -->
+<div class="section">
+  <h2><span class="sec-num">2</span> Flow A &mdash; Vehicle Breakdown</h2>
+  <p>Driver calls dispatcher. Dispatcher opens the in-transit trip on dashboard or app.</p>
+
+  <div class="flow-box amber">
+    <h4>&#128295; Step 1 &mdash; Report breakdown (Mobile or Dashboard)</h4>
+    <p><code>POST /exceptions/trips/:tripId/report</code></p>
+    <p>Body:</p>
+    <table>
+      <tr><td><strong>type</strong></td><td><code>"BREAKDOWN"</code> (required)</td></tr>
+      <tr><td><strong>location</strong></td><td><code>"N4 highway, km 142, after Edea junction"</code> (required, free text)</td></tr>
+      <tr><td><strong>description</strong></td><td><code>"Engine overheated. Coolant light on 20min."</code> (required, free text)</td></tr>
+    </table>
+    <p><strong>Result:</strong> trip.phase &rarr; <span class="badge b-amber">BREAKDOWN</span> &bull; exception.status = ACTIVE &bull; Returns exception with ID</p>
+  </div>
+
+  <div class="arrow">&darr;</div>
+  <p style="text-align:center;font-size:10px;color:var(--tx3);margin:4px 0;">Dispatcher chooses one of three resolution paths:</p>
+
+  <div class="flow-box teal">
+    <h4>Option A &mdash; Send Technician</h4>
+    <p><strong>1.</strong> <code>POST /exceptions/:exceptionId/dispatch-technician</code></p>
+    <table>
+      <tr><td><strong>technicianName</strong></td><td><code>"Jean-Paul Mbarga"</code></td></tr>
+      <tr><td><strong>technicianPhone</strong></td><td><code>"+237 677 123 456"</code></td></tr>
+      <tr><td><strong>estimatedArrivalTime</strong></td><td><code>"14:30"</code></td></tr>
+      <tr><td><strong>notes</strong></td><td><code>"Coming from Douala workshop"</code> (optional)</td></tr>
+    </table>
+    <p>Result: trip.phase &rarr; <span class="badge b-teal">AWAITING_REPAIR</span> &bull; exception.status = IN_PROGRESS</p>
+
+    <p style="margin-top:8px;"><strong>2.</strong> Add updates while waiting (optional, repeatable):<br>
+    <code>POST /exceptions/:exceptionId/notes</code> &nbsp; body: <code>{ note: "Technician on site now" }</code></p>
+
+    <p style="margin-top:8px;"><strong>3.</strong> <code>POST /exceptions/:exceptionId/mark-repaired</code></p>
+    <table>
+      <tr><td><strong>repairedBy</strong></td><td><code>"Jean-Paul Mbarga"</code></td></tr>
+      <tr><td><strong>repairDescription</strong></td><td><code>"Radiator hose replaced. Coolant refilled."</code></td></tr>
+      <tr><td><strong>repairReference</strong></td><td><code>"REP-2026-042"</code> (optional)</td></tr>
+    </table>
+    <p>Result: trip.phase &rarr; <span class="badge b-teal">IN_TRANSIT</span> (resumed!) &bull; exception.status = RESOLVED_RESUMED</p>
+  </div>
+
+  <div class="flow-box blue">
+    <h4>Option B &mdash; Transfer Goods to Rescue Vehicle</h4>
+    <p>See <strong>Flow C</strong> (Section 4) for the full transfer flow.</p>
+  </div>
+
+  <div class="flow-box gray">
+    <h4>Option C &mdash; Return Goods to Origin</h4>
+    <p><code>POST /exceptions/:exceptionId/return-to-origin</code></p>
+    <p>Body: <code>{ reason: "Cannot repair. No rescue vehicle available." }</code></p>
+    <p>Result: trip.phase &rarr; <span class="badge b-existing">CLOSED_RETURNED</span> &bull; trip.status = COMPLETED &bull; exception.status = CLOSED_RETURNED</p>
+  </div>
+</div>
+
+<!-- ========== 3. FLOW B — ACCIDENT ========== -->
+<div class="section">
+  <h2><span class="sec-num">3</span> Flow B &mdash; Road Accident</h2>
+  <p>Driver calls dispatcher, or reports directly from the mobile app (3-step form).</p>
+
+  <div class="flow-box red">
+    <h4>&#128680; Step 1 &mdash; Report accident (Mobile or Dashboard)</h4>
+    <p><code>POST /exceptions/trips/:tripId/report</code></p>
+    <table>
+      <tr><th>Field</th><th>Value</th><th>Required</th></tr>
+      <tr><td><strong>type</strong></td><td><code>"ACCIDENT"</code></td><td>Yes</td></tr>
+      <tr><td><strong>location</strong></td><td><code>"N3 road, km 67, between Edea and Douala"</code></td><td>Yes</td></tr>
+      <tr><td><strong>description</strong></td><td><code>"Rear-ended by truck at roundabout"</code></td><td>Yes</td></tr>
+      <tr><td><strong>severity</strong></td><td><code>"MINOR"</code> | <code>"MAJOR"</code> | <code>"CRITICAL"</code></td><td>Yes (accident)</td></tr>
+      <tr><td><strong>hasInjuries</strong></td><td><code>false</code></td><td>No</td></tr>
+      <tr><td><strong>isCargoDamaged</strong></td><td><code>true</code></td><td>No</td></tr>
+      <tr><td><strong>cargoDamageDescription</strong></td><td><code>"3 pallets shifted, outer packaging torn"</code></td><td>No</td></tr>
+      <tr><td><strong>isVehicleDriveable</strong></td><td><code>false</code></td><td>No</td></tr>
+      <tr><td><strong>policeReportReference</strong></td><td><code>"PV-2026-04-001"</code></td><td>No</td></tr>
+    </table>
+    <p><strong>Result:</strong> trip.phase &rarr; <span class="badge b-red">ACCIDENT</span> &bull; exception.incidentReference = <code>"INC-20260417-001"</code> (auto-generated)</p>
+  </div>
+
+  <div class="arrow">&darr;</div>
+  <p style="text-align:center;font-size:10px;color:var(--tx3);">Same 3 resolution options as Breakdown: dispatch-technician / dispatch-rescue-vehicle / return-to-origin</p>
+
+  <div class="callout info">
+    <div class="ci">&#128247;</div>
+    <div class="cb"><strong>Photos:</strong> Uploaded separately via your file storage service. Photo URLs are stored in the <code>exception_photos</code> table. The <code>GET /exceptions/:id</code> endpoint returns the photos array.</div>
+  </div>
+</div>
+
+<!-- ========== 4. FLOW C — GOODS TRANSFER ========== -->
+<div class="section">
+  <h2><span class="sec-num">4</span> Flow C &mdash; Goods Transfer to Rescue Vehicle</h2>
+  <p>Triggered from a Breakdown or Accident exception when goods need to move to another vehicle.</p>
+
+  <div class="flow-box blue">
+    <h4>&#128260; Step 1 &mdash; Dispatcher selects rescue vehicle (Dashboard)</h4>
+    <p>First, list available vehicles: <code>GET /vehicles/by-status/AVAILABLE</code></p>
+    <p>Then dispatch: <code>POST /exceptions/:exceptionId/dispatch-rescue-vehicle</code></p>
+    <table>
+      <tr><td><strong>rescueVehicleId</strong></td><td><code>17592</code> (required)</td></tr>
+      <tr><td><strong>transferLocation</strong></td><td><code>"N4 km 142, breakdown site"</code> (required)</td></tr>
+      <tr><td><strong>estimatedArrival</strong></td><td><code>"15:00"</code> (optional)</td></tr>
+      <tr><td><strong>notes</strong></td><td><code>"Dispatched from Douala center"</code> (optional)</td></tr>
+    </table>
+    <p>Result: trip.phase &rarr; <span class="badge b-blue">TRANSFER_IN_PROGRESS</span> &bull; exception.status = IN_PROGRESS</p>
+  </div>
+
+  <div class="arrow">&darr;</div>
+
+  <div class="flow-box blue">
+    <h4>Step 2 &mdash; Rescue vehicle arrives, staff scans QR (Mobile)</h4>
+    <p>Mobile app scans rescue vehicle QR code:</p>
+    <p><code>GET /vehicles/qr-code/:qrCode</code> &rarr; Confirms plate matches, shows original trip info</p>
+  </div>
+
+  <div class="arrow">&darr;</div>
+
+  <div class="flow-box blue">
+    <h4>Step 3 &mdash; Confirm transfer complete (Mobile)</h4>
+    <p><code>POST /exceptions/:exceptionId/confirm-transfer</code></p>
+    <table>
+      <tr><td><strong>cargoCountTransferred</strong></td><td><code>12</code> (pre-filled from manifest, editable)</td></tr>
+      <tr><td><strong>cargoCondition</strong></td><td><code>"GOOD"</code> | <code>"MINOR_DAMAGE"</code> | <code>"MAJOR_DAMAGE"</code></td></tr>
+      <tr><td><strong>notes</strong></td><td><code>"All 12 pallets transferred. No visible damage."</code> (optional)</td></tr>
+    </table>
+    <p><strong>What happens:</strong></p>
+    <ul>
+      <li>Original trip &rarr; <span class="badge b-existing">CLOSED_TRANSFERRED</span> (sealed, read-only)</li>
+      <li>Rescue trip &rarr; auto-created, phase = IN_TRANSIT, <code>isRescueTrip = true</code>, <code>originalTripId = original trip ID</code></li>
+      <li>Original vehicle &rarr; status = AVAILABLE</li>
+      <li>Rescue vehicle &rarr; status = IN_TRANSIT</li>
+    </ul>
+    <p>Response: <code>{ exception, rescueTrip }</code></p>
+  </div>
+
+  <div class="arrow">&darr;</div>
+
+  <div class="flow-box green">
+    <h4>Step 4 &mdash; Rescue vehicle arrives at destination (Mobile &mdash; normal flow)</h4>
+    <p>The rescue trip follows the standard arrival flow:</p>
+    <p><code>POST /trips/:rescueTripId/arrive-destination</code><br>
+    <code>POST /trips/:rescueTripId/start-unloading</code><br>
+    <code>POST /trips/:rescueTripId/end-unloading</code> &rarr; Rescue trip COMPLETED</p>
+  </div>
+</div>
+
+<!-- ========== 5. FLOW D — OVERDUE ========== -->
+<div class="section">
+  <h2><span class="sec-num">5</span> Flow D &mdash; Overdue / No-Show</h2>
+  <p>Triggered by frontend timer (checks ETA) or manually by dispatcher.</p>
+
+  <div class="flow-box orange">
+    <h4>&#9201; Step 1 &mdash; Flag as overdue</h4>
+    <p><code>POST /exceptions/trips/:tripId/report</code></p>
+    <table>
+      <tr><td><strong>type</strong></td><td><code>"OVERDUE"</code></td></tr>
+      <tr><td><strong>location</strong></td><td><code>"Unknown - last known: departed from Douala"</code></td></tr>
+      <tr><td><strong>description</strong></td><td><code>"Vehicle 45min past expected arrival time"</code></td></tr>
+    </table>
+    <p>Result: trip.phase &rarr; <span class="badge b-new">OVERDUE</span> &bull; exception.status = ACTIVE</p>
+  </div>
+
+  <div class="arrow">&darr;</div>
+
+  <div class="flow-box orange">
+    <h4>Step 2 &mdash; Dispatcher investigates</h4>
+    <p><strong>Get driver phone:</strong> <code>GET /trips/:id?include=vehicle</code></p>
+    <p><strong>Log each call attempt</strong> (repeatable):</p>
+    <p><code>POST /exceptions/:exceptionId/log-call-attempt</code></p>
+    <table>
+      <tr><td><strong>outcome</strong></td><td><code>"ANSWERED"</code> | <code>"NO_ANSWER"</code> | <code>"VOICEMAIL"</code></td></tr>
+      <tr><td><strong>notes</strong></td><td><code>"Driver says stuck in traffic. New ETA: 16:00"</code> (optional)</td></tr>
+    </table>
+    <p><strong>If driver gives new ETA:</strong><br>
+    <code>POST /trips/:tripId/set-eta</code> &nbsp; body: <code>{ estimatedArrivalAt: "2026-04-17T16:00:00Z" }</code></p>
+    <p><strong>If driver reports breakdown/accident:</strong><br>
+    <code>POST /exceptions/trips/:tripId/report</code> with <code>type: "BREAKDOWN"</code> or <code>"ACCIDENT"</code> (opens Flow A or B)</p>
+  </div>
+
+  <div class="arrow">&darr;</div>
+
+  <div class="flow-box red">
+    <h4>Step 3 &mdash; Escalate if unreachable (after 2h or dispatcher's discretion)</h4>
+    <p><code>POST /exceptions/:exceptionId/escalate</code></p>
+    <table>
+      <tr><td><strong>reason</strong></td><td><code>"DRIVER_UNREACHABLE"</code> | <code>"SUSPECTED_BREAKDOWN"</code> | <code>"SUSPECTED_ACCIDENT"</code> | <code>"UNKNOWN"</code></td></tr>
+      <tr><td><strong>contactAttemptsMade</strong></td><td><code>5</code></td></tr>
+      <tr><td><strong>notes</strong></td><td><code>"Phone off since 14:00. Police notified."</code> (required)</td></tr>
+      <tr><td><strong>actionsTaken</strong></td><td><code>["REPORTED_TO_POLICE", "NOTIFIED_MANAGEMENT"]</code> (optional)</td></tr>
+      <tr><td><strong>policeReportReference</strong></td><td><code>"PV-2026-04-003"</code> (optional)</td></tr>
+    </table>
+    <p>Result: trip.phase &rarr; <span class="badge b-red">NO_SHOW_ESCALATED</span> &bull; trip.status = COMPLETED (sealed) &bull; exception.status = ESCALATED</p>
+  </div>
+</div>
+
+<!-- ========== 6. FLOW E — POLICE / OTHER ========== -->
+<div class="section">
+  <h2><span class="sec-num">6</span> Flow E &mdash; Police Stop / Other</h2>
+  <p>Simple flow. Logs the event, dispatcher is notified, trip stays IN_TRANSIT.</p>
+
+  <div class="flow-box gray">
+    <h4>Report from mobile</h4>
+    <p><code>POST /exceptions/trips/:tripId/report</code></p>
+    <table>
+      <tr><td><strong>type</strong></td><td><code>"POLICE_STOP"</code> or <code>"OTHER"</code></td></tr>
+      <tr><td><strong>location</strong></td><td><code>"Checkpoint before Yaounde bypass"</code></td></tr>
+      <tr><td><strong>description</strong></td><td><code>"Routine document check. Estimated 30min delay."</code></td></tr>
+    </table>
+    <p>Result: trip.phase stays <span class="badge b-teal">IN_TRANSIT</span> (no phase change) &bull; exception.status = ACTIVE &bull; Dispatcher sees it in active exceptions list</p>
+  </div>
+</div>
+
+<!-- ========== 7. DASHBOARD INTEGRATION ========== -->
+<div class="section">
+  <h2><span class="sec-num">7</span> Dashboard Page Integration Map</h2>
+  <p>Which API endpoint powers each UI element on the web dashboard.</p>
+
+  <h3>7.1 Main Dashboard Page</h3>
+  <table>
+    <thead><tr><th>UI Element</th><th>Endpoint</th><th>Data Used</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Exception Alert Banner</strong> (top)</td><td><code>GET /exceptions/active</code></td><td>Shows one pill per active exception: type badge + vehicle plate. "View all exceptions" links to /incidents.</td></tr>
+      <tr><td><strong>KPI Card: Exceptions</strong></td><td><code>GET /exceptions/summary</code></td><td><code>totalActive</code>. Red when &gt; 0, green "All clear" when 0.</td></tr>
+      <tr><td><strong>KPI Cards: Trips, Completed, etc.</strong></td><td><code>GET /reports/dashboard</code></td><td><code>trips.ongoing</code>, <code>trips.completedInPeriod</code>, <code>exceptions.totalActive</code></td></tr>
+      <tr><td><strong>Active Exceptions Table</strong></td><td><code>GET /exceptions/active</code></td><td>Type, vehicle plate, route, reported time, reported by, location, action needed. "Manage &rarr;" button.</td></tr>
+      <tr><td><strong>All Active Trips Table</strong></td><td><code>GET /trips?status=ONGOING&amp;include=vehicle</code></td><td>Exception trips show colored dot + badge from trip.phase. Rescue trips have <code>isRescueTrip=true</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.2 Trips Page</h3>
+  <table>
+    <thead><tr><th>Filter Chip</th><th>Query</th></tr></thead>
+    <tbody>
+      <tr><td>All / Ongoing</td><td><code>GET /trips?status=ONGOING</code></td></tr>
+      <tr><td>Completed</td><td><code>GET /trips?status=COMPLETED</code></td></tr>
+      <tr><td>Exceptions (all types)</td><td><code>GET /trips?phase=BREAKDOWN</code> + <code>ACCIDENT</code> + <code>OVERDUE</code> + <code>TRANSFER_IN_PROGRESS</code></td></tr>
+      <tr><td>Breakdown</td><td><code>GET /trips?phase=BREAKDOWN</code></td></tr>
+      <tr><td>Accident</td><td><code>GET /trips?phase=ACCIDENT</code></td></tr>
+      <tr><td>Overdue</td><td><code>GET /trips?phase=OVERDUE</code></td></tr>
+      <tr><td>Transfer</td><td><code>GET /trips?phase=TRANSFER_IN_PROGRESS</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.3 Trip Detail Page</h3>
+  <table>
+    <thead><tr><th>UI Element</th><th>Endpoint</th></tr></thead>
+    <tbody>
+      <tr><td>Trip data + timeline</td><td><code>GET /trips/:id?include=vehicle,originCenter,destinationCenter,events</code></td></tr>
+      <tr><td>Exception banner + side panel</td><td><code>GET /exceptions/trip/:tripId</code></td></tr>
+      <tr><td>Exception detail (full)</td><td><code>GET /exceptions/:id</code></td></tr>
+      <tr><td>Exception timeline</td><td><code>GET /exceptions/:id/timeline</code></td></tr>
+      <tr><td>"Report exception" button</td><td><code>POST /exceptions/trips/:tripId/report</code></td></tr>
+      <tr><td>Dispatch technician</td><td><code>POST /exceptions/:id/dispatch-technician</code></td></tr>
+      <tr><td>Mark repaired</td><td><code>POST /exceptions/:id/mark-repaired</code></td></tr>
+      <tr><td>Dispatch rescue vehicle</td><td><code>POST /exceptions/:id/dispatch-rescue-vehicle</code></td></tr>
+      <tr><td>Confirm transfer</td><td><code>POST /exceptions/:id/confirm-transfer</code></td></tr>
+      <tr><td>Return to origin</td><td><code>POST /exceptions/:id/return-to-origin</code></td></tr>
+      <tr><td>Log call attempt</td><td><code>POST /exceptions/:id/log-call-attempt</code></td></tr>
+      <tr><td>Escalate</td><td><code>POST /exceptions/:id/escalate</code></td></tr>
+      <tr><td>Add note</td><td><code>POST /exceptions/:id/notes</code></td></tr>
+      <tr><td>Linked trips (transfer)</td><td><code>GET /trips/:rescueTripId</code> &mdash; linked via <code>originalTripId</code> / <code>isRescueTrip</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.4 Incidents &amp; Exceptions Log Page <code>/incidents</code></h3>
+  <table>
+    <thead><tr><th>UI Element</th><th>Endpoint</th></tr></thead>
+    <tbody>
+      <tr><td>KPI Cards (Breakdowns, Accidents, Transfers, Resolved Today)</td><td><code>GET /exceptions/summary</code></td></tr>
+      <tr><td>Incident List</td><td><code>GET /exceptions?type=BREAKDOWN&amp;status=ACTIVE&amp;page=1</code></td></tr>
+      <tr><td>Filter: All</td><td><code>GET /exceptions</code></td></tr>
+      <tr><td>Filter: Active</td><td><code>GET /exceptions?status=ACTIVE</code></td></tr>
+      <tr><td>Filter: Resolved</td><td><code>GET /exceptions?status=RESOLVED_RESUMED</code></td></tr>
+      <tr><td>Filter: Breakdown</td><td><code>GET /exceptions?type=BREAKDOWN</code></td></tr>
+      <tr><td>Filter: Accident</td><td><code>GET /exceptions?type=ACCIDENT</code></td></tr>
+      <tr><td>Filter: Overdue</td><td><code>GET /exceptions?type=OVERDUE</code></td></tr>
+      <tr><td>Search</td><td><code>GET /exceptions?search=Edea</code></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ========== 8. MOBILE INTEGRATION ========== -->
+<div class="section">
+  <h2><span class="sec-num">8</span> Mobile App Integration Map</h2>
+
+  <h3>8.1 Trip Detail Screen</h3>
+  <table>
+    <thead><tr><th>Action</th><th>Endpoint</th><th>Condition</th></tr></thead>
+    <tbody>
+      <tr><td>Load trip</td><td><code>GET /trips/:id?include=vehicle,events</code></td><td>Always</td></tr>
+      <tr><td>Show "Report an issue" button</td><td>&mdash;</td><td>When trip.phase = <code>IN_TRANSIT</code></td></tr>
+      <tr><td>Report Breakdown</td><td><code>POST /exceptions/trips/:tripId/report</code> <code>{ type: "BREAKDOWN" }</code></td><td>User selects "Vehicle breakdown"</td></tr>
+      <tr><td>Report Accident</td><td><code>POST /exceptions/trips/:tripId/report</code> <code>{ type: "ACCIDENT" }</code></td><td>User selects "Accident / collision"</td></tr>
+      <tr><td>Report Police Stop</td><td><code>POST /exceptions/trips/:tripId/report</code> <code>{ type: "POLICE_STOP" }</code></td><td>User selects "Police stop / checkpoint"</td></tr>
+      <tr><td>Report Other</td><td><code>POST /exceptions/trips/:tripId/report</code> <code>{ type: "OTHER" }</code></td><td>User selects "Other issue"</td></tr>
+    </tbody>
+  </table>
+
+  <h3>8.2 Transfer Flow (at breakdown site)</h3>
+  <table>
+    <thead><tr><th>Step</th><th>Screen</th><th>Endpoint</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Awaiting rescue vehicle (shows plate + ETA)</td><td><code>GET /exceptions/:id</code> &rarr; <code>rescueVehicleId</code></td></tr>
+      <tr><td>2</td><td>Scan rescue vehicle QR code</td><td><code>GET /vehicles/qr-code/:qrCode</code></td></tr>
+      <tr><td>3</td><td>Confirm transfer (cargo count + condition)</td><td><code>POST /exceptions/:id/confirm-transfer</code></td></tr>
+      <tr><td>4</td><td>Success: "Trip closed. Rescue trip created."</td><td>Response includes <code>rescueTrip</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>8.3 Incoming Arrivals (destination center)</h3>
+  <table>
+    <thead><tr><th>Display</th><th>Endpoint / Logic</th></tr></thead>
+    <tbody>
+      <tr><td>List incoming trips</td><td><code>GET /trips?status=ONGOING&amp;destinationCenterId=:myCenterId&amp;include=vehicle</code></td></tr>
+      <tr><td>Normal trip</td><td>Blue dot + ETA from <code>trip.estimatedArrivalAt</code></td></tr>
+      <tr><td>Overdue trip</td><td>Amber pulsing dot when <code>trip.phase = "OVERDUE"</code></td></tr>
+      <tr><td>Rescue trip</td><td>Purple badge when <code>trip.isRescueTrip = true</code>. Get original: <code>GET /trips/:originalTripId</code></td></tr>
+      <tr><td>QR scan arrival</td><td><code>POST /trips/:id/arrive-destination</code> &rarr; normal unloading flow</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ========== 9. OVERDUE DETECTION ========== -->
+<div class="section">
+  <h2><span class="sec-num">9</span> Overdue Detection (Frontend Logic)</h2>
+  <p>The backend provides the data. The <strong>frontend</strong> compares current time against the ETA.</p>
+
+  <div class="callout warn">
+    <div class="ci">&#9201;</div>
+    <div class="cb"><strong>No GPS.</strong> Overdue is purely time-based. The frontend polls <code>GET /trips?status=ONGOING&amp;phase=IN_TRANSIT</code> and compares <code>trip.estimatedArrivalAt</code> against the current time.</div>
+  </div>
+
+  <table>
+    <thead><tr><th>Threshold</th><th>Frontend Action</th><th>API Call</th></tr></thead>
+    <tbody>
+      <tr><td>ETA + 30 min</td><td>Show amber "Overdue" badge on trip</td><td>Optional: auto-report via <code>POST /exceptions/trips/:id/report { type: "OVERDUE" }</code></td></tr>
+      <tr><td>ETA + 1 hour</td><td>Show orange alert + "Call driver" prompt</td><td>&mdash;</td></tr>
+      <tr><td>ETA + 2 hours</td><td>Show red alert + "Escalate" prompt</td><td>&mdash;</td></tr>
+    </tbody>
+  </table>
+  <p>The dispatcher can also manually flag any trip as overdue from the trip action menu at any time.</p>
+</div>
+
+<!-- ========== 10. ENDPOINT REFERENCE ========== -->
+<div class="section">
+  <h2><span class="sec-num">10</span> Complete Endpoint Reference</h2>
+
+  <h3>Existing Endpoints (unchanged)</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Endpoint</th><th>Used By</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>POST</td><td><code>/auth/login</code></td><td>Both</td><td>Login with Malambi credentials</td></tr>
+      <tr><td>POST</td><td><code>/auth/refresh-token</code></td><td>Both</td><td>Refresh JWT tokens</td></tr>
+      <tr><td>GET</td><td><code>/auth/profile</code></td><td>Both</td><td>Current user profile</td></tr>
+      <tr><td>POST</td><td><code>/trips</code></td><td>Both</td><td>Create a new trip</td></tr>
+      <tr><td>GET</td><td><code>/trips</code></td><td>Both</td><td>List trips with filters</td></tr>
+      <tr><td>GET</td><td><code>/trips/pending</code></td><td>Dashboard</td><td>Ongoing trips from before today</td></tr>
+      <tr><td>GET</td><td><code>/trips/:id</code></td><td>Both</td><td>Trip detail with relations</td></tr>
+      <tr><td>POST</td><td><code>/trips/:id/start-loading</code></td><td>Mobile</td><td>Begin loading at origin</td></tr>
+      <tr><td>POST</td><td><code>/trips/:id/end-loading</code></td><td>Mobile</td><td>Finish loading at origin</td></tr>
+      <tr><td>POST</td><td><code>/trips/:id/set-destination</code></td><td>Both</td><td>Set destination + mark ready to exit</td></tr>
+      <tr><td>POST</td><td><code>/trips/:id/exit-origin</code></td><td>Mobile</td><td>Record vehicle exit from origin</td></tr>
+      <tr><td>POST</td><td><code>/trips/:id/arrive-destination</code></td><td>Mobile</td><td>Record arrival at destination</td></tr>
+      <tr><td>POST</td><td><code>/trips/:id/start-unloading</code></td><td>Mobile</td><td>Begin unloading at destination</td></tr>
+      <tr><td>POST</td><td><code>/trips/:id/end-unloading</code></td><td>Mobile</td><td>Finish unloading</td></tr>
+      <tr><td>POST</td><td><code>/trips/:id/complete</code></td><td>Both</td><td>Complete trip (PICKUP only)</td></tr>
+      <tr><td>GET</td><td><code>/vehicles/by-status/:status</code></td><td>Dashboard</td><td>List vehicles by status</td></tr>
+      <tr><td>GET</td><td><code>/vehicles/qr-code/:qrCode</code></td><td>Mobile</td><td>Validate QR code</td></tr>
+      <tr><td>GET</td><td><code>/reports/dashboard</code></td><td>Dashboard</td><td>Dashboard summary KPIs</td></tr>
+    </tbody>
+  </table>
+
+  <h3>New Endpoints <span class="badge b-new">NEW</span></h3>
+  <table>
+    <thead><tr><th>Method</th><th>Endpoint</th><th>Used By</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>POST</td><td><code>/trips/:id/set-eta</code></td><td>Both</td><td>Set/update estimated arrival time</td></tr>
+      <tr><td>POST</td><td><code>/exceptions/trips/:tripId/report</code></td><td>Both</td><td>Report an exception on an in-transit trip</td></tr>
+      <tr><td>POST</td><td><code>/exceptions/:id/dispatch-technician</code></td><td>Dashboard</td><td>Dispatch technician to breakdown/accident site</td></tr>
+      <tr><td>POST</td><td><code>/exceptions/:id/mark-repaired</code></td><td>Dashboard</td><td>Mark repaired, resume trip to IN_TRANSIT</td></tr>
+      <tr><td>POST</td><td><code>/exceptions/:id/dispatch-rescue-vehicle</code></td><td>Dashboard</td><td>Dispatch available vehicle for goods transfer</td></tr>
+      <tr><td>POST</td><td><code>/exceptions/:id/confirm-transfer</code></td><td>Mobile</td><td>Confirm goods transfer, seal original trip, create rescue trip</td></tr>
+      <tr><td>POST</td><td><code>/exceptions/:id/return-to-origin</code></td><td>Dashboard</td><td>Return goods to origin, close trip</td></tr>
+      <tr><td>POST</td><td><code>/exceptions/:id/log-call-attempt</code></td><td>Dashboard</td><td>Log driver contact attempt (overdue flow)</td></tr>
+      <tr><td>POST</td><td><code>/exceptions/:id/escalate</code></td><td>Dashboard</td><td>Escalate to no-show, close trip</td></tr>
+      <tr><td>POST</td><td><code>/exceptions/:id/notes</code></td><td>Dashboard</td><td>Add dispatcher note to exception timeline</td></tr>
+      <tr><td>GET</td><td><code>/exceptions</code></td><td>Dashboard</td><td>Paginated list with filters (Incidents page)</td></tr>
+      <tr><td>GET</td><td><code>/exceptions/active</code></td><td>Dashboard</td><td>Active exceptions (dashboard banner + table)</td></tr>
+      <tr><td>GET</td><td><code>/exceptions/summary</code></td><td>Dashboard</td><td>KPI counts (breakdowns, accidents, transfers, resolved today)</td></tr>
+      <tr><td>GET</td><td><code>/exceptions/trip/:tripId</code></td><td>Both</td><td>All exceptions for a trip (trip detail side panel)</td></tr>
+      <tr><td>GET</td><td><code>/exceptions/:id</code></td><td>Both</td><td>Full exception detail with relations</td></tr>
+      <tr><td>GET</td><td><code>/exceptions/:id/timeline</code></td><td>Both</td><td>Ordered exception timeline events</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- FOOTER -->
+<div style="text-align:center;padding:20px 0;border-top:2px solid var(--teal);margin-top:20px;font-size:9px;color:var(--tx3);">
+  ProofArrive API &mdash; Complete Endpoint Flow Guide &mdash; v2.0 &mdash; April 2026 &mdash; Malambi
+</div>
+
+</div>
+</body>
+</html>
