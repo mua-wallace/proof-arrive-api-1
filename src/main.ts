@@ -73,13 +73,14 @@ async function bootstrap() {
   if (appConfig().app.mode === MODE.DEVELOPMENT) {
     const apiDescription = 
       '## Overview\n\n' +
-      'The **Proof Arrive API** is a comprehensive REST API for tracking and managing vehicle logistics operations, including arrivals, exits, and inter-center transfers. The system integrates with the Malambi third-party API to synchronize user, vehicle, and center data.\n\n' +
+      'The **Proof Arrive API** is a comprehensive REST API for tracking and managing vehicle logistics operations via trips and trip events. The system integrates with the Malambi third-party API to synchronize user, vehicle, and center data.\n\n' +
       '## Key Features\n\n' +
-      '- **Vehicle Arrival Tracking**: Record and track vehicle arrivals at centers with QR code scanning, GPS coordinates, and processing stages\n' +
-      '- **Exit Management**: Track vehicle exits from centers with destination information and exit types\n' +
-      '- **Processing Stages**: Track multi-stage processing workflows for arrivals (e.g., unloading, inspection, etc.)\n' +
+      '- **Trips**: End-to-end tracking of vehicle journeys between centers, from start through loading/unloading to completion\n' +
+      '- **Trip Events**: Immutable timeline of arrivals, queueing, service start/end, and exits at each center\n' +
+      '- **Queues**: Loading and unloading queues per center\n' +
+      '- **Exceptions**: Reporting and resolution of issues encountered during trips\n' +
       '- **Data Synchronization**: Automatic background job processing to sync users, vehicles, and centers from Malambi API\n' +
-      '- **Audit Trail**: All records include `createdBy` fields to track which user performed each action\n\n' +
+      '- **Audit Trail**: Trip events form an append-only history and records include `createdBy` fields\n\n' +
       '## Authentication\n\n' +
       'The API uses **JWT (JSON Web Token)** authentication. Most endpoints require a valid JWT access token in the Authorization header:\n\n' +
       '```\n' +
@@ -103,13 +104,11 @@ async function bootstrap() {
       '- **Centers**: Can be synced on-demand by geozone ID\n\n' +
       'All sync operations run asynchronously in the background to ensure optimal API response times.\n\n' +
       '## Common Operations\n\n' +
-      '### Arrival Workflow\n' +
-      '1. Create arrival record when vehicle arrives at a center (`POST /api/v1/arrivals`)\n' +
-      '2. Start processing stages as needed (`POST /api/v1/arrivals/:id/process`)\n' +
-      '3. Update processing stage status (`PUT /api/v1/arrivals/:id/process/:stageId`)\n' +
-      '4. Update arrival status (`PUT /api/v1/arrivals/:id/status`)\n\n' +
-      '### Exit Workflow\n' +
-      '1. Create exit record when vehicle leaves a center (`POST /api/v1/exits`)\n\n' +
+      '### Trip Workflow\n' +
+      '1. Start a trip when a vehicle leaves an origin center (`POST /api/v1/trips`)\n' +
+      '2. Record events as the vehicle moves: arrival, queueing, service start/end, exit (`POST /api/v1/trips/:id/events`)\n' +
+      '3. Set the destination center when ready to exit (`POST /api/v1/trips/:id/set-destination`)\n' +
+      '4. Complete the trip when unloading ends at the destination (`POST /api/v1/trips/:id/end-unloading`)\n\n' +
       '## Pagination & Filtering\n\n' +
       'Most list endpoints support:\n' +
       '- **Pagination**: `page` (default: 1) and `limit` (default: 100) query parameters\n' +
@@ -135,8 +134,9 @@ async function bootstrap() {
         .addTag('Users', 'API for managing users (synced from Malambi)')
         .addTag('Centers', 'API for managing centers/locations (synced from Malambi)')
         .addTag('Vehicles', 'API for managing vehicles (synced from Malambi)')
-        .addTag('Arrivals', 'API for tracking vehicle arrivals at centers')
-        .addTag('Exits', 'API for tracking vehicle exits from centers')
+        .addTag('Trips', 'API for managing vehicle trips and trip events')
+        .addTag('Queues', 'API for managing loading/unloading queues at centers')
+        .addTag('Exceptions', 'API for reporting and resolving trip exceptions')
         .addTag('Reports', 'API for generating and managing reports')
         .addBearerAuth(
           {

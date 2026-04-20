@@ -28,7 +28,7 @@ export class CentersController {
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, vehicles, arrivals, exits)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, vehicles, tripEvents, originTrips, destinationTrips)' })
   async findAll(
     @Query() filterDto: FilterCentersDto,
     @CurrentUserCredentials() credentials: Credentials,
@@ -151,7 +151,7 @@ export class CentersController {
     summary: 'Get center details by ID',
     description: 'Provides access to view the details of a specific center by its internal ID (serial integer).',
   })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, vehicles, arrivals, exits)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (geozone, vehicles, tripEvents, originTrips, destinationTrips)' })
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,

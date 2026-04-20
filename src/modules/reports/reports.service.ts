@@ -14,6 +14,15 @@ import { TripPurpose } from '@common/enums/trip-purpose.enum';
 import { QueueType } from '@common/enums/queue-type.enum';
 import { ExceptionStatus } from '@common/enums/exception-status.enum';
 import { ExceptionType } from '@common/enums/exception-type.enum';
+import { TripEventType } from '@common/enums/trip-event-type.enum';
+
+const ARRIVAL_EVENT_TYPES = [TripEventType.ARRIVED, TripEventType.ARRIVED_DESTINATION];
+const PROCESSING_EVENT_TYPES = [
+  TripEventType.QUEUED,
+  TripEventType.SERVICE_STARTED,
+  TripEventType.LOADING_ENDED,
+  TripEventType.UNLOADING_ENDED,
+];
 
 type DrizzleDatabase = ReturnType<typeof import('drizzle-orm/postgres-js').drizzle>;
 
@@ -59,12 +68,11 @@ export class ReportsService {
 
   /**
    * Get dashboard summary with key metrics (trips, vehicles by status, queues, centers)
-   * Scoped by accountId. Optional date range applies to trip counts and legacy arrivals/exits.
+   * Scoped by accountId. Optional date range applies to trip counts.
    */
   async getDashboardSummary(query: ReportQueryDto = {}, accountId: number) {
     try {
       const tripConditions = this.buildTripDateConditions(query, accountId);
-      const conditions = this.buildDateConditions(query, accountId);
       const { start: todayStart, end: todayEnd } = this.getTodayDateRange();
 
       // --- Vehicles (current state, always account-scoped) ---
@@ -231,38 +239,6 @@ export class ReportsService {
           ),
         );
 
-      // --- Legacy (arrivals/exits in date range) ---
-      let totalArrivals = 0;
-      let totalExits = 0;
-      let arrivalsByStatus: { status: string | null; count: number }[] = [];
-      let exitsByType: { exitType: string | null; count: number }[] = [];
-      if (conditions.arrivals.length > 0) {
-        const arrivalsCount = await this.db
-          .select({ count: count() })
-          .from(schema.arrivals)
-          .where(and(...conditions.arrivals));
-        totalArrivals = Number(arrivalsCount[0]?.count || 0);
-        const byStatus = await this.db
-          .select({ status: schema.arrivals.status, count: count() })
-          .from(schema.arrivals)
-          .where(and(...conditions.arrivals))
-          .groupBy(schema.arrivals.status);
-        arrivalsByStatus = byStatus.map((r) => ({ status: r.status, count: Number(r.count) }));
-      }
-      if (conditions.exits.length > 0) {
-        const exitsCount = await this.db
-          .select({ count: count() })
-          .from(schema.exits)
-          .where(and(...conditions.exits));
-        totalExits = Number(exitsCount[0]?.count || 0);
-        const byType = await this.db
-          .select({ exitType: schema.exits.exitType, count: count() })
-          .from(schema.exits)
-          .where(and(...conditions.exits))
-          .groupBy(schema.exits.exitType);
-        exitsByType = byType.map((r) => ({ exitType: r.exitType, count: Number(r.count) }));
-      }
-
       return {
         vehicles: {
           total: Number(totalVehicles[0]?.count || 0),
@@ -290,12 +266,6 @@ export class ReportsService {
           totalActive: Number(activeExceptions[0]?.count || 0),
           byType: exceptionsByType.map((r) => ({ type: r.type, count: Number(r.count) })),
           resolvedToday: Number(resolvedExceptionsToday[0]?.count || 0),
-        },
-        legacy: {
-          totalArrivals,
-          totalExits,
-          arrivalsByStatus,
-          exitsByType,
         },
       };
     } catch (error: any) {
@@ -336,23 +306,21 @@ export class ReportsService {
   }
 
   /**
-   * Get arrival analytics (legacy, filtered by account)
+   * Get arrival analytics (backed by trip_events where eventType in ARRIVED/ARRIVED_DESTINATION)
    */
   async getArrivalAnalytics(query: ReportQueryDto = {}, accountId: number) {
     try {
-      const conditions = this.buildDateConditions(query, accountId);
+      const conditions = this.buildTripEventConditions(query, accountId, ARRIVAL_EVENT_TYPES);
 
-      // Arrivals by center
       const arrivalsByCenter = await this.db
         .select({
-          centerId: schema.arrivals.centerId,
+          centerId: schema.tripEvents.centerId,
           count: count(),
         })
-        .from(schema.arrivals)
-        .where(and(...conditions.arrivals))
-        .groupBy(schema.arrivals.centerId);
+        .from(schema.tripEvents)
+        .where(and(...conditions))
+        .groupBy(schema.tripEvents.centerId);
 
-      // Get center details
       const centerIds = arrivalsByCenter.map((item) => item.centerId);
       const centers = centerIds.length > 0
         ? await this.db
@@ -363,31 +331,30 @@ export class ReportsService {
 
       const centerMap = new Map(centers.map((c) => [c.id, c]));
 
-      // Arrivals by date (grouped)
       const dateGrouping = this.getDateGrouping(query.groupBy || 'day');
       const arrivalsByDate = await this.db
         .select({
-          date: sql<string>`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.arrivals.arrivedAt})`,
+          date: sql<string>`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.tripEvents.timestamp})`,
           count: count(),
         })
-        .from(schema.arrivals)
-        .where(and(...conditions.arrivals))
-        .groupBy(sql`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.arrivals.arrivedAt})`)
-        .orderBy(asc(sql`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.arrivals.arrivedAt})`));
+        .from(schema.tripEvents)
+        .where(and(...conditions))
+        .groupBy(sql`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.tripEvents.timestamp})`)
+        .orderBy(asc(sql`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.tripEvents.timestamp})`));
 
-      // Arrivals by vehicle
+      // Top vehicles (joins trip_events to trips to resolve vehicleId)
       const arrivalsByVehicle = await this.db
         .select({
-          vehicleId: schema.arrivals.vehicleId,
+          vehicleId: schema.trips.vehicleId,
           count: count(),
         })
-        .from(schema.arrivals)
-        .where(and(...conditions.arrivals))
-        .groupBy(schema.arrivals.vehicleId)
+        .from(schema.tripEvents)
+        .innerJoin(schema.trips, eq(schema.tripEvents.tripId, schema.trips.id))
+        .where(and(...conditions))
+        .groupBy(schema.trips.vehicleId)
         .orderBy(desc(count()))
         .limit(10);
 
-      // Get vehicle details
       const vehicleIds = arrivalsByVehicle.map((item) => item.vehicleId);
       const vehicles = vehicleIds.length > 0
         ? await this.db
@@ -421,23 +388,22 @@ export class ReportsService {
   }
 
   /**
-   * Get exit analytics (legacy, filtered by account)
+   * Get exit analytics (backed by trip_events where eventType = EXITED).
+   * "byType" is now broken down by the trip's purpose rather than a legacy exitType field.
    */
   async getExitAnalytics(query: ReportQueryDto = {}, accountId: number) {
     try {
-      const conditions = this.buildDateConditions(query, accountId);
+      const conditions = this.buildTripEventConditions(query, accountId, [TripEventType.EXITED]);
 
-      // Exits by center
       const exitsByCenter = await this.db
         .select({
-          centerId: schema.exits.centerId,
+          centerId: schema.tripEvents.centerId,
           count: count(),
         })
-        .from(schema.exits)
-        .where(and(...conditions.exits))
-        .groupBy(schema.exits.centerId);
+        .from(schema.tripEvents)
+        .where(and(...conditions))
+        .groupBy(schema.tripEvents.centerId);
 
-      // Get center details
       const centerIds = exitsByCenter.map((item) => item.centerId);
       const centers = centerIds.length > 0
         ? await this.db
@@ -448,27 +414,26 @@ export class ReportsService {
 
       const centerMap = new Map(centers.map((c) => [c.id, c]));
 
-      // Exits by date (grouped)
       const dateGrouping = this.getDateGrouping(query.groupBy || 'day');
       const exitsByDate = await this.db
         .select({
-          date: sql<string>`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.exits.exitedAt})`,
+          date: sql<string>`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.tripEvents.timestamp})`,
           count: count(),
         })
-        .from(schema.exits)
-        .where(and(...conditions.exits))
-        .groupBy(sql`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.exits.exitedAt})`)
-        .orderBy(asc(sql`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.exits.exitedAt})`));
+        .from(schema.tripEvents)
+        .where(and(...conditions))
+        .groupBy(sql`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.tripEvents.timestamp})`)
+        .orderBy(asc(sql`DATE_TRUNC(${sql.raw(`'${dateGrouping}'`)}, ${schema.tripEvents.timestamp})`));
 
-      // Exits by type
-      const exitsByType = await this.db
+      const exitsByPurpose = await this.db
         .select({
-          exitType: schema.exits.exitType,
+          purpose: schema.trips.purpose,
           count: count(),
         })
-        .from(schema.exits)
-        .where(and(...conditions.exits))
-        .groupBy(schema.exits.exitType);
+        .from(schema.tripEvents)
+        .innerJoin(schema.trips, eq(schema.tripEvents.tripId, schema.trips.id))
+        .where(and(...conditions))
+        .groupBy(schema.trips.purpose);
 
       return {
         byCenter: exitsByCenter.map((item) => ({
@@ -480,8 +445,8 @@ export class ReportsService {
           date: item.date,
           count: Number(item.count),
         })),
-        byType: exitsByType.map((item) => ({
-          exitType: item.exitType,
+        byType: exitsByPurpose.map((item) => ({
+          exitType: item.purpose,
           count: Number(item.count),
         })),
       };
@@ -492,88 +457,89 @@ export class ReportsService {
   }
 
   /**
-   * Get processing stage analytics (legacy, filtered by account)
+   * Get processing stage analytics (backed by trip_events for QUEUED/SERVICE_STARTED/LOADING_ENDED/UNLOADING_ENDED).
    */
   async getProcessingStageAnalytics(query: ReportQueryDto = {}, accountId: number) {
     try {
-      const conditions = this.buildDateConditions(query, accountId);
+      const conditions = this.buildTripEventConditions(query, accountId, PROCESSING_EVENT_TYPES);
 
-      // Get arrival IDs based on query filters
-      let arrivalIds: number[] = [];
-      if (conditions.arrivals.length > 0) {
-        const arrivals = await this.db
-          .select({ id: schema.arrivals.id })
-          .from(schema.arrivals)
-          .where(and(...conditions.arrivals));
-        arrivalIds = arrivals.map((a) => a.id);
-      } else {
-        const allArrivals = await this.db
-          .select({ id: schema.arrivals.id })
-          .from(schema.arrivals);
-        arrivalIds = allArrivals.map((a) => a.id);
-      }
-
-      if (arrivalIds.length === 0) {
-        return {
-          byType: [],
-          byStatus: [],
-          averageTimes: null,
-        };
-      }
-
-      // Processing stages by type
       const stagesByType = await this.db
         .select({
-          stageType: schema.processingStages.stageType,
+          stageType: schema.tripEvents.eventType,
           count: count(),
         })
-        .from(schema.processingStages)
-        .where(inArray(schema.processingStages.arrivalId, arrivalIds))
-        .groupBy(schema.processingStages.stageType);
+        .from(schema.tripEvents)
+        .where(and(...conditions))
+        .groupBy(schema.tripEvents.eventType);
 
-      // Processing stages by status
-      const stagesByStatus = await this.db
-        .select({
-          status: schema.processingStages.status,
-          count: count(),
-        })
-        .from(schema.processingStages)
-        .where(inArray(schema.processingStages.arrivalId, arrivalIds))
-        .groupBy(schema.processingStages.status);
-
-      // Average processing times
-      const completedStages = await this.db
-        .select({
-          stageType: schema.processingStages.stageType,
-          startedAt: schema.processingStages.startedAt,
-          completedAt: schema.processingStages.completedAt,
-        })
-        .from(schema.processingStages)
-        .where(
-          and(
-            inArray(schema.processingStages.arrivalId, arrivalIds),
-            sql`${schema.processingStages.startedAt} IS NOT NULL`,
-            sql`${schema.processingStages.completedAt} IS NOT NULL`,
-          ),
-        );
-
-      const averageTimes = this.calculateAverageProcessingTimes(completedStages);
+      const averageTimes = await this.computeStageAverages(accountId, query);
 
       return {
         byType: stagesByType.map((item) => ({
           stageType: item.stageType,
           count: Number(item.count),
         })),
-        byStatus: stagesByStatus.map((item) => ({
-          status: item.status,
-          count: Number(item.count),
-        })),
+        byStatus: [],
         averageTimes,
       };
     } catch (error: any) {
       this.logger.error(`Error generating processing stage analytics: ${error.message}`, error.stack);
       throw new InternalServerErrorException('Failed to generate processing stage analytics');
     }
+  }
+
+  /**
+   * Per-trip average duration (in minutes) between service start and end events.
+   * Keys: LOADING (SERVICE_STARTED -> LOADING_ENDED), UNLOADING (SERVICE_STARTED -> UNLOADING_ENDED).
+   */
+  private async computeStageAverages(accountId: number, query: ReportQueryDto) {
+    const baseConds: SQL[] = [eq(schema.tripEvents.accountId, accountId)];
+    if (query.startDate) baseConds.push(gte(schema.tripEvents.timestamp, new Date(query.startDate)));
+    if (query.endDate) baseConds.push(lte(schema.tripEvents.timestamp, new Date(query.endDate)));
+    if (query.centerId) baseConds.push(eq(schema.tripEvents.centerId, query.centerId));
+    if (query.agentId) baseConds.push(eq(schema.tripEvents.agentId, Number(query.agentId)));
+
+    const rows = await this.db
+      .select({
+        tripId: schema.tripEvents.tripId,
+        eventType: schema.tripEvents.eventType,
+        timestamp: schema.tripEvents.timestamp,
+      })
+      .from(schema.tripEvents)
+      .where(
+        and(
+          ...baseConds,
+          inArray(schema.tripEvents.eventType, [
+            TripEventType.SERVICE_STARTED,
+            TripEventType.LOADING_ENDED,
+            TripEventType.UNLOADING_ENDED,
+          ]),
+        ),
+      );
+
+    const byTrip = new Map<number, { start?: Date; loadingEnd?: Date; unloadingEnd?: Date }>();
+    rows.forEach((r) => {
+      const entry = byTrip.get(r.tripId) || {};
+      if (r.eventType === TripEventType.SERVICE_STARTED && !entry.start) entry.start = r.timestamp;
+      if (r.eventType === TripEventType.LOADING_ENDED) entry.loadingEnd = r.timestamp;
+      if (r.eventType === TripEventType.UNLOADING_ENDED) entry.unloadingEnd = r.timestamp;
+      byTrip.set(r.tripId, entry);
+    });
+
+    const loadingDurations: number[] = [];
+    const unloadingDurations: number[] = [];
+    byTrip.forEach((e) => {
+      if (e.start && e.loadingEnd) loadingDurations.push(e.loadingEnd.getTime() - e.start.getTime());
+      if (e.start && e.unloadingEnd) unloadingDurations.push(e.unloadingEnd.getTime() - e.start.getTime());
+    });
+
+    if (loadingDurations.length === 0 && unloadingDurations.length === 0) return null;
+
+    const avg = (arr: number[]) => arr.reduce((s, v) => s + v, 0) / arr.length / 1000 / 60;
+    const result: Record<string, number> = {};
+    if (loadingDurations.length > 0) result[TripEventType.LOADING_ENDED] = avg(loadingDurations);
+    if (unloadingDurations.length > 0) result[TripEventType.UNLOADING_ENDED] = avg(unloadingDurations);
+    return result;
   }
 
   /**
@@ -1202,43 +1168,24 @@ export class ReportsService {
   }
 
   /**
-   * Build date conditions for queries (arrivals/exits). Always include accountId.
+   * Build filter conditions for trip_events queries. Always includes accountId
+   * and restricts to the provided event types. Supports startDate/endDate, centerId,
+   * and agentId. vehicleId is resolved via tripId joins, so it must be applied separately.
    */
-  private buildDateConditions(query: ReportQueryDto, accountId: number) {
-    const conditions: {
-      arrivals: SQL[];
-      exits: SQL[];
-    } = {
-      arrivals: [eq(schema.arrivals.accountId, accountId)],
-      exits: [eq(schema.exits.accountId, accountId)],
-    };
+  private buildTripEventConditions(
+    query: ReportQueryDto,
+    accountId: number,
+    eventTypes: TripEventType[],
+  ): SQL[] {
+    const conditions: SQL[] = [
+      eq(schema.tripEvents.accountId, accountId),
+      inArray(schema.tripEvents.eventType, eventTypes),
+    ];
 
-    if (query.startDate) {
-      const startDate = new Date(query.startDate);
-      conditions.arrivals.push(gte(schema.arrivals.arrivedAt, startDate));
-      conditions.exits.push(gte(schema.exits.exitedAt, startDate));
-    }
-
-    if (query.endDate) {
-      const endDate = new Date(query.endDate);
-      conditions.arrivals.push(lte(schema.arrivals.arrivedAt, endDate));
-      conditions.exits.push(lte(schema.exits.exitedAt, endDate));
-    }
-
-    if (query.centerId) {
-      conditions.arrivals.push(eq(schema.arrivals.centerId, query.centerId));
-      conditions.exits.push(eq(schema.exits.centerId, query.centerId));
-    }
-
-    if (query.vehicleId) {
-      conditions.arrivals.push(eq(schema.arrivals.vehicleId, query.vehicleId));
-      conditions.exits.push(eq(schema.exits.vehicleId, query.vehicleId));
-    }
-
-    if (query.agentId) {
-      conditions.arrivals.push(eq(schema.arrivals.agentId, Number(query.agentId)));
-      conditions.exits.push(eq(schema.exits.agentId, Number(query.agentId)));
-    }
+    if (query.startDate) conditions.push(gte(schema.tripEvents.timestamp, new Date(query.startDate)));
+    if (query.endDate) conditions.push(lte(schema.tripEvents.timestamp, new Date(query.endDate)));
+    if (query.centerId) conditions.push(eq(schema.tripEvents.centerId, query.centerId));
+    if (query.agentId) conditions.push(eq(schema.tripEvents.agentId, Number(query.agentId)));
 
     return conditions;
   }
@@ -1257,84 +1204,4 @@ export class ReportsService {
     }
   }
 
-  /**
-   * Calculate transit time statistics
-   */
-  private calculateTransitTimeStats(
-    transitTimes: Array<{
-      id: number;
-      estimatedArrival: Date | null;
-      actualArrival: Date | null;
-      distanceKm: string | null;
-    }>,
-  ) {
-    if (transitTimes.length === 0) {
-      return null;
-    }
-
-    const times = transitTimes
-      .filter((t) => t.estimatedArrival && t.actualArrival)
-      .map((t) => {
-        const estimated = new Date(t.estimatedArrival!).getTime();
-        const actual = new Date(t.actualArrival!).getTime();
-        return actual - estimated; // Difference in milliseconds
-      });
-
-    if (times.length === 0) {
-      return null;
-    }
-
-    const avgTime = times.reduce((sum, time) => sum + time, 0) / times.length;
-    const sortedTimes = [...times].sort((a, b) => a - b);
-    const medianTime = sortedTimes[Math.floor(sortedTimes.length / 2)];
-    const minTime = Math.min(...times);
-    const maxTime = Math.max(...times);
-
-    // Count on-time (within 1 hour of estimated)
-    const onTimeCount = times.filter((time) => Math.abs(time) <= 3600000).length;
-    const onTimeRate = (onTimeCount / times.length) * 100;
-
-    return {
-      average: avgTime / 1000 / 60, // Convert to minutes
-      median: medianTime / 1000 / 60,
-      min: minTime / 1000 / 60,
-      max: maxTime / 1000 / 60,
-      onTimeRate: Number(onTimeRate.toFixed(2)),
-      totalSamples: times.length,
-    };
-  }
-
-  /**
-   * Calculate average processing times by stage type
-   */
-  private calculateAverageProcessingTimes(
-    stages: Array<{
-      stageType: string;
-      startedAt: Date | null;
-      completedAt: Date | null;
-    }>,
-  ) {
-    if (stages.length === 0) {
-      return null;
-    }
-
-    const byType = new Map<string, number[]>();
-
-    stages.forEach((stage) => {
-      if (stage.startedAt && stage.completedAt) {
-        const duration = new Date(stage.completedAt).getTime() - new Date(stage.startedAt).getTime();
-        const existing = byType.get(stage.stageType) || [];
-        existing.push(duration);
-        byType.set(stage.stageType, existing);
-      }
-    });
-
-    const averages: Record<string, number> = {};
-    byType.forEach((times, type) => {
-      const avg = times.reduce((sum, time) => sum + time, 0) / times.length;
-      averages[type] = avg / 1000 / 60; // Convert to minutes
-    });
-
-    return averages;
-  }
 }

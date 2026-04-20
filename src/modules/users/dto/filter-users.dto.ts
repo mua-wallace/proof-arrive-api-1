@@ -51,7 +51,7 @@ export class FilterUsersDto {
   sortBy?: string;
 
   @ApiPropertyOptional({
-    description: 'Comma-separated relations to include (arrivals, exits)',
+    description: 'Comma-separated relations to include (tripEvents)',
   })
   @IsOptional()
   @IsString()
