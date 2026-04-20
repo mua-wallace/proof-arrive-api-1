@@ -1,5 +1,12 @@
 # Dashboard Implementation Plan
 
+> **⚠️ LEGACY / HISTORICAL**
+>
+> This document was written against the old `arrivals` / `exits` / `incoming_vehicles` / `processing_stages` model,
+> which has been removed from the codebase. The system now uses the **trips** + **trip_events** model exclusively.
+> Use `TRIP_CENTRIC_API.md` and `TRIPS_API_INTEGRATION_FLOW.md` as the current references. This file is kept
+> for historical context only and should not be followed for new work.
+
 ## Overview
 
 This document outlines the complete implementation plan for a comprehensive dashboard that allows users to view all entities in the system (users, centers, vehicles, processes, arrivals, exits, incoming vehicles) with read-only access. The only action permitted through the dashboard is generating QR codes for vehicles.

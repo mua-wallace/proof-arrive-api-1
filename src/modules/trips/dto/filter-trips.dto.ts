@@ -76,12 +76,21 @@ export class FilterTripsDto {
   sortOrder?: 'asc' | 'desc';
 
   @ApiPropertyOptional({
-    description: 'Filter by trip creation date (YYYY-MM-DD). Defaults to today when not provided.',
-    example: '2025-02-25',
+    description:
+      'Start of creation-date range, inclusive (YYYY-MM-DD). For a single day pass the same value as endDate; weeks/months are expressed as the corresponding boundaries. When neither startDate nor endDate is provided, the endpoint returns trips created today plus any trip still ONGOING.',
+    example: '2025-02-01',
   })
   @IsOptional()
   @IsString()
-  createdAt?: string;
+  startDate?: string;
+
+  @ApiPropertyOptional({
+    description: 'End of creation-date range, inclusive (YYYY-MM-DD).',
+    example: '2025-02-28',
+  })
+  @IsOptional()
+  @IsString()
+  endDate?: string;
 
   @ApiPropertyOptional({ description: 'Include related entities (comma-separated: vehicle,originCenter,destinationCenter,events)' })
   @IsOptional()

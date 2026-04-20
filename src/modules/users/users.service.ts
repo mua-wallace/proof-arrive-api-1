@@ -108,11 +108,8 @@ export class UsersService extends BaseService<User> {
     // Build relations object for Drizzle query API
     const withRelations: any = {};
     if (options?.include) {
-      if (options.include.includes('arrivals')) {
-        withRelations.arrivals = true;
-      }
-      if (options.include.includes('exits')) {
-        withRelations.exits = true;
+      if (options.include.includes('tripEvents')) {
+        withRelations.tripEvents = true;
       }
     }
 
@@ -240,11 +237,8 @@ export class UsersService extends BaseService<User> {
       // Build relations object for Drizzle query API
       const withRelations: any = {};
       if (options?.include) {
-        if (options.include.includes('arrivals')) {
-          withRelations.arrivals = true;
-        }
-        if (options.include.includes('exits')) {
-          withRelations.exits = true;
+        if (options.include.includes('tripEvents')) {
+          withRelations.tripEvents = true;
         }
       }
 

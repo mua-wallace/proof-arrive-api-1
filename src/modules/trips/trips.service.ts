@@ -77,6 +77,33 @@ export class TripsService extends BaseService<Trip> {
         );
       }
 
+      // Reject duplicate scans: the vehicle must not already be on an ONGOING trip.
+      // Done before center validation so we fail fast, and keyed on the resolved
+      // vehicle.id (not the raw payload) so thirdPartyId/id variants both hit.
+      const [existingOngoingTrip] = await this.dbConnection
+        .select({
+          id: schema.trips.id,
+          phase: schema.trips.phase,
+          startedAt: schema.trips.startedAt,
+        })
+        .from(schema.trips)
+        .where(
+          and(
+            eq(schema.trips.vehicleId, vehicle.id),
+            eq(schema.trips.status, TripStatus.ONGOING),
+            eq(schema.trips.accountId, accountId),
+          ),
+        )
+        .limit(1);
+
+      if (existingOngoingTrip) {
+        throw new BadRequestException(
+          `Vehicle ${vehicle.id} is already on an ongoing trip ` +
+          `(trip ID: ${existingOngoingTrip.id}, phase: ${existingOngoingTrip.phase}). ` +
+          `Complete or cancel the existing trip before starting a new one.`,
+        );
+      }
+
       // Validate that origin center exists and belongs to account
       // Try both id (thirdPartyId) and geozoneId since API might send either
       let [originCenter] = await this.dbConnection
@@ -90,7 +117,7 @@ export class TripsService extends BaseService<Trip> {
         )
         .limit(1);
 
-      // If not found by id, try geozoneId (like arrivals/exits do)
+      // If not found by id, try geozoneId
       if (!originCenter) {
         [originCenter] = await this.dbConnection
           .select()
@@ -139,23 +166,6 @@ export class TripsService extends BaseService<Trip> {
         if (!destinationCenter) {
           throw new NotFoundException(`Destination center ${data.destinationCenterId} not found for this account (tried both id and geozoneId)`);
         }
-      }
-
-      // Check if vehicle has an active trip
-      const activeTrip = await this.dbConnection
-        .select()
-        .from(schema.trips)
-        .where(
-          and(
-            eq(schema.trips.vehicleId, data.vehicleId),
-            eq(schema.trips.status, TripStatus.ONGOING),
-            eq(schema.trips.accountId, accountId)
-          )
-        )
-        .limit(1);
-
-      if (activeTrip.length > 0) {
-        throw new BadRequestException(`Vehicle ${data.vehicleId} already has an active trip`);
       }
 
       // Create trip - use center.id (which equals thirdPartyId) since trips.originCenterId references centers.id
@@ -838,14 +848,38 @@ export class TripsService extends BaseService<Trip> {
     if (filterDto.phase) {
       conditions.push(eq(schema.trips.phase, filterDto.phase));
     }
-    // createdAt filter: default to today when not provided
-    const createdAtDate = filterDto.createdAt ? new Date(filterDto.createdAt) : new Date();
-    const startOfDay = new Date(createdAtDate);
-    startOfDay.setUTCHours(0, 0, 0, 0);
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
-    conditions.push(gte(schema.trips.createdAt, startOfDay));
-    conditions.push(lt(schema.trips.createdAt, endOfDay));
+    // Date range on createdAt. Default (no range provided): trips created today OR any trip still ONGOING.
+    const startOfUtcDay = (d: Date): Date => {
+      const s = new Date(d);
+      s.setUTCHours(0, 0, 0, 0);
+      return s;
+    };
+    const addUtcDays = (d: Date, days: number): Date => {
+      const n = new Date(d);
+      n.setUTCDate(n.getUTCDate() + days);
+      return n;
+    };
+
+    if (filterDto.startDate || filterDto.endDate) {
+      if (filterDto.startDate) {
+        conditions.push(gte(schema.trips.createdAt, startOfUtcDay(new Date(filterDto.startDate))));
+      }
+      if (filterDto.endDate) {
+        conditions.push(lt(schema.trips.createdAt, addUtcDays(startOfUtcDay(new Date(filterDto.endDate)), 1)));
+      }
+    } else {
+      const startOfDay = startOfUtcDay(new Date());
+      const endOfDay = addUtcDays(startOfDay, 1);
+      conditions.push(
+        or(
+          and(
+            gte(schema.trips.createdAt, startOfDay),
+            lt(schema.trips.createdAt, endOfDay),
+          ),
+          eq(schema.trips.status, TripStatus.ONGOING),
+        ) as SQL,
+      );
+    }
 
     // Search functionality
     const searchTerm = query.search || filterDto.search;

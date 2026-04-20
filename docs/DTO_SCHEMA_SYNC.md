@@ -1,5 +1,12 @@
 # DTO and Schema Type Synchronization
 
+> **⚠️ PARTIALLY STALE**
+>
+> Sections below that reference `arrivals`, `exits`, `incoming_vehicles`, or `processing_stages` schemas
+> describe modules that have been removed. The corresponding DTOs and schema files no longer exist in the
+> codebase. Trust the current source under `src/modules/schemas/` and the `trips` / `trip_events` / `center_queues`
+> / `trip_exceptions` schemas as the source of truth.
+
 This document tracks the synchronization between DTOs (Data Transfer Objects) and database schemas.
 
 ## ✅ Synchronized DTOs

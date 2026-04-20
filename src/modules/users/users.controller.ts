@@ -27,14 +27,14 @@ export class UsersController {
   @Get()
   @ApiOperation({
     summary: 'List all users in the system with filtering and pagination',
-    description: 'Retrieves a paginated list of users synced from the Malambi API for the logged-in user\'s account. Supports filtering, searching, sorting, and optional relation loading (arrivals, exits).',
+    description: 'Retrieves a paginated list of users synced from the Malambi API for the logged-in user\'s account. Supports filtering, searching, sorting, and optional relation loading (tripEvents).',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 100)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term' })
   @ApiQuery({ name: 'searchBy', required: false, type: String, description: 'Comma-separated fields to search in' })
   @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Comma-separated sort fields (format: field:direction)' })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (tripEvents)' })
   async findAllWithFilter(
     @Query() filterDto: FilterUsersDto,
     @CurrentUserCredentials() credentials: Credentials,
@@ -122,9 +122,9 @@ export class UsersController {
   @Get('details/:id')
   @ApiOperation({
     summary: 'Get user details by ID (UUID)',
-    description: 'Retrieves detailed information about a specific user by their internal UUID for the logged-in user\'s account. Supports optional relation loading (arrivals, exits).',
+    description: 'Retrieves detailed information about a specific user by their internal UUID for the logged-in user\'s account. Supports optional relation loading (tripEvents).',
   })
-  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (arrivals, exits)' })
+  @ApiQuery({ name: 'include', required: false, type: String, description: 'Comma-separated relations to include (tripEvents)' })
   async findOneById(
     @Param('id') id: string,
     @Query('include') include?: string,

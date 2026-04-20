@@ -96,11 +96,14 @@ export class CentersService extends BaseService<Center> {
         if (options.include.includes('vehicles')) {
           withRelations.vehicles = true;
         }
-        if (options.include.includes('arrivals')) {
-          withRelations.arrivals = true;
+        if (options.include.includes('tripEvents')) {
+          withRelations.tripEvents = true;
         }
-        if (options.include.includes('exits')) {
-          withRelations.exits = true;
+        if (options.include.includes('originTrips')) {
+          withRelations.originTrips = true;
+        }
+        if (options.include.includes('destinationTrips')) {
+          withRelations.destinationTrips = true;
         }
       }
 
@@ -201,11 +204,14 @@ export class CentersService extends BaseService<Center> {
         if (options.include.includes('vehicles')) {
           withRelations.vehicles = true;
         }
-        if (options.include.includes('arrivals')) {
-          withRelations.arrivals = true;
+        if (options.include.includes('tripEvents')) {
+          withRelations.tripEvents = true;
         }
-        if (options.include.includes('exits')) {
-          withRelations.exits = true;
+        if (options.include.includes('originTrips')) {
+          withRelations.originTrips = true;
+        }
+        if (options.include.includes('destinationTrips')) {
+          withRelations.destinationTrips = true;
         }
       }
 

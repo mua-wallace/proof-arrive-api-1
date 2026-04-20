@@ -74,7 +74,7 @@ export class QueuesService extends BaseService<CenterQueueEntity> {
       )
       .limit(1);
 
-    // If not found by id, try geozoneId (like arrivals/exits do)
+    // If not found by id, try geozoneId
     if (!center) {
       [center] = await this.dbConnection
         .select()

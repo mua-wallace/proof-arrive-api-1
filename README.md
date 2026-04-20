@@ -1,15 +1,15 @@
 # Proof Arrive API
 
-A comprehensive NestJS-based REST API for tracking and managing vehicle logistics operations, including arrivals, exits, and inter-center transfers. The system integrates with the Malambi third-party API to synchronize user, vehicle, and center data. Built with TypeScript, Drizzle ORM, and PostgreSQL.
+A comprehensive NestJS-based REST API for tracking and managing vehicle logistics operations via trips and an immutable trip-event timeline. The system integrates with the Malambi third-party API to synchronize user, vehicle, and center data. Built with TypeScript, Drizzle ORM, and PostgreSQL.
 
 ## 🚀 Features
 
 - **RESTful API** with NestJS framework
 - **JWT Authentication** with access and refresh tokens
-- **Vehicle Arrival Tracking** with QR code scanning, GPS coordinates, and processing stages
-- **Exit Management** with destination tracking and exit types
-- **Incoming Vehicle Operations** for managing vehicles in transit between centers
-- **Processing Stages** for multi-stage workflow tracking (unloading, inspection, etc.)
+- **Trips** covering end-to-end vehicle journeys between centers
+- **Trip Events** forming an immutable audit timeline (arrivals, queueing, service start/end, exits)
+- **Queues** for loading/unloading per center
+- **Exceptions** for reporting and resolving issues encountered during trips
 - **Data Synchronization** with Malambi API via background jobs
 - **Audit Trail** with `createdBy` fields to track user actions
 - **PostgreSQL Database** with Drizzle ORM
@@ -38,9 +38,9 @@ src/
 │   └── migrations/        # Database migrations
 ├── modules/               # Feature modules
 │   ├── vehicles/         # Vehicle management
-│   ├── arrivals/         # Arrival tracking
-│   ├── exits/           # Exit tracking
-│   ├── incoming/        # Incoming operations
+│   ├── trips/           # Trips and trip events
+│   ├── queues/          # Loading/unloading queues
+│   ├── exceptions/      # Trip exceptions
 │   ├── centers/         # Center management
 │   ├── users/           # User management
 │   ├── reports/         # Reporting
@@ -229,7 +229,7 @@ Database schemas are defined in `src/modules/schemas/`. The base schemas include
 - `updatedAt` (timestamp)
 - `deletedAt` (timestamp, nullable for soft deletes)
 
-**Base Columns Serial (Integer-based tables like arrivals, exits, etc.):**
+**Base Columns Serial (Integer-based tables like trips, trip_events, etc.):**
 - `id` (serial integer, primary key)
 - `createdAt` (timestamp)
 - `updatedAt` (timestamp)
@@ -238,15 +238,15 @@ Database schemas are defined in `src/modules/schemas/`. The base schemas include
 - `users` - User/agent information (synced from Malambi)
 - `vehicles` - Vehicle information (synced from Malambi)
 - `centers` - Center/location information (synced from Malambi)
-- `arrivals` - Vehicle arrival records with QR codes and processing stages
-- `exits` - Vehicle exit records with destination information
-- `incoming_vehicles` - Vehicles in transit between centers
-- `processing_stages` - Multi-stage processing workflows for arrivals
+- `trips` - End-to-end vehicle journeys between centers
+- `trip_events` - Immutable timeline of events on each trip (arrivals, queueing, service, exits)
+- `center_queues` - Loading/unloading queue state per center
+- `trip_exceptions` - Exceptions reported during trips
 
 **Relations:**
 - All tables support relational queries via Drizzle ORM
-- Foreign key relationships between vehicles, centers, users, arrivals, exits, and incoming vehicles
-- `createdBy` fields on arrivals, exits, and incoming_vehicles for audit trail
+- Foreign key relationships between vehicles, centers, users, trips, and trip events
+- `createdBy` fields on relevant records for audit trail
 
 ## 📚 API Documentation
 
@@ -272,7 +272,7 @@ The Swagger documentation includes detailed information about:
 - **Key Features**: Core functionality and capabilities
 - **Authentication**: JWT token flow and usage
 - **Data Synchronization**: Malambi integration details
-- **Common Operations**: Workflow examples for arrivals and exits
+- **Common Operations**: Trip workflow examples
 - **Pagination & Filtering**: Query parameter usage
 - **Error Handling**: HTTP status codes and error responses
 
@@ -313,33 +313,26 @@ The Swagger documentation includes detailed information about:
 - **Delete Vehicle**: Remove vehicle by internal ID
 - **Data Source**: Synced from Malambi API on-demand
 
-### Arrivals (`/api/v1/arrivals`)
+### Trips (`/api/v1/trips`)
 
-- **Create Arrival**: Record vehicle arrival at a center (scan QR code)
-- **List Arrivals**: Paginated list with filtering, searching, and sorting
-- **Get Arrival Details**: Retrieve arrival information with optional relations
-- **Update Status**: Update arrival status
-- **Start Processing Stage**: Create a new processing stage for an arrival
-- **Update Processing Stage**: Update processing stage status and notes
-- **Features**: QR code tracking, GPS coordinates, multi-stage processing workflows
+- **Create Trip**: Start a trip for a vehicle leaving an origin center
+- **List Trips**: Paginated list with filtering by status, purpose, phase, and date range
+- **Get Trip Details**: Retrieve trip information with events timeline
+- **Create Trip Event**: Append an event to a trip (ARRIVED, QUEUED, SERVICE_STARTED, LOADING_ENDED, UNLOADING_ENDED, READY_TO_EXIT, EXITED, etc.)
+- **Set Destination / End Unloading / Complete**: State-transition endpoints for the trip lifecycle
+- **Features**: Immutable event timeline, automatic vehicle status and `currentCenterId` updates
 
-### Exits (`/api/v1/exits`)
+### Queues (`/api/v1/queues`)
 
-- **Create Exit**: Record vehicle exit from a center
-- **List Exits**: Paginated list with filtering and relations
-- **Get Exit Details**: Retrieve exit information with optional relations
-- **Update Exit**: Update exit information (destination, notes, etc.)
-- **Delete Exit**: Remove exit by internal ID
-- **Features**: Exit type tracking, destination center/name, GPS coordinates
+- **Add to Queue**: Add a vehicle to a center's loading or unloading queue
+- **List Queues**: Paginated, filterable by center, queue type, and activity state
+- **Remove / Reorder**: Manage queue entries
 
-### Incoming Vehicles (`/api/v1/incoming`)
+### Exceptions (`/api/v1/exceptions`)
 
-- **Create Incoming Vehicle**: Record vehicle in transit between centers
-- **List Incoming Vehicles**: Paginated list with filtering and relations
-- **Get Incoming Vehicle Details**: Retrieve incoming vehicle information
-- **Update Incoming Vehicle**: Update status, estimated/actual arrival, distance
-- **Delete Incoming Vehicle**: Remove incoming vehicle by internal ID
-- **Features**: Status tracking, arrival estimates, distance calculation
+- **Report Exception**: Record an issue encountered during a trip
+- **Resolve / Close Exception**: Update status and outcome
+- **List Exceptions**: Filter by status, type, trip, or center
 
 ### Reports (`/api/v1/reports`)
 
@@ -532,44 +525,22 @@ All sync operations run asynchronously in the background using a queue system:
 
 ## 📊 Common Workflows
 
-### Arrival Workflow
+### Trip Workflow
 
-1. **Create Arrival**: `POST /api/v1/arrivals`
-   - Vehicle arrives at center
-   - QR code scanned (optional)
-   - GPS coordinates recorded (optional)
-   - Status defaults to "arrived"
+1. **Create Trip**: `POST /api/v1/trips`
+   - Vehicle starts a trip from an origin center
+   - Purpose specified (e.g., DELIVERY, PICKUP)
+   - Trip status set to ONGOING
 
-2. **Start Processing**: `POST /api/v1/arrivals/:id/process`
-   - Create processing stage (e.g., "unloading", "inspection")
-   - Status defaults to "pending"
-   - `startedAt` timestamp set automatically
+2. **Record Events**: `POST /api/v1/trips/:id/events`
+   - Append events as the vehicle moves: ARRIVED, QUEUED, SERVICE_STARTED, LOADING_ENDED, UNLOADING_ENDED, READY_TO_EXIT, EXITED, ARRIVED_DESTINATION
+   - Vehicle `status` and `currentCenterId` are updated automatically based on event type
 
-3. **Update Processing Stage**: `PUT /api/v1/arrivals/:id/process/:stageId`
-   - Update stage status
-   - When status set to "completed", `completedAt` is set automatically
+3. **Set Destination** (when ready to leave): `POST /api/v1/trips/:id/set-destination`
+   - Attach the destination center to the trip
 
-4. **Update Arrival Status**: `PUT /api/v1/arrivals/:id/status`
-   - Change overall arrival status
-
-### Exit Workflow
-
-1. **Create Exit**: `POST /api/v1/exits`
-   - Vehicle exits from center
-   - Exit type specified (e.g., "delivery", "transfer")
-   - Destination center/name recorded (optional)
-   - GPS coordinates recorded (optional)
-
-2. **Create Incoming Vehicle** (if inter-center transfer): `POST /api/v1/incoming`
-   - Link to exit record
-   - Source and destination centers specified
-   - Status defaults to "in_transit"
-   - Estimated arrival time set (optional)
-
-3. **Update Incoming Vehicle**: `PUT /api/v1/incoming/:id`
-   - Update status (e.g., "in_transit", "arrived")
-   - Set actual arrival time when vehicle arrives
-   - Update distance if needed
+4. **Complete the Trip**: `POST /api/v1/trips/:id/end-unloading` (for DELIVERY)
+   - Finalizes the trip when unloading completes at the destination
 
 ## 🔍 Query Parameters
 
@@ -593,7 +564,7 @@ Most list endpoints support the following query parameters:
 ### Example
 
 ```
-GET /api/v1/arrivals?page=1&limit=50&search=truck&searchBy=qrCode,notes&sortBy=arrivedAt:DESC&include=vehicle,center
+GET /api/v1/trips?page=1&limit=50&sortBy=startedAt:DESC&include=events,vehicle,originCenter,destinationCenter
 ```
 
 ## 🆘 Support
