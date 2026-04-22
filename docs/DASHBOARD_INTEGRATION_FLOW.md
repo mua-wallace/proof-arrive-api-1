@@ -116,8 +116,8 @@ Base URL for all endpoints: **`/api/v1`**. All require **JWT** in `Authorization
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/trips` | Create a new trip. Body: `{ vehicleId, originCenterId, purpose: "DELIVERY" \| "PICKUP" }`. Trip starts in phase `AT_ORIGIN_ARRIVED`. |
-| `GET` | `/trips` | List trips with filters and pagination. Query: `page`, `limit`, `vehicleId`, `originCenterId`, `destinationCenterId`, `centerId`, `status` (ONGOING \| COMPLETED), `purpose` (DELIVERY \| PICKUP), `phase`, `search`, `sortBy`, `sortOrder`, `createdAt`, `include` (vehicle,originCenter,destinationCenter,events). |
+| `POST` | `/trips` | Create a new trip (scan-at-origin). Body: `{ vehicleId, originCenterId, purpose: "DELIVERY" \| "PICKUP" }`. Trip starts in phase `AT_ORIGIN_ARRIVED`. **Rejects duplicate scans**: returns `400` if the vehicle already has an ONGOING trip (error includes the existing trip's `id` and `phase`). |
+| `GET` | `/trips` | List trips with filters and pagination. Query: `page`, `limit`, `vehicleId`, `originCenterId`, `destinationCenterId`, `centerId`, `status` (ONGOING \| COMPLETED), `purpose` (DELIVERY \| PICKUP), `phase`, `search`, `sortBy`, `sortOrder`, `startDate` (YYYY-MM-DD, inclusive), `endDate` (YYYY-MM-DD, inclusive), `include` (vehicle,originCenter,destinationCenter,events). **Default (no `startDate`/`endDate`)**: trips created today **OR** any trip still ONGOING — so ongoing trips started on earlier days still appear. For a specific day pass `startDate=endDate=YYYY-MM-DD`; for a week/month pass the corresponding boundaries. |
 | `GET` | `/trips/:id` | Get one trip. Query: `include` (vehicle,originCenter,destinationCenter,events). Response includes `phase` and `status`. |
 | `POST` | `/trips/:id/start-loading` | Start loading at origin. Valid phase: `AT_ORIGIN_ARRIVED` → `AT_ORIGIN_LOADING`. |
 | `POST` | `/trips/:id/end-loading` | End loading at origin. Valid phase: `AT_ORIGIN_LOADING` → `AT_ORIGIN_LOADING_ENDED`. |
@@ -299,7 +299,10 @@ export const VEHICLE_STATUS_OPTIONS = [
 ];
 
 // Trips list filter params: page, limit, status (ONGOING|COMPLETED), phase, vehicleId,
-// originCenterId, destinationCenterId, centerId, purpose (DELIVERY|PICKUP), search, sortBy, sortOrder, createdAt, include
+// originCenterId, destinationCenterId, centerId, purpose (DELIVERY|PICKUP), search, sortBy, sortOrder,
+// startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), include
+// Default when no startDate/endDate: trips created today OR any ONGOING trip.
+// Single day: startDate=endDate. Week/month: pass the matching boundaries.
 ```
 
 ---
@@ -318,7 +321,7 @@ Base: GET/POST/PUT to /api/v1 with header: Authorization: Bearer <token>
 | Vehicle status counts | GET | /vehicles/status-summary | — |
 | Active trips | GET | /trips | status=ONGOING, limit |
 | Centers list | GET | /centers | page, limit |
-| Trips list | GET | /trips | page, limit, status, phase, vehicleId, originCenterId, destinationCenterId, centerId, purpose, search, sortBy, sortOrder, createdAt, include |
+| Trips list | GET | /trips | page, limit, status, phase, vehicleId, originCenterId, destinationCenterId, centerId, purpose, search, sortBy, sortOrder, startDate, endDate, include (default: today's trips OR any ONGOING) |
 | Trip detail | GET | /trips/:id | include=vehicle,originCenter,destinationCenter,events |
 | Trips summary | GET | /reports/trips/summary | startDate, endDate, centerId, vehicleId (default: today) |
 | Trips by date | GET | /reports/trips/by-date | startDate, endDate, centerId, vehicleId, groupBy (day|week|month) |
@@ -403,7 +406,11 @@ async function loadDashboardSummary(accountId) {
 - `page`, `limit`: Pagination
 - `sortBy`, `sortOrder`: Sorting
 - `search`: Vehicle plate, center names
-- `createdAt`: YYYY-MM-DD (trip creation date)
+- `startDate`, `endDate`: YYYY-MM-DD, inclusive. Filter by trip `createdAt`.
+  - **Single day:** `startDate=endDate=YYYY-MM-DD`
+  - **Week:** `startDate=<Monday>`, `endDate=<Sunday>`
+  - **Month:** `startDate=YYYY-MM-01`, `endDate=<last day of month>`
+  - **Omitted (default):** returns trips created today **OR** any trip still ONGOING (so ongoing trips started earlier still show up on the "today" view).
 - `include`: vehicle, originCenter, destinationCenter, events
 
 **Example Implementation**:

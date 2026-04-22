@@ -1,10 +1,10 @@
-import { Controller, Post, Get, Query, Param, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Query, Param, Body, BadRequestException } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiBearerAuth, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { CentersService } from './centers.service';
 import { CentersSeederService } from './centers-seeder.service';
 import { CurrentUserCredentials } from '@modules/auth/decorators/current-user-credentials.decorator';
 import { Credentials, PaginateResult, PaginateQuery } from '@common/interfaces';
-import { FilterCentersDto } from './dto';
+import { CreateCenterDto, FilterCentersDto } from './dto';
 import * as schema from '@modules/schemas';
 
 type Center = typeof schema.centers.$inferSelect;
@@ -168,6 +168,25 @@ export class CentersController {
       accountId: accountIdNum, // Multi-tenant: filter by account ID
     };
     return this.centersService.findOneById(Number(id), options);
+  }
+
+  @Post()
+  @ApiOperation({
+    summary: 'Create a center directly',
+    description: 'Creates a center in the local database without going through the Malambi API. Only `name` and `gzone_id` are required; all other fields are optional. `gzone_id` is used as the center\'s primary key.',
+  })
+  @ApiResponse({ status: 201, description: 'Center created successfully' })
+  @ApiResponse({ status: 409, description: 'Center with the given gzone_id already exists' })
+  async createCenter(
+    @Body() createCenterDto: CreateCenterDto,
+    @CurrentUserCredentials() credentials: Credentials,
+  ): Promise<Center> {
+    const accountIdNum = Number(credentials.accid);
+    if (isNaN(accountIdNum) || accountIdNum <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${credentials.accid}`);
+    }
+
+    return this.centersService.createCenter(createCenterDto, accountIdNum);
   }
 
   @Post('sync')

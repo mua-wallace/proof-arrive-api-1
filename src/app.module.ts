@@ -5,6 +5,7 @@ import appConfig from '@config/app.config';
 import { DatabaseModule } from '@database/database.module';
 import { VehiclesModule } from '@modules/vehicles/vehicles.module';
 import { CentersModule } from '@modules/centers/centers.module';
+import { GeozonesModule } from '@modules/geozones/geozones.module';
 import { UsersModule } from '@modules/users/users.module';
 import { ReportsModule } from '@modules/reports/reports.module';
 import { AuthModule } from '@modules/auth/auth.module';
@@ -56,6 +57,7 @@ import { MalambiAuthMiddleware } from '@common/middleware/malambi-auth.middlewar
     AuthModule,
     VehiclesModule,
     CentersModule,
+    GeozonesModule,
     UsersModule,
     ReportsModule,
     TripsModule,

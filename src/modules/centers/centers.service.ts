@@ -1,11 +1,12 @@
-import { Injectable, Inject, NotFoundException, Logger, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger, InternalServerErrorException, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
 import { DATABASE_CONNECTION } from '@database/database-connection';
 import { CentersSyncService } from './centers-sync.service';
 import { MalambiApiService } from '@integrations/malambi-api/malambi-api.service';
 import { PaginateQuery, PaginateResult, BaseEntity } from '@common/interfaces';
 import { BaseService } from '@common/services/base.service';
-import { eq, and, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
+import { eq, and, or, SQL, desc, asc, count, sql, inArray } from 'drizzle-orm';
 import * as schema from '@modules/schemas';
+import { CreateCenterDto } from './dto';
 
 type Center = typeof schema.centers.$inferSelect & BaseEntity;
 
@@ -328,6 +329,106 @@ export class CentersService extends BaseService<Center> {
       if (error instanceof NotFoundException) throw error;
       throw new InternalServerErrorException(
         `Failed to remove center: ${error?.message || 'Unknown error occurred'}`,
+      );
+    }
+  }
+
+  /**
+   * Create a center directly (not synced from Malambi API).
+   * `name` and `gzone_id` are required; other fields are optional.
+   * `gzone_id` is used as the primary key (centers.id), matching the sync path.
+   */
+  async createCenter(dto: CreateCenterDto, accountId: number): Promise<Center> {
+    if (!accountId || isNaN(accountId) || accountId <= 0) {
+      throw new BadRequestException(`Invalid account ID: ${accountId}`);
+    }
+
+    const geozoneId = dto.gzone_id;
+    if (!geozoneId || !Number.isInteger(geozoneId) || geozoneId <= 0) {
+      throw new BadRequestException(`gzone_id must be a positive integer, got: ${geozoneId}`);
+    }
+
+    try {
+      const [geozone] = await this.dbConnection
+        .select({ id: schema.geozones.id })
+        .from(schema.geozones)
+        .where(
+          and(
+            eq(schema.geozones.thirdPartyId, geozoneId),
+            eq(schema.geozones.accountId, accountId),
+          ),
+        )
+        .limit(1);
+
+      if (!geozone) {
+        throw new NotFoundException(
+          `Geozone with gzone_id=${geozoneId} does not exist for this account. Sync geozones first via POST /geozones/sync.`,
+        );
+      }
+
+      const [existing] = await this.dbConnection
+        .select()
+        .from(schema.centers)
+        .where(
+          or(
+            eq(schema.centers.id, geozoneId),
+            eq(schema.centers.geozoneId, geozoneId),
+          ),
+        )
+        .limit(1);
+
+      if (existing) {
+        throw new ConflictException(`Center with gzone_id=${geozoneId} already exists`);
+      }
+
+      // thirdPartyId and siteid are NOT NULL in the schema but optional for direct creates —
+      // default them to gzone_id so a directly-created center still satisfies the constraint.
+      const record = {
+        id: geozoneId,
+        accountId,
+        thirdPartyId: dto.thirdPartyId ?? geozoneId,
+        siteid: dto.siteid ?? geozoneId,
+        name: dto.name,
+        fullname: dto.fullname ?? null,
+        geozone: dto.geozone ?? null,
+        geozoneId,
+        manager: dto.manager ?? null,
+        groupid: dto.groupid ?? null,
+        groupname: dto.groupname ?? null,
+        sitetype: dto.sitetype ?? 0,
+        distance: dto.distance ?? null,
+        time1: dto.time1 ?? null,
+        time2: dto.time2 ?? null,
+        saturday: dto.saturday ?? null,
+        sunday: dto.sunday ?? null,
+        breakstart: dto.breakstart ?? null,
+        breakstop: dto.breakstop ?? null,
+        timeoutin: dto.timeoutin ?? null,
+        timeoutin_str: dto.timeoutin_str ?? null,
+        timeoutin_muros: dto.timeoutin_muros ?? null,
+        timeoutin_muros_str: dto.timeoutin_muros_str ?? null,
+      };
+
+      const [created] = await this.dbConnection
+        .insert(schema.centers)
+        .values(record)
+        .returning();
+
+      return created as Center;
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to create center: ${error?.message || 'Unknown error'}`,
+        error?.stack,
+      );
+      if (
+        error instanceof ConflictException ||
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      ) {
+        throw error;
+      }
+      throw new InternalServerErrorException(
+        `Failed to create center: ${error?.message || 'Unknown error occurred'}`,
       );
     }
   }
