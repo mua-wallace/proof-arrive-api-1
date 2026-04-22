@@ -224,6 +224,62 @@ export class MalambiApiService extends MalambiBaseApiService {
   }
 
   /**
+   * Get geozones (MapVars) from Malambi API.
+   * Mirrors the frontend `buildZoneUrl` helper: sys=MapVars, task=zone, edit=true,
+   * with query=% and limit=1000 by default.
+   */
+  async getGeozones(
+    token: string,
+    accId: string,
+    subId: string,
+    options?: {
+      page?: number;
+      limit?: number;
+      query?: string;
+    },
+  ): Promise<{
+    success?: boolean;
+    totalCount?: number;
+    rows: Array<{
+      i?: number | string; // zone id
+      n?: string; // name
+      c?: string; // color
+      l?: number | string; // speed limit
+      s?: string; // path "lat:lng!lat:lng!..."
+      [key: string]: any;
+    }>;
+  }> {
+    const params = {
+      sys: 'MapVars',
+      task: 'zone',
+      edit: 'true',
+      page: String(options?.page ?? 1),
+      start: '0',
+      limit: String(options?.limit ?? 1000),
+      query: options?.query ?? '%',
+    };
+
+    const response = await this.makeApiCall<{
+      success?: boolean;
+      totalCount?: number;
+      rows?: any[];
+    }>(
+      'GET',
+      params,
+      undefined,
+      undefined,
+      { token, accId, subId },
+      { includeDc: true },
+    );
+
+    return {
+      success: response?.success ?? true,
+      totalCount: response?.totalCount ?? (response?.rows?.length ?? 0),
+      rows: Array.isArray(response?.rows) ? response.rows : [],
+    };
+  }
+
+  /**
    * Get vehicle detail from Malambi API
    */
   async getVehicleDetail(

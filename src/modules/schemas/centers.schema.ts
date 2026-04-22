@@ -14,7 +14,7 @@ export const centers = pgTable('centers', {
   name: varchar('name', { length: 255 }).notNull(),
   fullname: varchar('fullname', { length: 255 }),
   geozone: varchar('geozone', { length: 255 }), // geozone name (e.g., "CC Y3")
-  geozoneId: integer('geozone_id'), // gzone_id from Malambi API (e.g., 3656) - Reference handled at application level
+  geozoneId: integer('geozone_id').unique(), // gzone_id from Malambi API (e.g., 3656) - Unique across centers; reference handled at application level
   manager: varchar('manager', { length: 255 }),
   groupid: integer('groupid'),
   groupname: varchar('groupname', { length: 255 }),
